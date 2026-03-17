@@ -9,6 +9,7 @@ Monitors USB-C power and enables/disables display + browsers to save battery.
 import os
 import sys
 import time
+import glob
 import signal
 import subprocess
 import logging
@@ -78,12 +79,14 @@ def enable_display():
     env = os.environ.copy()
     env['DISPLAY'] = ':0'
 
-    # Enable HDMI
+    # Unblank display (DPMS on)
     try:
-        subprocess.run(['xrandr', '--output', 'HDMI-1', '--auto'],
-                      env=env, capture_output=True, timeout=10)
-    except Exception as e:
-        logger.warning(f"Could not enable HDMI: {e}")
+        subprocess.run(['xset', 'dpms', 'force', 'on'],
+                      env=env, capture_output=True, timeout=5)
+        subprocess.run(['xset', 's', 'reset'],
+                      env=env, capture_output=True, timeout=5)
+    except Exception:
+        pass
 
     # Start dashboard script (which opens browsers)
     dashboard_script = os.path.expanduser('~/sailframes-dashboard.sh')
@@ -91,6 +94,7 @@ def enable_display():
         try:
             subprocess.Popen([dashboard_script], env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info("Started dashboard browsers")
         except Exception as e:
             logger.warning(f"Could not start dashboard: {e}")
 
@@ -108,18 +112,30 @@ def disable_display():
     env = os.environ.copy()
     env['DISPLAY'] = ':0'
 
-    # Kill browsers
+    # Kill browsers (main power savings)
     try:
         subprocess.run(['pkill', '-9', 'chromium'], capture_output=True, timeout=5)
+        logger.info("Killed browsers")
     except Exception:
         pass
 
-    # Disable HDMI
+    # Try multiple methods to blank/disable display
+    # Method 1: DPMS force off (works on X11)
     try:
-        subprocess.run(['xrandr', '--output', 'HDMI-1', '--off'],
-                      env=env, capture_output=True, timeout=10)
-    except Exception as e:
-        logger.warning(f"Could not disable HDMI: {e}")
+        subprocess.run(['xset', 'dpms', 'force', 'off'],
+                      env=env, capture_output=True, timeout=5)
+        logger.info("DPMS blanked display")
+    except Exception:
+        pass
+
+    # Method 2: Set backlight to 0 (Pi-specific, if available)
+    try:
+        for bl_pattern in ['/sys/class/backlight/*/brightness']:
+            for path in glob.glob(bl_pattern):
+                with open(path, 'w') as f:
+                    f.write('0')
+    except Exception:
+        pass
 
     display_enabled = False
 
