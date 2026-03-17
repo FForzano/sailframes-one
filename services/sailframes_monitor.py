@@ -1338,6 +1338,9 @@ VIDEO_PAGE_HTML = """
         {% for d in dates %}
         <button class="date-btn {% if selected_date == d.date %}active{% endif %}" onclick="location.href='/video?date={{ d.date }}'">{{ d.date }} ({{ d.video_count }})</button>
         {% endfor %}
+        {% if selected_date and videos %}
+        <button class="btn-delete" style="margin-left: auto; padding: 8px 16px;" onclick="confirmDeleteAll('{{ selected_date }}', {{ videos|length }})">Delete All {{ selected_date }}</button>
+        {% endif %}
     </div>
 
     <div id="player-container" class="video-player" style="display: none;">
@@ -1381,8 +1384,21 @@ VIDEO_PAGE_HTML = """
         </div>
     </div>
 
+    <!-- Delete All confirmation modal -->
+    <div id="delete-all-modal" class="modal">
+        <div class="modal-content">
+            <div style="font-size: 18px; margin-bottom: 8px;">Delete All Videos?</div>
+            <div id="delete-all-info" style="color: #78909c;"></div>
+            <div class="modal-buttons">
+                <button class="btn" style="background: #455a64; color: white;" onclick="closeDeleteAllModal()">Cancel</button>
+                <button class="btn" style="background: #c62828; color: white;" onclick="doDeleteAll()">Delete All</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let deleteFilepath = null;
+        let deleteAllDate = null;
 
         function playVideo(filepath, filename) {
             const player = document.getElementById('video-player');
@@ -1432,6 +1448,40 @@ VIDEO_PAGE_HTML = """
             .catch(e => {
                 alert('Error: ' + e);
                 closeDeleteModal();
+            });
+        }
+
+        function confirmDeleteAll(date, count) {
+            deleteAllDate = date;
+            document.getElementById('delete-all-info').textContent = 'Delete ' + count + ' videos from ' + date + '?';
+            document.getElementById('delete-all-modal').style.display = 'block';
+        }
+
+        function closeDeleteAllModal() {
+            document.getElementById('delete-all-modal').style.display = 'none';
+            deleteAllDate = null;
+        }
+
+        function doDeleteAll() {
+            if (!deleteAllDate) return;
+
+            fetch('/api/video/delete-date', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: deleteAllDate })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    location.href = '/video';
+                } else {
+                    alert('Error: ' + (data.error || 'Delete failed'));
+                }
+                closeDeleteAllModal();
+            })
+            .catch(e => {
+                alert('Error: ' + e);
+                closeDeleteAllModal();
             });
         }
     </script>
@@ -1529,6 +1579,52 @@ def api_video_delete():
     except Exception as e:
         logger.error(f"Failed to delete video {filepath}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/video/delete-date', methods=['POST'])
+def api_video_delete_date():
+    """Delete all videos for a specific date."""
+    global _config
+    if _config is None:
+        _config = load_config()
+
+    data = request.get_json()
+    date = data.get('date') if data else None
+
+    if not date:
+        return jsonify({'success': False, 'error': 'No date provided'}), 400
+
+    # Validate date format (YYYY-MM-DD)
+    import re
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+        return jsonify({'success': False, 'error': 'Invalid date format'}), 400
+
+    data_dir = Path(_config['storage']['data_dir'])
+    video_dir = data_dir / date / 'video'
+
+    if not video_dir.exists():
+        return jsonify({'success': False, 'error': 'No videos for this date'}), 404
+
+    # Delete all mp4 files in the directory
+    deleted = 0
+    errors = []
+    for video_file in video_dir.glob('*.mp4'):
+        try:
+            video_file.unlink()
+            deleted += 1
+        except Exception as e:
+            errors.append(f"{video_file.name}: {e}")
+
+    logger.info(f"Deleted {deleted} videos for {date}")
+
+    if errors:
+        return jsonify({
+            'success': True,
+            'deleted': deleted,
+            'errors': errors
+        })
+
+    return jsonify({'success': True, 'deleted': deleted})
 
 
 @app.route('/api/camera/start', methods=['POST'])

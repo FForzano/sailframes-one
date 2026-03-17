@@ -89,13 +89,26 @@ def get_battery_info():
 def get_top_processes(n=5):
     """Get top N CPU-consuming processes."""
     processes = []
-    for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+    for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'cmdline']):
         try:
             pinfo = proc.info
             if pinfo['cpu_percent'] > 0:
+                name = pinfo['name']
+                # For python processes, extract the script name
+                cmdline = pinfo.get('cmdline') or []
+                if name in ('python3', 'python') and len(cmdline) >= 2:
+                    # cmdline is like ['python3', '/path/to/script.py', ...]
+                    script = cmdline[1]
+                    # Extract just the filename without path
+                    if '/' in script:
+                        script = script.split('/')[-1]
+                    # Remove .py extension for cleaner display
+                    if script.endswith('.py'):
+                        script = script[:-3]
+                    name = script
                 processes.append({
                     'pid': pinfo['pid'],
-                    'name': pinfo['name'][:30],
+                    'name': name[:30],
                     'cpu_percent': round(pinfo['cpu_percent'], 1),
                     'memory_percent': round(pinfo['memory_percent'], 1),
                 })
