@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import psutil
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 import yaml
 
 logging.basicConfig(
@@ -268,6 +268,9 @@ DASHBOARD_HTML = """
         {% endfor %}
     </div>
     <div class="updated">Updated {{ state.last_update }}</div>
+    <div style="text-align: center; margin-top: 12px;">
+        <a href="/battery" style="color: #4fc3f7; font-size: 13px;">🔋 Battery History</a>
+    </div>
 </body>
 </html>
 """
@@ -279,6 +282,216 @@ def dashboard():
 @app.route('/api/status')
 def api_status():
     return jsonify(system_state)
+
+
+# ── Battery History API ──
+BATTERY_DATA_DIR = Path('/mnt/sailframes-data/battery')
+
+
+def get_battery_sessions(limit=20):
+    """Get list of battery discharge sessions."""
+    sessions_file = BATTERY_DATA_DIR / 'sessions.csv'
+    if not sessions_file.exists():
+        return []
+
+    sessions = []
+    with open(sessions_file, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sessions.append(row)
+
+    # Return most recent first
+    sessions.reverse()
+    return sessions[:limit]
+
+
+def get_session_data(session_id):
+    """Get detailed data for a specific session."""
+    log_file = BATTERY_DATA_DIR / f'session_{session_id}.csv'
+    process_file = BATTERY_DATA_DIR / f'processes_{session_id}.csv'
+
+    data = {'samples': [], 'processes': {}}
+
+    if log_file.exists():
+        with open(log_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                data['samples'].append(row)
+
+    if process_file.exists():
+        with open(process_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                name = row['name']
+                if name not in data['processes']:
+                    data['processes'][name] = {'total_cpu': 0, 'samples': 0}
+                data['processes'][name]['total_cpu'] += float(row['cpu_percent'])
+                data['processes'][name]['samples'] += 1
+
+        # Calculate average CPU per process
+        for name, stats in data['processes'].items():
+            stats['avg_cpu'] = round(stats['total_cpu'] / stats['samples'], 1) if stats['samples'] > 0 else 0
+
+        # Sort by total CPU usage
+        data['top_processes'] = sorted(
+            [{'name': k, **v} for k, v in data['processes'].items()],
+            key=lambda x: x['total_cpu'],
+            reverse=True
+        )[:10]
+
+    return data
+
+
+@app.route('/api/battery/sessions')
+def api_battery_sessions():
+    """Get list of battery sessions."""
+    return jsonify(get_battery_sessions())
+
+
+@app.route('/api/battery/session/<session_id>')
+def api_battery_session(session_id):
+    """Get detailed data for a session."""
+    return jsonify(get_session_data(session_id))
+
+
+BATTERY_HISTORY_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Battery History - SailFrames</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, sans-serif; background: #0a1628; color: #e0e8f0; padding: 16px; }
+        h1 { color: #4fc3f7; margin-bottom: 8px; font-size: 24px; }
+        h2 { color: #78909c; font-size: 16px; margin: 16px 0 8px; }
+        a { color: #4fc3f7; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .nav { margin-bottom: 16px; font-size: 14px; }
+        .card { background: #1a2a40; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+        .session { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #233; }
+        .session:last-child { border-bottom: none; }
+        .session:hover { background: #233; cursor: pointer; }
+        .session-date { font-weight: 600; }
+        .session-stats { font-size: 13px; color: #90a4ae; }
+        .stat { display: inline-block; margin-right: 16px; }
+        .stat-value { color: #fff; font-weight: 600; }
+        .no-data { color: #546e7a; font-style: italic; padding: 20px; text-align: center; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #233; }
+        th { color: #78909c; font-weight: 500; }
+        .chart { height: 200px; background: #0d1929; border-radius: 4px; margin: 12px 0; position: relative; }
+        .chart-bar { position: absolute; bottom: 0; background: #4fc3f7; min-width: 2px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+        .summary-item { text-align: center; }
+        .summary-value { font-size: 24px; font-weight: 700; color: #fff; }
+        .summary-label { font-size: 12px; color: #78909c; }
+    </style>
+</head>
+<body>
+    <div class="nav"><a href="/">← Back to Dashboard</a></div>
+    <h1>🔋 Battery History</h1>
+
+    {% if session %}
+    <h2>Session {{ session.session_id }}</h2>
+    <div class="card">
+        <div class="summary-grid">
+            <div class="summary-item">
+                <div class="summary-value">{{ session.duration_minutes }}m</div>
+                <div class="summary-label">Duration</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value">{{ session.percent_used }}%</div>
+                <div class="summary-label">Battery Used</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value">{{ session.start_percent }}%</div>
+                <div class="summary-label">Start</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value">{{ session.end_percent }}%</div>
+                <div class="summary-label">End</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value">{{ session.total_power_mwh }}</div>
+                <div class="summary-label">mWh Used</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value">{{ session.max_current_ma }}</div>
+                <div class="summary-label">Peak mA</div>
+            </div>
+        </div>
+    </div>
+
+    {% if top_processes %}
+    <h2>Top Power Consumers</h2>
+    <div class="card">
+        <table>
+            <tr><th>Process</th><th>Avg CPU %</th><th>Total CPU Time</th></tr>
+            {% for proc in top_processes %}
+            <tr>
+                <td>{{ proc.name }}</td>
+                <td>{{ proc.avg_cpu }}%</td>
+                <td>{{ proc.total_cpu|round(1) }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+
+    <p style="margin-top: 12px;"><a href="/battery">← All Sessions</a></p>
+
+    {% else %}
+    <h2>Discharge Sessions</h2>
+    <div class="card">
+        {% if sessions %}
+        {% for s in sessions %}
+        <div class="session" onclick="location.href='/battery/{{ s.session_id }}'">
+            <div>
+                <div class="session-date">{{ s.start_time[:16].replace('T', ' ') }}</div>
+                <div class="session-stats">
+                    <span class="stat"><span class="stat-value">{{ s.duration_minutes }}m</span> duration</span>
+                    <span class="stat"><span class="stat-value">{{ s.percent_used }}%</span> used</span>
+                </div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 18px; font-weight: 600;">{{ s.start_percent }}% → {{ s.end_percent }}%</div>
+                <div class="session-stats">{{ s.total_power_mwh }} mWh</div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="no-data">No battery sessions recorded yet.<br>Unplug USB-C to start tracking.</div>
+        {% endif %}
+    </div>
+    {% endif %}
+</body>
+</html>
+"""
+
+
+@app.route('/battery')
+def battery_history():
+    """Battery history dashboard."""
+    sessions = get_battery_sessions()
+    return render_template_string(BATTERY_HISTORY_HTML, sessions=sessions, session=None, top_processes=None)
+
+
+@app.route('/battery/<session_id>')
+def battery_session_detail(session_id):
+    """Detailed view of a battery session."""
+    sessions = get_battery_sessions(limit=100)
+    session = next((s for s in sessions if s['session_id'] == session_id), None)
+    if not session:
+        return "Session not found", 404
+
+    data = get_session_data(session_id)
+    return render_template_string(
+        BATTERY_HISTORY_HTML,
+        sessions=None,
+        session=session,
+        top_processes=data.get('top_processes', [])
+    )
 
 
 def run(config):
