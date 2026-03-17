@@ -328,18 +328,135 @@ def get_session_data(session_id):
                 data['processes'][name]['total_cpu'] += float(row['cpu_percent'])
                 data['processes'][name]['samples'] += 1
 
-        # Calculate average CPU per process
+        # Calculate average CPU per process and add descriptions
         for name, stats in data['processes'].items():
             stats['avg_cpu'] = round(stats['total_cpu'] / stats['samples'], 1) if stats['samples'] > 0 else 0
+            stats['description'] = get_process_description(name)
 
-        # Sort by total CPU usage
+        # Sort by total CPU usage - show top 25
         data['top_processes'] = sorted(
             [{'name': k, **v} for k, v in data['processes'].items()],
             key=lambda x: x['total_cpu'],
             reverse=True
-        )[:10]
+        )[:25]
 
     return data
+
+
+# Process descriptions - what each process does and its origin
+PROCESS_DESCRIPTIONS = {
+    # System core (Raspberry Pi OS)
+    'systemd': ('Init system', 'Core', 'Main system and service manager'),
+    'systemd-journald': ('System logger', 'Core', 'Collects and stores logs'),
+    'systemd-udevd': ('Device manager', 'Core', 'Handles hardware events'),
+    'systemd-logind': ('Login manager', 'Core', 'Manages user sessions'),
+    'systemd-timesyncd': ('Time sync', 'Core', 'Synchronizes system clock'),
+    'dbus-daemon': ('Message bus', 'Core', 'Inter-process communication'),
+    'dbus-broker': ('Message bus', 'Core', 'Modern D-Bus implementation'),
+
+    # Desktop environment (Wayland/Wayfire)
+    'labwc': ('Compositor', 'Desktop', 'Wayland window compositor'),
+    'wayfire': ('Compositor', 'Desktop', 'Wayland compositor (alternative)'),
+    'wf-panel-pi': ('Panel', 'Desktop', 'Desktop taskbar/panel'),
+    'wireplumber': ('Audio routing', 'Desktop', 'PipeWire session manager'),
+    'pipewire': ('Audio server', 'Desktop', 'Modern audio/video server'),
+    'pipewire-pulse': ('PulseAudio compat', 'Desktop', 'PulseAudio compatibility'),
+    'xdg-desktop-portal': ('Desktop portal', 'Desktop', 'App sandboxing support'),
+    'pcmanfm': ('File manager', 'Desktop', 'Lightweight file manager'),
+    'lxpolkit': ('Auth agent', 'Desktop', 'Policy kit authentication'),
+    'lxsession': ('Session manager', 'Desktop', 'LXDE session manager'),
+    'openbox': ('Window manager', 'Desktop', 'X11 window manager'),
+    'mutter': ('Window manager', 'Desktop', 'GNOME window manager'),
+
+    # Browsers
+    'chromium': ('Web browser', 'Added', 'Chromium browser - HIGH POWER'),
+    'chromium-browser': ('Web browser', 'Added', 'Chromium browser - HIGH POWER'),
+    'chrome': ('Web browser', 'Added', 'Chrome browser - HIGH POWER'),
+    'firefox': ('Web browser', 'Added', 'Firefox browser - HIGH POWER'),
+    'firefox-esr': ('Web browser', 'Added', 'Firefox ESR - HIGH POWER'),
+
+    # SailFrames services
+    'sailframes_monitor': ('SailFrames', 'SailFrames', 'System monitoring dashboard'),
+    'sailframes_gps': ('SailFrames', 'SailFrames', 'GPS sensor service'),
+    'sailframes_imu': ('SailFrames', 'SailFrames', 'IMU sensor service'),
+    'sailframes_pressure': ('SailFrames', 'SailFrames', 'Pressure sensor service'),
+    'sailframes_wind': ('SailFrames', 'SailFrames', 'Wind sensor (BLE) service'),
+    'sailframes_camera': ('SailFrames', 'SailFrames', 'Camera recording service'),
+    'sailframes_battery': ('SailFrames', 'SailFrames', 'Battery logging service'),
+    'power-manager': ('SailFrames', 'SailFrames', 'Power management daemon'),
+
+    # Monitoring tools
+    'netdata': ('Monitoring', 'Added', 'Real-time system monitoring'),
+    'apps.plugin': ('Netdata plugin', 'Added', 'Netdata application monitor'),
+    'proc.plugin': ('Netdata plugin', 'Added', 'Netdata process monitor'),
+    'go.d.plugin': ('Netdata plugin', 'Added', 'Netdata Go collectors'),
+    'cgroups.plugin': ('Netdata plugin', 'Added', 'Netdata cgroup monitor'),
+    'ebpf.plugin': ('Netdata plugin', 'Added', 'Netdata eBPF monitor'),
+
+    # Network services
+    'NetworkManager': ('Network', 'Core', 'Network connection manager'),
+    'wpa_supplicant': ('WiFi', 'Core', 'WiFi authentication'),
+    'dhcpcd': ('DHCP client', 'Core', 'IP address management'),
+    'avahi-daemon': ('mDNS', 'Core', 'Local network discovery'),
+    'sshd': ('SSH server', 'Core', 'Remote access server'),
+    'ssh': ('SSH client', 'Core', 'Remote access client'),
+
+    # Bluetooth
+    'bluetoothd': ('Bluetooth', 'Core', 'Bluetooth daemon'),
+    'bt-adapter': ('Bluetooth', 'Core', 'Bluetooth adapter control'),
+
+    # Python processes
+    'python3': ('Python', 'Varies', 'Python interpreter - check parent'),
+    'python': ('Python', 'Varies', 'Python interpreter - check parent'),
+
+    # Hardware/GPU
+    'Xorg': ('X server', 'Desktop', 'X11 display server'),
+    'Xwayland': ('X compat', 'Desktop', 'X11 apps on Wayland'),
+
+    # Camera/Video
+    'libcamera-vid': ('Camera', 'Added', 'Camera video capture'),
+    'libcamera-still': ('Camera', 'Added', 'Camera still capture'),
+    'rpicam-vid': ('Camera', 'Added', 'Pi camera video'),
+    'ffmpeg': ('Video encode', 'Added', 'Video encoding/streaming'),
+    'gstreamer': ('Media', 'Added', 'Media framework'),
+
+    # Other common
+    'cron': ('Scheduler', 'Core', 'Task scheduler'),
+    'rsyslogd': ('Logging', 'Core', 'System logging'),
+    'polkitd': ('Auth', 'Core', 'Authorization framework'),
+    'udisksd': ('Disks', 'Core', 'Disk management'),
+    'accounts-daemon': ('Accounts', 'Core', 'User account service'),
+    'gpsd': ('GPS daemon', 'Added', 'GPS device service'),
+    'cups': ('Printing', 'Added', 'Print server - can disable'),
+    'cupsd': ('Printing', 'Added', 'Print server - can disable'),
+}
+
+
+def get_process_description(name):
+    """Get description for a process."""
+    # Direct match
+    if name in PROCESS_DESCRIPTIONS:
+        return PROCESS_DESCRIPTIONS[name]
+
+    # Partial matches
+    name_lower = name.lower()
+    for key, value in PROCESS_DESCRIPTIONS.items():
+        if key.lower() in name_lower or name_lower in key.lower():
+            return value
+
+    # Check for sailframes processes
+    if 'sailframes' in name_lower:
+        return ('SailFrames', 'SailFrames', 'SailFrames service')
+
+    # Check for common patterns
+    if 'plugin' in name_lower:
+        return ('Plugin', 'Added', 'Extension/plugin process')
+    if 'kworker' in name_lower:
+        return ('Kernel', 'Core', 'Kernel worker thread')
+    if 'irq/' in name_lower:
+        return ('Kernel', 'Core', 'Interrupt handler')
+
+    return ('Unknown', 'Unknown', 'Process not recognized')
 
 
 @app.route('/api/battery/sessions')
@@ -386,6 +503,13 @@ BATTERY_HISTORY_HTML = """
         .summary-item { text-align: center; }
         .summary-value { font-size: 24px; font-weight: 700; color: #fff; }
         .summary-label { font-size: 12px; color: #78909c; }
+        .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+        .tag-core { background: #1565c0; color: #fff; }
+        .tag-desktop { background: #6a1b9a; color: #fff; }
+        .tag-sailframes { background: #00695c; color: #fff; }
+        .tag-added { background: #e65100; color: #fff; }
+        .tag-varies { background: #455a64; color: #fff; }
+        .tag-unknown { background: #37474f; color: #90a4ae; }
     </style>
 </head>
 <body>
@@ -427,15 +551,24 @@ BATTERY_HISTORY_HTML = """
     <h2>Top Power Consumers</h2>
     <div class="card">
         <table>
-            <tr><th>Process</th><th>Avg CPU %</th><th>Total CPU Time</th></tr>
+            <tr><th>Process</th><th>Type</th><th>Description</th><th>Avg CPU %</th><th>Total CPU</th></tr>
             {% for proc in top_processes %}
             <tr>
-                <td>{{ proc.name }}</td>
+                <td><strong>{{ proc.name }}</strong></td>
+                <td><span class="tag tag-{{ proc.description[1]|lower|replace(' ', '') }}">{{ proc.description[1] }}</span></td>
+                <td style="font-size: 12px; color: #90a4ae;">{{ proc.description[2] }}</td>
                 <td>{{ proc.avg_cpu }}%</td>
                 <td>{{ proc.total_cpu|round(1) }}</td>
             </tr>
             {% endfor %}
         </table>
+    </div>
+    <div style="margin-top: 12px; font-size: 12px; color: #78909c;">
+        <strong>Type Legend:</strong>
+        <span class="tag tag-core">Core</span> = Essential system service
+        <span class="tag tag-desktop">Desktop</span> = GUI/Desktop environment
+        <span class="tag tag-sailframes">SailFrames</span> = Our services
+        <span class="tag tag-added">Added</span> = Optional/installable
     </div>
     {% endif %}
 
