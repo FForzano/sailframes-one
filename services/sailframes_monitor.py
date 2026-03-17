@@ -143,6 +143,66 @@ def check_service_status(service_name):
         return False
 
 
+def get_latest_gps():
+    """Get latest GPS data from most recent CSV file."""
+    try:
+        data_dir = Path('/mnt/sailframes-data')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        gps_dir = data_dir / today / 'gps'
+
+        if not gps_dir.exists():
+            return None
+
+        # Find most recent CSV
+        csv_files = sorted(gps_dir.glob('track_*.csv'), reverse=True)
+        if not csv_files:
+            return None
+
+        # Read last line of most recent file
+        with open(csv_files[0], 'r') as f:
+            lines = f.readlines()
+            if len(lines) < 2:  # Header only
+                return None
+            last_line = lines[-1].strip()
+
+        # Parse CSV line
+        parts = last_line.split(',')
+        if len(parts) < 10:
+            return None
+
+        # Fix quality descriptions
+        fix_types = {
+            0: 'No Fix',
+            1: 'GPS',
+            2: 'DGPS',
+            4: 'RTK Fixed',
+            5: 'RTK Float',
+            6: 'Dead Reckoning',
+        }
+
+        fix_quality = int(parts[7]) if parts[7] else 0
+        speed_knots = float(parts[4]) if parts[4] else 0
+
+        return {
+            'latitude': float(parts[1]) if parts[1] else None,
+            'longitude': float(parts[2]) if parts[2] else None,
+            'altitude_m': float(parts[3]) if parts[3] else None,
+            'speed_knots': round(speed_knots, 1),
+            'speed_mph': round(speed_knots * 1.15078, 1),
+            'speed_kmh': round(speed_knots * 1.852, 1),
+            'course_deg': float(parts[6]) if parts[6] else None,
+            'fix_quality': fix_quality,
+            'fix_type': fix_types.get(fix_quality, f'Unknown ({fix_quality})'),
+            'satellites': int(parts[8]) if parts[8] else 0,
+            'hdop': float(parts[9]) if parts[9] else None,
+            'accuracy': 'Excellent' if float(parts[9] or 99) < 1 else 'Good' if float(parts[9] or 99) < 2 else 'Fair' if float(parts[9] or 99) < 5 else 'Poor',
+            'timestamp': parts[0],
+        }
+    except Exception as e:
+        logger.debug(f"GPS read error: {e}")
+        return None
+
+
 # ── System state (shared between monitor thread and web server) ──
 system_state = {
     'device_id': '',
@@ -152,6 +212,7 @@ system_state = {
     'ram_percent': 0,
     'battery': {},
     'disk': {},
+    'gps': {},
     'services': {},
     'last_update': '',
 }
@@ -174,6 +235,7 @@ def monitor_loop(config):
         system_state['ram_percent'] = psutil.virtual_memory().percent
         system_state['battery'] = get_battery_info()
         system_state['disk'] = get_disk_usage(data_mount)
+        system_state['gps'] = get_latest_gps() or {}
         system_state['uptime_sec'] = int(time.monotonic())
         system_state['last_update'] = datetime.now(timezone.utc).isoformat()
 
@@ -259,6 +321,48 @@ DASHBOARD_HTML = """
             <div class="value">{{ state.ram_percent or '—' }}<span class="unit">%</span></div>
         </div>
     </div>
+
+    <!-- GPS Section -->
+    {% if state.gps %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>📍 GPS — {{ state.gps.fix_type }} ({{ state.gps.satellites }} sats)</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+            <div>
+                <div style="font-size: 11px; color: #78909c;">POSITION</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.6f"|format(state.gps.latitude) }}, {{ "%.6f"|format(state.gps.longitude) }}</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">ALTITUDE</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.gps.altitude_m|round(1) }} m</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">SPEED</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.gps.speed_knots }} kts · {{ state.gps.speed_mph }} mph</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">COURSE</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.gps.course_deg|round(0)|int if state.gps.course_deg else '—' }}°</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">ACCURACY (HDOP)</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.gps.hdop }} — {{ state.gps.accuracy }}</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">FIX QUALITY</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.gps.fix_type }}</div>
+            </div>
+        </div>
+        <div style="margin-top: 8px; font-size: 11px; color: #546e7a;">
+            <a href="https://www.google.com/maps?q={{ state.gps.latitude }},{{ state.gps.longitude }}" target="_blank" style="color: #4fc3f7;">Open in Google Maps ↗</a>
+        </div>
+    </div>
+    {% else %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>📍 GPS</h2>
+        <div style="color: #78909c; font-style: italic;">No GPS fix — waiting for satellites...</div>
+    </div>
+    {% endif %}
+
     <div class="card services" style="margin-top: 12px;">
         <h2>Sensor Services</h2>
         {% for name, active in state.services.items() %}
