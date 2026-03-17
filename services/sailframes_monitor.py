@@ -62,45 +62,55 @@ def get_cpu_temp():
 
 def get_battery_info():
     """
-    Read battery status from UPS HAT via I2C.
-    This is HAT-specific - adjust for your UPS HAT model.
-    Returns dict with voltage, percent, charging status.
+    Read battery status from Waveshare UPS HAT (D) via I2C.
+    - MCU at 0x2D: register 0x04 contains battery percentage (0-221 scale, 221=100%)
+    - INA219 at 0x43: voltage/current monitoring of output rail
     """
+    MCU_ADDR = 0x2D
+    MCU_REG_BATTERY = 0x04
+    MCU_MAX_PERCENT = 221  # Raw value when batteries are 100% full
+
+    INA219_ADDR = 0x43
+    REG_BUS_VOLTAGE = 0x02
+    REG_SHUNT_VOLTAGE = 0x01
+    SHUNT_OHMS = 0.1
+
     try:
         import smbus2
         bus = smbus2.SMBus(1)
 
-        # UeeKKoo UPS HAT (D) typically uses INA219 or MAX17048 fuel gauge
-        # Common I2C address: 0x36 (MAX17048) or 0x40 (INA219)
-        # Adjust these registers for your specific UPS HAT
+        # Read battery percentage from MCU (0-221 scale, 221 = 100%)
+        raw_percent = bus.read_byte_data(MCU_ADDR, MCU_REG_BATTERY)
+        percent = min((raw_percent / MCU_MAX_PERCENT) * 100.0, 100.0)
 
-        # Try MAX17048 fuel gauge (common on many UPS HATs)
-        try:
-            # Voltage register (0x02) - 16-bit, 78.125µV/cell resolution
-            data = bus.read_word_data(0x36, 0x02)
-            # Byte swap (little endian to big endian)
-            voltage_raw = ((data & 0xFF) << 8) | ((data >> 8) & 0xFF)
-            voltage = voltage_raw * 78.125 / 1_000_000  # Convert to volts
+        # Read output voltage from INA219
+        raw_bus = bus.read_word_data(INA219_ADDR, REG_BUS_VOLTAGE)
+        raw_bus = ((raw_bus & 0xFF) << 8) | ((raw_bus >> 8) & 0xFF)
+        voltage = (raw_bus >> 3) * 0.004
 
-            # SOC register (0x04) - state of charge in %
-            data = bus.read_word_data(0x36, 0x04)
-            soc_raw = ((data & 0xFF) << 8) | ((data >> 8) & 0xFF)
-            percent = soc_raw / 256.0
-
-            bus.close()
-            return {
-                'voltage': round(voltage, 3),
-                'percent': round(min(percent, 100), 1),
-                'charging': voltage > 4.1,  # Rough heuristic
-            }
-        except Exception:
-            pass
+        # Read current from INA219 shunt
+        raw_shunt = bus.read_word_data(INA219_ADDR, REG_SHUNT_VOLTAGE)
+        raw_shunt = ((raw_shunt & 0xFF) << 8) | ((raw_shunt >> 8) & 0xFF)
+        if raw_shunt > 32767:
+            raw_shunt -= 65536
+        shunt_mv = raw_shunt * 0.01
+        current_ma = shunt_mv / SHUNT_OHMS
 
         bus.close()
-    except Exception:
-        pass
 
-    return {'voltage': None, 'percent': None, 'charging': None}
+        # Charging detection: when USB-C connected, current is near zero (USB powers Pi)
+        # When on battery, current is positive (battery discharging to Pi, typically 100-500mA)
+        charging = current_ma < 50  # Low current = USB power present (charging)
+
+        return {
+            'voltage': round(voltage, 2),
+            'percent': round(percent, 1),
+            'current_ma': round(current_ma, 0),
+            'charging': charging,
+        }
+    except Exception as e:
+        logger.debug(f"Battery read error: {e}")
+        return {'voltage': None, 'percent': None, 'current_ma': None, 'charging': None}
 
 
 def get_disk_usage(mount_point):
@@ -172,10 +182,13 @@ def monitor_loop(config):
             'camera': check_service_status('sailframes-camera'),
         }
 
-        # Low battery shutdown
+        # Low battery shutdown - only if batteries are actually present
+        # (voltage > 5V means batteries installed, not just HAT with no/dead batteries)
         battery_pct = system_state['battery'].get('percent')
-        if battery_pct is not None and battery_pct < shutdown_percent:
-            logger.warning(f"Battery at {battery_pct}%! Initiating clean shutdown.")
+        battery_voltage = system_state['battery'].get('voltage')
+        if (battery_pct is not None and battery_voltage is not None
+            and battery_voltage > 5.0 and battery_pct < shutdown_percent):
+            logger.warning(f"Battery at {battery_pct}% ({battery_voltage}V)! Initiating clean shutdown.")
             subprocess.run(['sudo', 'shutdown', '-h', 'now'])
             running = False
             return
@@ -213,6 +226,9 @@ DASHBOARD_HTML = """
         .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
         .status.on { background: #4caf50; }
         .status.off { background: #f44336; }
+        .sub { font-size: 13px; color: #90a4ae; margin-top: 6px; }
+        .charging { color: #4caf50; }
+        .discharging { color: #ff9800; }
         .services { margin-top: 12px; }
         .svc-row { padding: 6px 0; font-size: 14px; border-bottom: 1px solid #233; }
         .updated { font-size: 11px; color: #546e7a; margin-top: 12px; text-align: center; }
@@ -226,8 +242,9 @@ DASHBOARD_HTML = """
             <div class="value">{{ state.cpu_temp_c or '—' }}<span class="unit">°C</span></div>
         </div>
         <div class="card">
-            <h2>Battery</h2>
+            <h2>Battery {% if state.battery.charging %}<span class="charging">⚡</span>{% endif %}</h2>
             <div class="value">{{ state.battery.percent or '—' }}<span class="unit">%</span></div>
+            <div class="sub">{{ state.battery.voltage or '—' }}V · {{ state.battery.current_ma or '—' }}mA · {% if state.battery.charging %}<span class="charging">Charging</span>{% else %}<span class="discharging">On Battery</span>{% endif %}</div>
         </div>
         <div class="card">
             <h2>Disk Free</h2>

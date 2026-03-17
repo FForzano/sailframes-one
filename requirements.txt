@@ -36,3 +36,4 @@ boto3>=1.28
 
 # System monitoring
 psutil>=5.9
+smbus2>=0.4
