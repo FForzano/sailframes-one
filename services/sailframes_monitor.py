@@ -19,7 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import psutil
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, send_file
 import yaml
 
 logging.basicConfig(
@@ -449,11 +449,66 @@ DASHBOARD_HTML = """
         </div>
         {% endfor %}
     </div>
+
+    <!-- Camera Control -->
+    <div class="card" style="margin-top: 12px;">
+        <h2>Camera Control</h2>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div id="camera-status" style="font-size: 18px; font-weight: 600;">
+                {% if state.services.camera %}
+                <span style="color: #4caf50;">Recording</span>
+                {% else %}
+                <span style="color: #78909c;">Stopped</span>
+                {% endif %}
+            </div>
+            <button id="camera-toggle" onclick="toggleCamera()" style="
+                background: {% if state.services.camera %}#c62828{% else %}#1976d2{% endif %};
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+            ">
+                {% if state.services.camera %}Stop Recording{% else %}Start Recording{% endif %}
+            </button>
+        </div>
+    </div>
+
     <div class="updated">Updated {{ state.last_update }}</div>
     <div style="text-align: center; margin-top: 12px; display: flex; gap: 20px; justify-content: center;">
         <a href="/gps" style="color: #4fc3f7; font-size: 13px;">📍 GPS Details</a>
         <a href="/battery" style="color: #4fc3f7; font-size: 13px;">🔋 Battery History</a>
+        <a href="/video" style="color: #4fc3f7; font-size: 13px;">🎬 Video Review</a>
     </div>
+
+    <script>
+    function toggleCamera() {
+        const btn = document.getElementById('camera-toggle');
+        const isRecording = btn.textContent.trim() === 'Stop Recording';
+        const action = isRecording ? 'stop' : 'start';
+
+        btn.disabled = true;
+        btn.textContent = isRecording ? 'Stopping...' : 'Starting...';
+
+        fetch('/api/camera/' + action, { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                    btn.disabled = false;
+                    btn.textContent = isRecording ? 'Stop Recording' : 'Start Recording';
+                }
+            })
+            .catch(e => {
+                alert('Error: ' + e);
+                btn.disabled = false;
+            });
+    }
+    </script>
 </body>
 </html>
 """
@@ -971,6 +1026,83 @@ def get_process_description(name):
     return ('Unknown', 'Unknown', 'Process not recognized')
 
 
+# ── Video Management ──
+
+def get_video_list(data_dir, date_filter=None):
+    """Get list of all recorded videos with metadata."""
+    data_path = Path(data_dir)
+    videos = []
+
+    # Get all date directories or filter to specific date
+    if date_filter:
+        date_dirs = [data_path / date_filter]
+    else:
+        date_dirs = sorted(data_path.glob('20??-??-??'), reverse=True)
+
+    for date_dir in date_dirs:
+        video_dir = date_dir / 'video'
+        if not video_dir.exists():
+            continue
+
+        for video_file in sorted(video_dir.glob('*.mp4'), reverse=True):
+            try:
+                stat = video_file.stat()
+                size_mb = stat.st_size / (1024 * 1024)
+                # Estimate duration: ~8 Mbps = ~1 MB/s
+                duration_sec = int(size_mb)
+                videos.append({
+                    'filename': video_file.name,
+                    'filepath': str(video_file.relative_to(data_path)),
+                    'date': date_dir.name,
+                    'size_mb': round(size_mb, 1),
+                    'size_bytes': stat.st_size,
+                    'duration_sec': duration_sec,
+                    'duration_str': f"{duration_sec // 60}:{duration_sec % 60:02d}",
+                    'created': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+            except Exception:
+                pass
+
+    return videos
+
+
+def get_video_dates(data_dir):
+    """Get list of dates that have videos."""
+    data_path = Path(data_dir)
+    dates = []
+
+    for date_dir in sorted(data_path.glob('20??-??-??'), reverse=True):
+        video_dir = date_dir / 'video'
+        if video_dir.exists():
+            video_count = len(list(video_dir.glob('*.mp4')))
+            if video_count > 0:
+                dates.append({
+                    'date': date_dir.name,
+                    'video_count': video_count
+                })
+
+    return dates
+
+
+def validate_video_path(data_dir, filepath):
+    """Security: validate that filepath is within data_dir and is a video file."""
+    data_path = Path(data_dir).resolve()
+    try:
+        video_path = (data_path / filepath).resolve()
+        # Ensure path is within data directory
+        if not str(video_path).startswith(str(data_path)):
+            return None
+        # Ensure it's an MP4 file
+        if video_path.suffix.lower() != '.mp4':
+            return None
+        # Ensure file exists
+        if not video_path.exists():
+            return None
+        return video_path
+    except Exception:
+        return None
+
+
 @app.route('/api/battery/sessions')
 def api_battery_sessions():
     """Get list of battery sessions."""
@@ -1139,7 +1271,308 @@ def battery_session_detail(session_id):
     )
 
 
+# ── Video Review Page ──
+
+VIDEO_PAGE_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Review - SailFrames</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, sans-serif; background: #0a1628; color: #e0e8f0; padding: 16px; }
+        h1 { color: #4fc3f7; margin-bottom: 8px; font-size: 24px; }
+        h2 { color: #78909c; font-size: 14px; text-transform: uppercase; margin: 16px 0 8px; }
+        a { color: #4fc3f7; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .nav { margin-bottom: 16px; font-size: 14px; }
+        .card { background: #1a2a40; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+        .date-nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+        .date-btn { background: #233; color: #e0e8f0; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .date-btn.active { background: #1976d2; color: white; }
+        .date-btn:hover { background: #344; }
+        .video-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #233; }
+        .video-item:last-child { border-bottom: none; }
+        .video-item:hover { background: #233; }
+        .video-name { font-weight: 600; font-size: 14px; }
+        .video-meta { font-size: 12px; color: #78909c; margin-top: 4px; }
+        .video-actions { display: flex; gap: 8px; }
+        .btn { padding: 6px 12px; border-radius: 4px; border: none; font-size: 12px; cursor: pointer; }
+        .btn-play { background: #1976d2; color: white; }
+        .btn-delete { background: #455a64; color: #e0e8f0; }
+        .btn-delete:hover { background: #c62828; }
+        .no-videos { color: #546e7a; font-style: italic; padding: 20px; text-align: center; }
+        .video-player { margin: 16px 0; }
+        .video-player video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; }
+        .modal-content { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #1a2a40; padding: 24px; border-radius: 8px; text-align: center; }
+        .modal-buttons { margin-top: 16px; display: flex; gap: 12px; justify-content: center; }
+        .summary { display: flex; gap: 24px; margin-bottom: 16px; font-size: 14px; }
+        .summary-item { }
+        .summary-value { font-size: 20px; font-weight: 700; color: #fff; }
+        .summary-label { font-size: 11px; color: #78909c; }
+    </style>
+</head>
+<body>
+    <div class="nav"><a href="/">&larr; Back to Dashboard</a></div>
+    <h1>Video Review</h1>
+
+    <div class="summary">
+        <div class="summary-item">
+            <div class="summary-value">{{ total_videos }}</div>
+            <div class="summary-label">Total Videos</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-value">{{ total_size_gb }}GB</div>
+            <div class="summary-label">Total Size</div>
+        </div>
+        <div class="summary-item">
+            <div class="summary-value">{{ total_duration }}</div>
+            <div class="summary-label">Total Duration</div>
+        </div>
+    </div>
+
+    <div class="date-nav">
+        <button class="date-btn {% if not selected_date %}active{% endif %}" onclick="location.href='/video'">All</button>
+        {% for d in dates %}
+        <button class="date-btn {% if selected_date == d.date %}active{% endif %}" onclick="location.href='/video?date={{ d.date }}'">{{ d.date }} ({{ d.video_count }})</button>
+        {% endfor %}
+    </div>
+
+    <div id="player-container" class="video-player" style="display: none;">
+        <video id="video-player" controls></video>
+        <div style="margin-top: 8px; font-size: 14px;">
+            <span id="player-filename"></span>
+            <button onclick="closePlayer()" style="float: right; background: #455a64; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer;">Close</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="video-list">
+            {% if videos %}
+            {% for v in videos %}
+            <div class="video-item" id="video-{{ loop.index }}">
+                <div>
+                    <div class="video-name">{{ v.filename }}</div>
+                    <div class="video-meta">{{ v.date }} | {{ v.size_mb }}MB | ~{{ v.duration_str }}</div>
+                </div>
+                <div class="video-actions">
+                    <button class="btn btn-play" onclick="playVideo('{{ v.filepath }}', '{{ v.filename }}')">Play</button>
+                    <button class="btn btn-delete" onclick="confirmDelete('{{ v.filepath }}', '{{ v.filename }}')">Delete</button>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="no-videos">No videos found{% if selected_date %} for {{ selected_date }}{% endif %}.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Delete confirmation modal -->
+    <div id="delete-modal" class="modal">
+        <div class="modal-content">
+            <div style="font-size: 18px; margin-bottom: 8px;">Delete Video?</div>
+            <div id="delete-filename" style="color: #78909c;"></div>
+            <div class="modal-buttons">
+                <button class="btn" style="background: #455a64; color: white;" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn" style="background: #c62828; color: white;" onclick="doDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let deleteFilepath = null;
+
+        function playVideo(filepath, filename) {
+            const player = document.getElementById('video-player');
+            const container = document.getElementById('player-container');
+            document.getElementById('player-filename').textContent = filename;
+            player.src = '/video/stream/' + filepath;
+            container.style.display = 'block';
+            player.play();
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function closePlayer() {
+            const player = document.getElementById('video-player');
+            player.pause();
+            player.src = '';
+            document.getElementById('player-container').style.display = 'none';
+        }
+
+        function confirmDelete(filepath, filename) {
+            deleteFilepath = filepath;
+            document.getElementById('delete-filename').textContent = filename;
+            document.getElementById('delete-modal').style.display = 'block';
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('delete-modal').style.display = 'none';
+            deleteFilepath = null;
+        }
+
+        function doDelete() {
+            if (!deleteFilepath) return;
+
+            fetch('/api/video/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filepath: deleteFilepath })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Delete failed'));
+                }
+                closeDeleteModal();
+            })
+            .catch(e => {
+                alert('Error: ' + e);
+                closeDeleteModal();
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
+
+# Store config globally for video routes
+_config = None
+
+
+@app.route('/video')
+def video_page():
+    """Video review page."""
+    global _config
+    if _config is None:
+        _config = load_config()
+
+    data_dir = _config['storage']['data_dir']
+    selected_date = request.args.get('date')
+    videos = get_video_list(data_dir, date_filter=selected_date)
+    dates = get_video_dates(data_dir)
+
+    # Calculate totals
+    total_size_bytes = sum(v['size_bytes'] for v in videos)
+    total_duration_sec = sum(v['duration_sec'] for v in videos)
+
+    return render_template_string(
+        VIDEO_PAGE_HTML,
+        videos=videos,
+        dates=dates,
+        selected_date=selected_date,
+        total_videos=len(videos),
+        total_size_gb=round(total_size_bytes / (1024**3), 2),
+        total_duration=f"{total_duration_sec // 3600}h {(total_duration_sec % 3600) // 60}m"
+    )
+
+
+@app.route('/video/stream/<path:filepath>')
+def video_stream(filepath):
+    """Serve video file for playback with range support."""
+    global _config
+    if _config is None:
+        _config = load_config()
+
+    data_dir = _config['storage']['data_dir']
+    video_path = validate_video_path(data_dir, filepath)
+
+    if video_path is None:
+        return "Not found", 404
+
+    return send_file(
+        video_path,
+        mimetype='video/mp4',
+        conditional=True  # Enables HTTP range requests for seeking
+    )
+
+
+@app.route('/api/videos')
+def api_videos():
+    """List all recorded videos."""
+    global _config
+    if _config is None:
+        _config = load_config()
+
+    data_dir = _config['storage']['data_dir']
+    date_filter = request.args.get('date')
+    return jsonify(get_video_list(data_dir, date_filter=date_filter))
+
+
+@app.route('/api/video/delete', methods=['POST'])
+def api_video_delete():
+    """Delete a video file."""
+    global _config
+    if _config is None:
+        _config = load_config()
+
+    data = request.get_json()
+    filepath = data.get('filepath') if data else None
+
+    if not filepath:
+        return jsonify({'success': False, 'error': 'No filepath provided'}), 400
+
+    data_dir = _config['storage']['data_dir']
+    video_path = validate_video_path(data_dir, filepath)
+
+    if video_path is None:
+        return jsonify({'success': False, 'error': 'Invalid path or file not found'}), 404
+
+    try:
+        video_path.unlink()
+        logger.info(f"Deleted video: {filepath}")
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Failed to delete video {filepath}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/camera/start', methods=['POST'])
+def api_camera_start():
+    """Start camera recording service."""
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'start', 'sailframes-camera'],
+            capture_output=True, text=True, timeout=10
+        )
+        success = result.returncode == 0
+        if success:
+            logger.info("Camera service started via API")
+        else:
+            logger.warning(f"Failed to start camera: {result.stderr}")
+        return jsonify({'success': success, 'error': result.stderr if not success else None})
+    except Exception as e:
+        logger.error(f"Camera start error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/camera/stop', methods=['POST'])
+def api_camera_stop():
+    """Stop camera recording service."""
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'stop', 'sailframes-camera'],
+            capture_output=True, text=True, timeout=10
+        )
+        success = result.returncode == 0
+        if success:
+            logger.info("Camera service stopped via API")
+        else:
+            logger.warning(f"Failed to stop camera: {result.stderr}")
+        return jsonify({'success': success, 'error': result.stderr if not success else None})
+    except Exception as e:
+        logger.error(f"Camera stop error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def run(config):
+    global _config
+    _config = config  # Store config for video routes
+
     monitor_config = config['monitor']
     port = monitor_config['web_port']
 
