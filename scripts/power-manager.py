@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 SailFrames Power Manager
-Monitors USB-C power and enables/disables display + browsers to save battery.
-- USB-C connected: Enable HDMI, start browsers
-- On battery: Disable HDMI, kill browsers
+Monitors USB-C power and enables/disables desktop to save battery.
+- USB-C connected: Start desktop session + browsers
+- On battery: Stop entire desktop session (saves ~200-400mA)
 """
 
 import os
@@ -22,6 +22,7 @@ logger = logging.getLogger('sailframes.power')
 
 # Configuration
 CHECK_INTERVAL = 10  # seconds between checks
+STARTUP_DELAY = 60   # wait before first power check (let desktop initialize)
 CURRENT_THRESHOLD = 0  # negative current = USB-C connected
 INA219_ADDR = 0x43
 REG_SHUNT_VOLTAGE = 0x01
@@ -68,31 +69,43 @@ def is_usb_connected():
 
 
 def enable_display():
-    """Enable HDMI and start browsers."""
+    """Start desktop session and browsers."""
     global display_enabled
     if display_enabled:
         return  # Already enabled
 
-    logger.info("USB-C connected - enabling display")
+    logger.info("USB-C connected - starting desktop session")
 
-    # Set DISPLAY for subprocess commands
+    # Start the display manager (brings up full desktop)
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'start', 'lightdm'],
+            capture_output=True, timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("Started display manager")
+        else:
+            logger.warning(f"Display manager start returned: {result.returncode}")
+    except Exception as e:
+        logger.warning(f"Could not start display manager: {e}")
+
+    # Wait for desktop to initialize, then start browsers
+    time.sleep(10)
+
+    # Start dashboard browsers
     env = os.environ.copy()
     env['DISPLAY'] = ':0'
+    env['WAYLAND_DISPLAY'] = 'wayland-1'
 
-    # Signal display helper to turn on display
-    try:
-        with open('/tmp/sailframes-display-control', 'w') as f:
-            f.write('on')
-        logger.info("Signaled display helper to turn on")
-    except Exception as e:
-        logger.warning(f"Could not signal display helper: {e}")
-
-    # Start dashboard script (which opens browsers)
-    dashboard_script = os.path.expanduser('~/sailframes-dashboard.sh')
+    dashboard_script = '/home/paul/sailframes-dashboard.sh'
     if os.path.exists(dashboard_script):
         try:
-            subprocess.Popen([dashboard_script], env=env,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                ['sudo', '-u', 'paul', dashboard_script],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
             logger.info("Started dashboard browsers")
         except Exception as e:
             logger.warning(f"Could not start dashboard: {e}")
@@ -101,30 +114,32 @@ def enable_display():
 
 
 def disable_display():
-    """Disable HDMI and kill browsers to save power."""
+    """Stop entire desktop session to save power."""
     global display_enabled
     if display_enabled is False:
         return  # Already disabled
 
-    logger.info("On battery - disabling display to save power")
+    logger.info("On battery - stopping desktop session to save power")
 
-    env = os.environ.copy()
-    env['DISPLAY'] = ':0'
-
-    # Kill browsers (main power savings)
+    # Stop the display manager (kills labwc, pipewire, browsers, panel, etc.)
     try:
-        subprocess.run(['pkill', '-9', 'chromium'], capture_output=True, timeout=5)
-        logger.info("Killed browsers")
-    except Exception:
-        pass
-
-    # Signal display helper to turn off display (Wayland requires in-session control)
-    try:
-        with open('/tmp/sailframes-display-control', 'w') as f:
-            f.write('off')
-        logger.info("Signaled display helper to turn off")
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'stop', 'lightdm'],
+            capture_output=True, timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("Stopped display manager - desktop session ended")
+        else:
+            logger.warning(f"Display manager stop returned: {result.returncode}")
     except Exception as e:
-        logger.warning(f"Could not signal display helper: {e}")
+        logger.warning(f"Could not stop display manager: {e}")
+
+    # Also kill any remaining GUI processes
+    for proc in ['chromium', 'labwc', 'pipewire', 'wireplumber', 'wf-panel-pi']:
+        try:
+            subprocess.run(['pkill', '-9', proc], capture_output=True, timeout=5)
+        except Exception:
+            pass
 
     display_enabled = False
 
@@ -133,11 +148,19 @@ def run():
     global display_enabled
     logger.info("Power manager started")
 
+    # Wait for system to fully boot before managing power
+    logger.info(f"Waiting {STARTUP_DELAY}s for system initialization...")
+    time.sleep(STARTUP_DELAY)
+
     # Check initial state
     usb_connected = is_usb_connected()
+    logger.info(f"Initial state: USB connected = {usb_connected}")
+
     if usb_connected is True:
-        enable_display()
+        display_enabled = True  # Assume desktop is already running
+        logger.info("USB-C connected at startup - desktop stays on")
     elif usb_connected is False:
+        display_enabled = True  # Mark as enabled so disable_display() will run
         disable_display()
 
     while running:

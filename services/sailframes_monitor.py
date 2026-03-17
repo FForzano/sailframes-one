@@ -16,6 +16,7 @@ import threading
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import psutil
 from flask import Flask, jsonify, render_template_string, request
@@ -288,6 +289,19 @@ def api_status():
 BATTERY_DATA_DIR = Path('/mnt/sailframes-data/battery')
 
 
+def format_time_ny(iso_time):
+    """Convert ISO UTC time to New York time formatted string."""
+    try:
+        # Parse ISO format
+        dt = datetime.fromisoformat(iso_time.replace('Z', '+00:00'))
+        # Convert to New York timezone
+        ny_tz = ZoneInfo('America/New_York')
+        dt_ny = dt.astimezone(ny_tz)
+        return dt_ny.strftime('%Y-%m-%d %I:%M %p')
+    except Exception:
+        return iso_time[:16].replace('T', ' ')
+
+
 def get_battery_sessions(limit=20):
     """Get list of battery discharge sessions."""
     sessions_file = BATTERY_DATA_DIR / 'sessions.csv'
@@ -298,6 +312,11 @@ def get_battery_sessions(limit=20):
     with open(sessions_file, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
+            # Add formatted times in New York timezone
+            row['start_time_ny'] = format_time_ny(row['start_time'])
+            row['end_time_ny'] = format_time_ny(row['end_time'])
+            # Round duration to int
+            row['duration_minutes'] = round(float(row['duration_minutes']))
             sessions.append(row)
 
     # Return most recent first
@@ -517,7 +536,7 @@ BATTERY_HISTORY_HTML = """
     <h1>🔋 Battery History</h1>
 
     {% if session %}
-    <h2>Session {{ session.session_id }}</h2>
+    <h2>{{ session.start_time_ny }} → {{ session.end_time_ny }}</h2>
     <div class="card">
         <div class="summary-grid">
             <div class="summary-item">
@@ -581,7 +600,7 @@ BATTERY_HISTORY_HTML = """
         {% for s in sessions %}
         <div class="session" onclick="location.href='/battery/{{ s.session_id }}'">
             <div>
-                <div class="session-date">{{ s.start_time[:16].replace('T', ' ') }}</div>
+                <div class="session-date">{{ s.start_time_ny }}</div>
                 <div class="session-stats">
                     <span class="stat"><span class="stat-value">{{ s.duration_minutes }}m</span> duration</span>
                     <span class="stat"><span class="stat-value">{{ s.percent_used }}%</span> used</span>
