@@ -63,25 +63,23 @@ def get_cpu_temp():
 def get_battery_info():
     """
     Read battery status from Waveshare UPS HAT (D) via I2C.
-    - MCU at 0x2D: register 0x04 contains battery percentage (0-221 scale, 221=100%)
-    - INA219 at 0x43: voltage/current monitoring of output rail
+    - INA219 at 0x43: voltage/current monitoring
+    - Battery percentage calculated from output voltage:
+      - Full (charging): ~4.2V output
+      - Empty (shutdown): ~3.4V output
     """
-    MCU_ADDR = 0x2D
-    MCU_REG_BATTERY = 0x04
-    MCU_MAX_PERCENT = 221  # Raw value when batteries are 100% full
-
     INA219_ADDR = 0x43
     REG_BUS_VOLTAGE = 0x02
     REG_SHUNT_VOLTAGE = 0x01
     SHUNT_OHMS = 0.1
 
+    # Output voltage range observed on UPS HAT (D)
+    VOUT_FULL = 4.2   # Output voltage when fully charged
+    VOUT_EMPTY = 3.4  # Output voltage when battery depleted
+
     try:
         import smbus2
         bus = smbus2.SMBus(1)
-
-        # Read battery percentage from MCU (0-221 scale, 221 = 100%)
-        raw_percent = bus.read_byte_data(MCU_ADDR, MCU_REG_BATTERY)
-        percent = min((raw_percent / MCU_MAX_PERCENT) * 100.0, 100.0)
 
         # Read output voltage from INA219
         raw_bus = bus.read_word_data(INA219_ADDR, REG_BUS_VOLTAGE)
@@ -98,9 +96,14 @@ def get_battery_info():
 
         bus.close()
 
-        # Charging detection: when USB-C connected, current is near zero (USB powers Pi)
-        # When on battery, current is positive (battery discharging to Pi, typically 100-500mA)
-        charging = current_ma < 50  # Low current = USB power present (charging)
+        # Calculate battery percentage from output voltage
+        percent = (voltage - VOUT_EMPTY) / (VOUT_FULL - VOUT_EMPTY) * 100.0
+        percent = max(0, min(100, percent))
+
+        # Charging detection: current is negative when USB powers system and charges battery
+        # Positive current = discharging (battery powering Pi)
+        # Negative current = charging (USB powering Pi + charging battery)
+        charging = current_ma < 0
 
         return {
             'voltage': round(voltage, 2),
