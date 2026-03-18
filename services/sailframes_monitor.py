@@ -1048,9 +1048,15 @@ def get_active_session():
             last_time = datetime.fromisoformat(last['timestamp'].replace('Z', '+00:00'))
             duration = last_time - start_time
 
+            # Check if file was modified recently (within 2 minutes) to determine if truly active
+            file_mtime = datetime.fromtimestamp(session_file.stat().st_mtime, tz=timezone.utc)
+            now = datetime.now(timezone.utc)
+            is_stale = (now - file_mtime).total_seconds() > 120
+
             return {
                 'session_id': session_id,
                 'start_time_ny': format_time_ny(first['timestamp']),
+                'end_time_ny': format_time_ny(last['timestamp']),
                 'duration_minutes': round(duration.total_seconds() / 60),
                 'start_percent': float(first['percent']),
                 'current_percent': float(last['percent']),
@@ -1058,9 +1064,74 @@ def get_active_session():
                 'sample_count': len(samples),
                 'current_voltage': float(last['voltage']),
                 'current_ma': float(last['current_ma']),
+                'is_stale': is_stale,  # True if session was interrupted (not actively updating)
             }
 
     return None
+
+
+def finalize_orphan_session(session_id):
+    """Finalize an orphan session by adding it to sessions.csv."""
+    session_file = BATTERY_DATA_DIR / f'session_{session_id}.csv'
+    process_file = BATTERY_DATA_DIR / f'processes_{session_id}.csv'
+
+    if not session_file.exists():
+        return False
+
+    # Read session data
+    samples = []
+    with open(session_file, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            samples.append(row)
+
+    if len(samples) < 2:
+        return False
+
+    # Calculate stats
+    first = samples[0]
+    last = samples[-1]
+    start_time = datetime.fromisoformat(first['timestamp'].replace('Z', '+00:00'))
+    end_time = datetime.fromisoformat(last['timestamp'].replace('Z', '+00:00'))
+    duration = end_time - start_time
+
+    # Calculate power usage
+    total_power_mwh = 0
+    max_current = 0
+    min_voltage = float(first['voltage'])
+    for sample in samples:
+        power_mw = float(sample['voltage']) * abs(float(sample['current_ma']))
+        total_power_mwh += power_mw * (30 / 3600)  # 30 second intervals
+        max_current = max(max_current, float(sample['current_ma']))
+        min_voltage = min(min_voltage, float(sample['voltage']))
+
+    summary = {
+        'session_id': session_id,
+        'start_time': first['timestamp'],
+        'end_time': last['timestamp'],
+        'duration_minutes': round(duration.total_seconds() / 60, 1),
+        'start_percent': float(first['percent']),
+        'end_percent': float(last['percent']),
+        'percent_used': round(float(first['percent']) - float(last['percent']), 1),
+        'start_voltage': float(first['voltage']),
+        'end_voltage': float(last['voltage']),
+        'min_voltage': min_voltage,
+        'max_current_ma': round(max_current, 1),
+        'total_power_mwh': round(total_power_mwh, 1),
+        'sample_count': len(samples),
+    }
+
+    # Append to sessions.csv
+    sessions_file = BATTERY_DATA_DIR / 'sessions.csv'
+    write_header = not sessions_file.exists()
+
+    with open(sessions_file, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=summary.keys())
+        if write_header:
+            writer.writeheader()
+        writer.writerow(summary)
+
+    return True
 
 
 def get_session_data(session_id):
@@ -1335,6 +1406,19 @@ def api_battery_session(session_id):
     return jsonify(get_session_data(session_id))
 
 
+@app.route('/api/battery/finalize', methods=['POST'])
+def api_finalize_session():
+    """Finalize an orphan battery session."""
+    data = request.get_json() or {}
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+
+    if finalize_orphan_session(session_id):
+        return jsonify({'success': True, 'message': f'Session {session_id} finalized'})
+    return jsonify({'error': 'Failed to finalize session'}), 500
+
+
 BATTERY_HISTORY_HTML = """
 <!DOCTYPE html>
 <html>
@@ -1440,8 +1524,13 @@ BATTERY_HISTORY_HTML = """
 
     {% else %}
     {% if active_session %}
+    {% if active_session.is_stale %}
+    <h2 style="color: #ffb74d;">⚠ Interrupted Session</h2>
+    <div class="card" style="border: 2px solid #ffb74d;">
+    {% else %}
     <h2 style="color: #66bb6a;">⚡ Active Session (On Battery)</h2>
     <div class="card" style="border: 2px solid #66bb6a;">
+    {% endif %}
         <div class="summary-grid">
             <div class="summary-item">
                 <div class="summary-value">{{ active_session.duration_minutes }}m</div>
@@ -1449,15 +1538,15 @@ BATTERY_HISTORY_HTML = """
             </div>
             <div class="summary-item">
                 <div class="summary-value">{{ active_session.percent_used }}%</div>
-                <div class="summary-label">Used So Far</div>
+                <div class="summary-label">Battery Used</div>
             </div>
             <div class="summary-item">
                 <div class="summary-value">{{ active_session.start_percent|round|int }}%</div>
-                <div class="summary-label">Started At</div>
+                <div class="summary-label">Start</div>
             </div>
             <div class="summary-item">
                 <div class="summary-value">{{ active_session.current_percent|round|int }}%</div>
-                <div class="summary-label">Current</div>
+                <div class="summary-label">End</div>
             </div>
             <div class="summary-item">
                 <div class="summary-value">{{ active_session.current_ma|round|int }}</div>
@@ -1468,9 +1557,21 @@ BATTERY_HISTORY_HTML = """
                 <div class="summary-label">Samples</div>
             </div>
         </div>
+        {% if active_session.is_stale %}
+        <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 12px; color: #90a4ae;">
+                {{ active_session.start_time_ny }} → {{ active_session.end_time_ny }} · Session ended by shutdown/restart
+            </span>
+            <button onclick="finalizeSession('{{ active_session.session_id }}')"
+                    style="background: #1976d2; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px;">
+                Save to History
+            </button>
+        </div>
+        {% else %}
         <div style="margin-top: 12px; font-size: 12px; color: #90a4ae;">
             Started: {{ active_session.start_time_ny }} · Session will be saved when USB-C is connected
         </div>
+        {% endif %}
     </div>
     {% endif %}
 
@@ -1497,6 +1598,25 @@ BATTERY_HISTORY_HTML = """
         {% endif %}
     </div>
     {% endif %}
+
+    <script>
+    function finalizeSession(sessionId) {
+        fetch('/api/battery/finalize', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_id: sessionId})
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(e => alert('Error: ' + e));
+    }
+    </script>
 </body>
 </html>
 """
