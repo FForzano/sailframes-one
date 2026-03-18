@@ -53,14 +53,14 @@ def load_config():
     sys.exit(1)
 
 
-# Calypso Mini BLE UUIDs
-# These are the standard Calypso BLE service and characteristic UUIDs.
-# The wind data characteristic sends binary packets with speed and direction.
-CALYPSO_SERVICE_UUID = "0000a000-0000-1000-8000-00805f9b34fb"
-CALYPSO_WIND_CHAR_UUID = "0000a001-0000-1000-8000-00805f9b34fb"
+# Calypso Ultrasonic Portable Mini BLE UUIDs
+# Uses standard Bluetooth Environmental Sensing Service (0x181a)
+WIND_SPEED_CHAR_UUID = "00002a72-0000-1000-8000-00805f9b34fb"      # Apparent Wind Speed
+WIND_DIRECTION_CHAR_UUID = "00002a73-0000-1000-8000-00805f9b34fb"  # Apparent Wind Direction
+BATTERY_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"         # Battery Level
 
-# Alternative: some Calypso firmware versions use these UUIDs
-CALYPSO_ALT_SERVICE_UUID = "00001800-0000-1000-8000-00805f9b34fb"
+# Nordic UART Service (alternative data stream - NMEA format)
+UART_RX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 
 
 def get_data_dir(config):
@@ -202,6 +202,16 @@ async def run_async(config):
     csv_file, writer = create_csv_writer(data_dir)
     rows_written = 0
 
+    # Current wind state (updated by separate notifications)
+    wind_state = {
+        'speed_mps': 0.0,
+        'speed_knots': 0.0,
+        'angle_deg': 0,
+        'battery': None,
+        'temperature': None,
+    }
+    last_write = 0
+
     while running:
         # Find sensor
         device = await scan_for_calypso(config)
@@ -213,44 +223,72 @@ async def run_async(config):
         logger.info(f"Connecting to {device.name} ({device.address})")
 
         try:
-            async with BleakClient(device.address, timeout=20) as client:
+            async with BleakClient(device.address, timeout=30) as client:
                 logger.info("BLE connected")
                 device_name = device.name
                 device_address = device.address
 
-                # Define notification handler
-                def wind_callback(sender, data):
-                    nonlocal rows_written, csv_file, writer, data_dir
+                # Wind speed notification handler (uint16, 0.01 m/s resolution)
+                def speed_callback(sender, data):
+                    nonlocal last_write, rows_written, csv_file, writer, data_dir
+                    if len(data) >= 2:
+                        raw = struct.unpack('<H', data[0:2])[0]
+                        wind_state['speed_mps'] = raw / 100.0
+                        wind_state['speed_knots'] = wind_state['speed_mps'] * 1.94384
+                        write_wind_data()
 
-                    parsed = parse_calypso_data(data)
-                    if parsed is None:
+                # Wind direction notification handler (uint16, 0.01 degree resolution)
+                def direction_callback(sender, data):
+                    if len(data) >= 2:
+                        raw = struct.unpack('<H', data[0:2])[0]
+                        wind_state['angle_deg'] = int(raw / 100.0)
+
+                # Battery notification handler (uint8, percent)
+                def battery_callback(sender, data):
+                    if len(data) >= 1:
+                        wind_state['battery'] = data[0]
+
+                def write_wind_data():
+                    nonlocal last_write, rows_written, csv_file, writer, data_dir
+                    now = time.time()
+                    # Write at most once per second
+                    if now - last_write < 1.0:
                         return
+                    last_write = now
 
                     # Update status file for dashboard
-                    update_wind_status(parsed, device_name, device_address, connected=True)
+                    update_wind_status(wind_state, device_name, device_address, connected=True)
 
                     utc_now = datetime.now(timezone.utc).isoformat()
                     writer.writerow([
                         utc_now,
-                        parsed['speed_knots'],
-                        parsed['speed_mps'],
-                        parsed['angle_deg'],
-                        parsed['battery'] or '',
-                        parsed['temperature'] or '',
+                        round(wind_state['speed_knots'], 2),
+                        round(wind_state['speed_mps'], 2),
+                        wind_state['angle_deg'],
+                        wind_state['battery'] or '',
+                        wind_state['temperature'] or '',
                     ])
                     rows_written += 1
 
                     if rows_written % 60 == 0:
                         csv_file.flush()
-                        logger.debug(
-                            f"AWS={parsed['speed_knots']:.1f}kn "
-                            f"AWA={parsed['angle_deg']}° "
-                            f"Batt={parsed['battery']}%"
+                        logger.info(
+                            f"Wind: {wind_state['speed_knots']:.1f}kn @ {wind_state['angle_deg']}° "
+                            f"Batt={wind_state['battery']}%"
                         )
 
-                # Subscribe to wind data notifications
-                await client.start_notify(CALYPSO_WIND_CHAR_UUID, wind_callback)
-                logger.info("Subscribed to wind data notifications")
+                # Subscribe to all wind-related notifications
+                await client.start_notify(WIND_SPEED_CHAR_UUID, speed_callback)
+                logger.info("Subscribed to wind speed")
+                await client.start_notify(WIND_DIRECTION_CHAR_UUID, direction_callback)
+                logger.info("Subscribed to wind direction")
+                try:
+                    await client.start_notify(BATTERY_CHAR_UUID, battery_callback)
+                    logger.info("Subscribed to battery")
+                except Exception:
+                    logger.debug("Battery notifications not available")
+
+                logger.info("Wind sensor connected and streaming")
 
                 # Stay connected until disconnected or shutdown
                 while running and client.is_connected:

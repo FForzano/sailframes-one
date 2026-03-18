@@ -23,11 +23,12 @@ async def scan():
     calypso_found = None
     print(f"Found {len(devices)} BLE devices:\n")
 
-    for d in sorted(devices, key=lambda x: x.rssi, reverse=True):
+    for d in devices:
         name = d.name or "Unknown"
         is_calypso = 'calypso' in name.lower() or 'ultrasonic' in name.lower()
-        marker = " ← CALYPSO" if is_calypso else ""
-        print(f"  {d.address}  RSSI={d.rssi:4d}  {name}{marker}")
+        marker = " ← WIND SENSOR" if is_calypso else ""
+        rssi = getattr(d, 'rssi', None) or '?'
+        print(f"  {d.address}  RSSI={rssi}  {name}{marker}")
         if is_calypso:
             calypso_found = d
 
@@ -49,28 +50,35 @@ async def scan():
                         props = ','.join(char.properties)
                         print(f"      {char.uuid} [{props}]")
 
-                # Try to read wind data
-                print(f"\n  Listening for wind data (10 seconds)...")
-                data_received = []
+                # Find all notify-capable characteristics
+                notify_chars = []
+                for service in client.services:
+                    for char in service.characteristics:
+                        if 'notify' in char.properties:
+                            notify_chars.append(char)
 
-                def callback(sender, data):
-                    data_received.append(data)
-                    print(f"    Received: {data.hex()} ({len(data)} bytes)")
+                print(f"\n  Found {len(notify_chars)} notify-capable characteristic(s)")
 
-                try:
-                    await client.start_notify(CALYPSO_WIND_CHAR_UUID, callback)
-                    await asyncio.sleep(10)
-                    await client.stop_notify(CALYPSO_WIND_CHAR_UUID)
-                except Exception as e:
-                    print(f"    Could not subscribe to wind data: {e}")
-                    print(f"    The UUID may differ on your firmware version.")
-                    print(f"    Check the service list above for the correct characteristic.")
+                # Try to read wind data from each notify characteristic
+                for char in notify_chars:
+                    print(f"\n  Trying {char.uuid}...")
+                    data_received = []
 
-                if data_received:
-                    print(f"\n  ✓ Wind data flowing! Received {len(data_received)} packets.")
-                else:
-                    print(f"\n  ✗ Connected but no wind data received.")
-                    print(f"    Make sure the Calypso is powered on and in BLE mode.")
+                    def callback(sender, data):
+                        data_received.append(data)
+                        print(f"    Received: {data.hex()} ({len(data)} bytes)")
+
+                    try:
+                        await client.start_notify(char.uuid, callback)
+                        await asyncio.sleep(5)
+                        await client.stop_notify(char.uuid)
+
+                        if data_received:
+                            print(f"    ✓ Got {len(data_received)} packets from {char.uuid}")
+                        else:
+                            print(f"    No data from {char.uuid}")
+                    except Exception as e:
+                        print(f"    Error: {e}")
 
         except Exception as e:
             print(f"  ✗ Connection failed: {e}")
