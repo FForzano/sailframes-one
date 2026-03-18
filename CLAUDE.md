@@ -1,0 +1,233 @@
+# SailFrames — Sailboat Racing Data Logger
+## Project Context for Claude Code
+
+---
+
+## Project Overview
+
+**SailFrames** is an open-source sailboat racing data logger and analytics platform.
+- **License:** Apache 2.0
+- **GitHub org:** github.com/sailframes
+- **Main repo:** github.com/sailframes/sailframes
+- **Domain:** sailframes.com (registered via AWS)
+- **Cloud:** AWS
+- **Fleet:** 6 devices — Sonar 23 and J/80 class boats, Boston Harbor
+
+The system captures GPS, IMU, wind, pressure, and camera data during races,
+syncs to AWS after each session, and provides web-based race analysis and replay.
+
+---
+
+## Hardware Stack (Per Device)
+
+| Component | Part | Interface | Notes |
+|---|---|---|---|
+| SBC | Raspberry Pi 5 | — | Primary compute |
+| GPS | u-blox ZED-F9P | USB (preferred) or UART | RTK-capable, PointPerfect PPP-RTK ~$5-8/mo, ~10cm accuracy |
+| IMU | GY-BNO08X (BNO085) | I2C @ 0x4A | 9DOF AHRS, 400kHz I2C required |
+| Wind | Calypso Ultrasonic Portable Mini | BLE 5.1 | Wireless only, open-source protocol, 1Hz, IPX8 |
+| Pressure | Adafruit DPS310 | I2C @ 0x77 (STEMMA QT) | Needs Gore-Tex vent (Amphenol LTW VENT-PS1) in sealed enclosure |
+| Camera | Pi Camera 3 Wide (IMX708) | CSI (22-pin MIPI) | Requires Pi 5 adapter cable |
+| UPS/Battery | PiSugar 3 Plus | I2C @ 0x57/0x68 (pogo pins) | 21700 cells, Pi 5 confirmed compatible |
+| Display | 1602 LCD + PCF8574T I2C backpack | I2C @ 0x27 | 5V VCC, I2C at 3.3V |
+| Storage | SanDisk Extreme 128GB microSD (A2) | — | Preferred over PNY 256GB A1 for OS |
+
+**Future / Considering:**
+- OAK-D Pro Wide — 3D sail shape analysis (adds ~2-4W power draw)
+
+---
+
+## I2C Address Map (No Conflicts)
+
+| Device | Address |
+|---|---|
+| BNO085 IMU | 0x4A |
+| DPS310 Pressure | 0x77 |
+| PiSugar Battery | 0x57 |
+| PiSugar RTC | 0x68 |
+| LCD Display | 0x27 |
+
+Verify all devices after wiring:
+```bash
+sudo i2cdetect -y 1
+# Expected: 0x27, 0x4a, 0x57, 0x68, 0x77
+```
+
+---
+
+## OS & Software Environment
+
+- **OS:** Raspberry Pi OS Bookworm (64-bit)
+- **Python:** 3.11+, async preferred
+- **Config file:** `/boot/firmware/config.txt` (Bookworm location)
+- **Camera stack:** `rpicam-*` commands (libcamera is deprecated on Bookworm)
+
+### Required I2C config (`/boot/firmware/config.txt`)
+```ini
+dtparam=i2c_arm=on
+dtparam=i2c_arm_baudrate=400000   # Required for BNO085 clock stretching fix
+```
+
+### Key Python Libraries
+```bash
+pip install adafruit-circuitpython-bno08x --break-system-packages
+pip install adafruit-circuitpython-dps310 --break-system-packages
+pip install bleak              # BLE for Calypso wind sensor
+pip install pyserial           # ZED-F9P UART fallback
+```
+
+---
+
+## Sensor Wiring Summary
+
+### BNO085 (GY-BNO08X breakout)
+```
+VCC  → 3.3V
+GND  → GND
+SCL  → SCL1 (GPIO3, Pin 5)
+SDA  → SDA1 (GPIO2, Pin 3)
+ADO  → unconnected  (I2C addr 0x4A)
+CS   → unconnected  (I2C mode)
+PS0  → unconnected
+PS1  → unconnected
+```
+
+### DPS310 (Adafruit breakout)
+```
+VIN  → 3.3V
+GND  → GND
+SCL  → SCL1 (shared bus)
+SDA  → SDA1 (shared bus)
+SDO  → unconnected (addr 0x77)
+CS   → unconnected
+```
+Connect via STEMMA QT cable: Black=GND, Red=3.3V, Blue=SDA, Yellow=SCL
+
+### 1602 LCD (with PCF8574T I2C backpack)
+```
+VCC  → 5V  ⚠️ (needs 5V, not 3.3V)
+GND  → GND
+SDA  → SDA1 (shared bus)
+SCL  → SCL1 (shared bus)
+```
+
+### ZED-F9P GPS
+Preferred: USB → any Pi 5 USB port → `/dev/ttyACM0`
+Fallback UART: TX→GPIO15(RX), RX→GPIO14(TX)
+
+### Calypso Wind Sensor
+BLE only — no wires. Pi 5 built-in Bluetooth.
+- BLE 5.1, open-source protocol
+- Hardware open source: contact info@calypsoinstruments.com
+- 1Hz sample rate, apparent wind direction + speed
+- Must orient bow-mark toward bow when installing
+
+---
+
+## Pi Camera 3 Wide
+
+- Sensor: IMX708, 4608×2592, 10-bit RGGB
+- Requires **22-pin Pi 5 adapter cable** (not the stock 15-pin cable)
+- Detect: `rpicam-hello --list-cameras`
+- Expected output: `imx708_wide [4608x2592]`
+- Config override if not autodetected: `dtoverlay=imx708,cam0` in config.txt
+
+---
+
+## Power Budget (Approximate)
+
+| Component | Draw |
+|---|---|
+| Pi 5 (typical load) | 3–5W |
+| ZED-F9P | ~0.5W |
+| Camera 3 Wide (active) | ~1–2W |
+| BNO085 | negligible |
+| DPS310 | negligible |
+| Wi-Fi AP mode | +0.1–0.2W |
+| OAK-D Pro Wide (if added) | +2–4W |
+| **Total (no OAK-D)** | **~5–7W** |
+
+PiSugar 3 Plus with 21700 cells (~18.5Wh/cell):
+- 1 cell: ~2.5–3.5 hours
+- 2 cells: ~5–7 hours (covers typical Boston Harbor race)
+
+**Power saving tips:**
+- Duty-cycle camera (burst recording on maneuver detection)
+- Disable HDMI: add `hdmi_blanking=2` to config.txt
+- Record raw video, do CV/ML analysis in AWS post-race
+- Target 1080p/15fps minimum instead of 4K
+
+---
+
+## Networking & Dashboard
+
+- Pi 5 runs as **Wi-Fi Access Point** (hostapd) during races
+- Dashboard served as lightweight web app (FastAPI or Flask + WebSocket)
+- Crew connects via browser — no app install required
+- Each boat = isolated network, no inter-boat interference
+- Post-race: sync to AWS S3
+
+---
+
+## Enclosure
+
+- **IP67** sealed enclosure
+- Daily install/remove on boat — no permanent cables
+- DPS310 requires Gore-Tex pressure vent (Amphenol LTW VENT-PS1, ~$2-5)
+  to allow pressure equalization while maintaining waterproofing
+- Mast mounting: RAM Mounts tube clamp system (RAM-B-231ZU or similar)
+
+---
+
+## Known Issues & Gotchas
+
+1. **BNO085 I2C clock stretching** — must set baudrate=400000 in config.txt.
+   Default 100kHz causes intermittent read errors. 400kHz is the fix (not slower).
+
+2. **Pi 4 vs Pi 5** — project uses Pi 5. Pi 4 images do NOT boot on Pi 5.
+   Reflash with Pi Imager selecting Pi 5 as target device.
+
+3. **Pi 4 Rev 1.1 USB-C bug** — older Pi 4 (Rev 1.1, 2018) requires
+   non-e-marked USB-C cable for bench power. Not relevant for Pi 5.
+
+4. **Camera cable** — Pi Camera 3 Wide ships with 15-pin cable.
+   Pi 5 requires 22-pin adapter cable. Must swap before connecting.
+
+5. **DPS310 in sealed enclosure** — without a pressure vent, the sensor
+   reads internal enclosure pressure, not ambient. Gore-Tex vent is required.
+
+6. **Calypso wind sensor BLE** — only one device can connect at a time.
+   Pi 5 BLE client will claim the connection; disconnect other devices first.
+
+7. **LCD needs 5V** — unlike other sensors (3.3V), the 1602 LCD VCC must
+   connect to 5V rail. I2C data lines are safe at 3.3V via PCF8574T.
+
+---
+
+## Project Branding History
+- Originally named **TrimLog** (trimlog.com taken)
+- Renamed to **SailFrames** — global find-and-replace done across all 18 files
+- Package: sailframes-v1.tar.gz
+
+---
+
+## Competitive Landscape / Related Work
+- ComVis-Sail (TU Delft, 2022) — CV-based sail analysis
+- VSPARS — commercial sail shape system
+- Njord Analytics, Kinetix AI, kTool, Fastrrr — commercial competitors
+- Anemomind, Veetr — open-source sailing analytics
+- Fastrrr DinghyEdition: ESP32 + u-blox NEO-M8N + ICM-20948 + MicroSD
+  (simpler stack than SailFrames, no camera/cloud)
+
+---
+
+## Weather Data Integration
+- GOES-16/19 imagery on AWS S3 (`s3://noaa-goes16/`, `s3://noaa-goes19/`)
+- Use `goes2go` Python library for easy access
+- Boston NWS office (BOX) provides regional GOES crops
+- Useful layers: visible (sea breeze), water vapor, GeoColor composite
+- Can overlay GPS tracks on GOES imagery for post-race analysis
+
+---
+
+*Last updated: March 2026 — generated from Claude.ai project conversations*

@@ -54,13 +54,18 @@ def load_config():
 
 
 # Calypso Ultrasonic Portable Mini BLE UUIDs
-# Uses standard Bluetooth Environmental Sensing Service (0x181a)
+# Standard Bluetooth Environmental Sensing Service (0x181a)
 WIND_SPEED_CHAR_UUID = "00002a72-0000-1000-8000-00805f9b34fb"      # Apparent Wind Speed
 WIND_DIRECTION_CHAR_UUID = "00002a73-0000-1000-8000-00805f9b34fb"  # Apparent Wind Direction
 BATTERY_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"         # Battery Level
 
-# Nordic UART Service (alternative data stream - NMEA format)
-UART_RX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+# Calypso custom characteristics (under service 0x180d)
+COMPASS_CHAR_UUID = "0000a001-0000-1000-8000-00805f9b34fb"         # Compass Heading (degrees)
+TEMPERATURE_CHAR_UUID = "0000a002-0000-1000-8000-00805f9b34fb"     # Temperature (°C)
+ROLL_CHAR_UUID = "0000a003-0000-1000-8000-00805f9b34fb"            # Roll angle (degrees)
+PITCH_CHAR_UUID = "0000a007-0000-1000-8000-00805f9b34fb"           # Pitch angle (degrees)
+COMPASS_CAL_CHAR_UUID = "0000a008-0000-1000-8000-00805f9b34fb"     # Compass calibration status
+RATE_OF_TURN_CHAR_UUID = "0000a009-0000-1000-8000-00805f9b34fb"    # Rate of turn (deg/s)
 
 
 def get_data_dir(config):
@@ -78,11 +83,16 @@ def create_csv_writer(data_dir):
     writer = csv.writer(f)
     writer.writerow([
         'utc_time',
-        'apparent_wind_speed_knots',   # Apparent wind speed
-        'apparent_wind_speed_mps',     # Apparent wind speed in m/s
-        'apparent_wind_angle_deg',     # Apparent wind angle (0-360, 0=bow)
-        'battery_percent',             # Sensor battery level (if available)
-        'temperature_c',               # Sensor temperature (if available)
+        'apparent_wind_speed_knots',
+        'apparent_wind_speed_mps',
+        'apparent_wind_angle_deg',
+        'compass_heading_deg',
+        'temperature_c',
+        'roll_deg',
+        'pitch_deg',
+        'rate_of_turn_deg_s',
+        'compass_cal_status',
+        'battery_percent',
     ])
     logger.info(f"Logging to {filepath}")
     return f, writer
@@ -99,8 +109,13 @@ def update_wind_status(parsed, device_name=None, device_address=None, connected=
             'speed_knots': parsed.get('speed_knots') if parsed else None,
             'speed_mps': parsed.get('speed_mps') if parsed else None,
             'angle_deg': parsed.get('angle_deg') if parsed else None,
-            'battery': parsed.get('battery') if parsed else None,
+            'compass_deg': parsed.get('compass_deg') if parsed else None,
             'temperature': parsed.get('temperature') if parsed else None,
+            'roll_deg': parsed.get('roll_deg') if parsed else None,
+            'pitch_deg': parsed.get('pitch_deg') if parsed else None,
+            'rate_of_turn': parsed.get('rate_of_turn') if parsed else None,
+            'compass_cal': parsed.get('compass_cal') if parsed else None,
+            'battery': parsed.get('battery') if parsed else None,
         }
         with open(WIND_STATUS_FILE, 'w') as f:
             json.dump(status, f)
@@ -207,8 +222,13 @@ async def run_async(config):
         'speed_mps': 0.0,
         'speed_knots': 0.0,
         'angle_deg': 0,
-        'battery': None,
+        'compass_deg': None,
         'temperature': None,
+        'roll_deg': None,
+        'pitch_deg': None,
+        'rate_of_turn': None,
+        'compass_cal': None,
+        'battery': None,
     }
     last_write = 0
 
@@ -248,6 +268,44 @@ async def run_async(config):
                     if len(data) >= 1:
                         wind_state['battery'] = data[0]
 
+                # Compass heading handler
+                def compass_callback(sender, data):
+                    if len(data) >= 2:
+                        raw = struct.unpack('<H', data[0:2])[0]
+                        wind_state['compass_deg'] = raw / 10.0  # 0.1 degree resolution
+
+                # Temperature handler (signed int8 or int16)
+                def temperature_callback(sender, data):
+                    if len(data) >= 1:
+                        if len(data) >= 2:
+                            raw = struct.unpack('<h', data[0:2])[0]
+                            wind_state['temperature'] = raw / 10.0
+                        else:
+                            wind_state['temperature'] = struct.unpack('b', data[0:1])[0]
+
+                # Roll handler
+                def roll_callback(sender, data):
+                    if len(data) >= 2:
+                        raw = struct.unpack('<h', data[0:2])[0]
+                        wind_state['roll_deg'] = raw / 10.0
+
+                # Pitch handler
+                def pitch_callback(sender, data):
+                    if len(data) >= 2:
+                        raw = struct.unpack('<h', data[0:2])[0]
+                        wind_state['pitch_deg'] = raw / 10.0
+
+                # Rate of turn handler
+                def rot_callback(sender, data):
+                    if len(data) >= 2:
+                        raw = struct.unpack('<h', data[0:2])[0]
+                        wind_state['rate_of_turn'] = raw / 10.0
+
+                # Compass calibration handler
+                def compass_cal_callback(sender, data):
+                    if len(data) >= 1:
+                        wind_state['compass_cal'] = data[0]
+
                 def write_wind_data():
                     nonlocal last_write, rows_written, csv_file, writer, data_dir
                     now = time.time()
@@ -265,8 +323,13 @@ async def run_async(config):
                         round(wind_state['speed_knots'], 2),
                         round(wind_state['speed_mps'], 2),
                         wind_state['angle_deg'],
-                        wind_state['battery'] or '',
-                        wind_state['temperature'] or '',
+                        wind_state['compass_deg'] if wind_state['compass_deg'] is not None else '',
+                        wind_state['temperature'] if wind_state['temperature'] is not None else '',
+                        wind_state['roll_deg'] if wind_state['roll_deg'] is not None else '',
+                        wind_state['pitch_deg'] if wind_state['pitch_deg'] is not None else '',
+                        wind_state['rate_of_turn'] if wind_state['rate_of_turn'] is not None else '',
+                        wind_state['compass_cal'] if wind_state['compass_cal'] is not None else '',
+                        wind_state['battery'] if wind_state['battery'] is not None else '',
                     ])
                     rows_written += 1
 
@@ -274,19 +337,38 @@ async def run_async(config):
                         csv_file.flush()
                         logger.info(
                             f"Wind: {wind_state['speed_knots']:.1f}kn @ {wind_state['angle_deg']}° "
+                            f"Hdg={wind_state['compass_deg']}° Temp={wind_state['temperature']}°C "
                             f"Batt={wind_state['battery']}%"
                         )
 
-                # Subscribe to all wind-related notifications
+                # Subscribe to standard BLE characteristics
                 await client.start_notify(WIND_SPEED_CHAR_UUID, speed_callback)
                 logger.info("Subscribed to wind speed")
                 await client.start_notify(WIND_DIRECTION_CHAR_UUID, direction_callback)
                 logger.info("Subscribed to wind direction")
-                try:
-                    await client.start_notify(BATTERY_CHAR_UUID, battery_callback)
-                    logger.info("Subscribed to battery")
-                except Exception:
-                    logger.debug("Battery notifications not available")
+
+                # Subscribe to optional characteristics (may not all be available)
+                optional_subs = [
+                    (BATTERY_CHAR_UUID, battery_callback, "battery"),
+                    (COMPASS_CHAR_UUID, compass_callback, "compass"),
+                    (TEMPERATURE_CHAR_UUID, temperature_callback, "temperature"),
+                    (ROLL_CHAR_UUID, roll_callback, "roll"),
+                    (PITCH_CHAR_UUID, pitch_callback, "pitch"),
+                    (RATE_OF_TURN_CHAR_UUID, rot_callback, "rate of turn"),
+                    (COMPASS_CAL_CHAR_UUID, compass_cal_callback, "compass cal"),
+                ]
+                for uuid, callback, name in optional_subs:
+                    try:
+                        await client.start_notify(uuid, callback)
+                        logger.info(f"Subscribed to {name}")
+                    except Exception:
+                        # Try reading instead of notifying
+                        try:
+                            data = await client.read_gatt_char(uuid)
+                            callback(None, data)
+                            logger.info(f"Read {name}: {data.hex()}")
+                        except Exception:
+                            logger.debug(f"{name} not available")
 
                 logger.info("Wind sensor connected and streaming")
 

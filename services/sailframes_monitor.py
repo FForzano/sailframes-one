@@ -533,16 +533,46 @@ DASHBOARD_HTML = """
                 <div style="font-size: 11px; color: #78909c;">APPARENT WIND ANGLE</div>
                 <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ state.wind.angle_deg or 0 }}°</div>
             </div>
+            {% if state.wind.compass_deg is not none %}
+            <div>
+                <div style="font-size: 11px; color: #78909c;">COMPASS HEADING</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.compass_deg) }}°</div>
+            </div>
+            {% endif %}
             {% if state.wind.temperature is not none %}
             <div>
-                <div style="font-size: 11px; color: #78909c;">SENSOR TEMP</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ state.wind.temperature }}°C</div>
+                <div style="font-size: 11px; color: #78909c;">TEMPERATURE</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.temperature) }}°C</div>
+            </div>
+            {% endif %}
+            {% if state.wind.roll_deg is not none %}
+            <div>
+                <div style="font-size: 11px; color: #78909c;">ROLL</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.roll_deg) }}°</div>
+            </div>
+            {% endif %}
+            {% if state.wind.pitch_deg is not none %}
+            <div>
+                <div style="font-size: 11px; color: #78909c;">PITCH</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.pitch_deg) }}°</div>
+            </div>
+            {% endif %}
+            {% if state.wind.rate_of_turn is not none %}
+            <div>
+                <div style="font-size: 11px; color: #78909c;">RATE OF TURN</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.rate_of_turn) }}°/s</div>
             </div>
             {% endif %}
             {% if state.wind.battery is not none %}
             <div>
-                <div style="font-size: 11px; color: #78909c;">SENSOR BATTERY</div>
+                <div style="font-size: 11px; color: #78909c;">BATTERY</div>
                 <div style="font-size: 14px; font-weight: 600;">{{ state.wind.battery }}%</div>
+            </div>
+            {% endif %}
+            {% if state.wind.compass_cal is not none %}
+            <div>
+                <div style="font-size: 11px; color: #78909c;">COMPASS CAL</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.wind.compass_cal }}</div>
             </div>
             {% endif %}
         </div>
