@@ -9,6 +9,7 @@ Triggers clean shutdown on low battery.
 import os
 import sys
 import csv
+import json
 import time
 import signal
 import logging
@@ -190,6 +191,28 @@ def check_service_status(service_name):
         return False
 
 
+def get_wind_status():
+    """Read current wind data from status file written by wind service."""
+    status_file = Path('/tmp/sailframes-wind-status.json')
+    try:
+        if not status_file.exists():
+            return None
+
+        with open(status_file, 'r') as f:
+            data = json.load(f)
+
+        # Check if data is stale (older than 10 seconds)
+        if data.get('timestamp'):
+            ts = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age > 10:
+                data['connected'] = False
+
+        return data
+    except Exception:
+        return None
+
+
 def get_latest_gps():
     """Get latest GPS data from most recent CSV file with detailed metrics."""
     try:
@@ -366,6 +389,7 @@ def monitor_loop(config):
         system_state['battery'] = get_battery_info()
         system_state['disk'] = get_disk_usage(data_mount)
         system_state['gps'] = get_latest_gps() or {}
+        system_state['wind'] = get_wind_status() or {}
         system_state['uptime_sec'] = int(time.monotonic())
         system_state['last_update'] = datetime.now(timezone.utc).isoformat()
 
@@ -496,6 +520,57 @@ DASHBOARD_HTML = """
     </div>
     {% endif %}
 
+    <!-- Wind Section -->
+    {% if state.wind and state.wind.connected %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>💨 Wind — {{ state.wind.device_name or 'Connected' }}</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+            <div>
+                <div style="font-size: 11px; color: #78909c;">APPARENT WIND SPEED</div>
+                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.wind.speed_knots or 0) }} <span style="font-size: 14px; font-weight: 400;">kts</span></div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">APPARENT WIND ANGLE</div>
+                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ state.wind.angle_deg or 0 }}°</div>
+            </div>
+            {% if state.wind.temperature is not none %}
+            <div>
+                <div style="font-size: 11px; color: #78909c;">SENSOR TEMP</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.wind.temperature }}°C</div>
+            </div>
+            {% endif %}
+            {% if state.wind.battery is not none %}
+            <div>
+                <div style="font-size: 11px; color: #78909c;">SENSOR BATTERY</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ state.wind.battery }}%</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>💨 Wind</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="color: #78909c; font-style: italic;">
+                {% if state.services.wind %}
+                Searching for sensor...
+                {% else %}
+                Wind service not running
+                {% endif %}
+            </div>
+            <button onclick="scanBluetooth()" style="
+                background: #1976d2;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 13px;
+                cursor: pointer;
+            ">Scan Bluetooth</button>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card services" style="margin-top: 12px;">
         <h2>Sensor Services</h2>
         {% for name, active in state.services.items() %}
@@ -580,6 +655,19 @@ DASHBOARD_HTML = """
         </div>
     </div>
 
+    <!-- Bluetooth scan modal -->
+    <div id="bt-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #1a2a40; padding: 24px; border-radius: 8px; max-width: 400px; width: 90%;">
+            <div style="font-size: 18px; margin-bottom: 12px;">Bluetooth Wind Sensors</div>
+            <div id="bt-status" style="color: #78909c; font-size: 13px; margin-bottom: 12px;">Scanning for devices...</div>
+            <div id="bt-devices" style="max-height: 300px; overflow-y: auto;"></div>
+            <div style="display: flex; gap: 12px; justify-content: center; margin-top: 16px;">
+                <button onclick="closeBtModal()" style="background: #455a64; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; cursor: pointer;">Close</button>
+                <button id="bt-rescan" onclick="scanBluetooth()" style="background: #1976d2; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; cursor: pointer;">Rescan</button>
+            </div>
+        </div>
+    </div>
+
     <div class="updated">Updated {{ state.last_update }}</div>
     <div style="text-align: center; margin-top: 12px; display: flex; gap: 20px; justify-content: center;">
         <a href="/gps" style="color: #4fc3f7; font-size: 13px;">📍 GPS Details</a>
@@ -648,6 +736,65 @@ DASHBOARD_HTML = """
                 btn.disabled = false;
                 btn.textContent = 'Shutdown';
             });
+    }
+
+    function scanBluetooth() {
+        document.getElementById('bt-modal').style.display = 'block';
+        document.getElementById('bt-status').textContent = 'Scanning for devices (30s)...';
+        document.getElementById('bt-devices').innerHTML = '';
+        document.getElementById('bt-rescan').disabled = true;
+
+        fetch('/api/bluetooth/scan', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('bt-rescan').disabled = false;
+                if (data.devices && data.devices.length > 0) {
+                    document.getElementById('bt-status').textContent = 'Found ' + data.devices.length + ' device(s):';
+                    let html = '';
+                    data.devices.forEach(d => {
+                        const isWind = d.is_wind_sensor;
+                        const bg = isWind ? '#1a3a2a' : '#1a2a40';
+                        const border = isWind ? '1px solid #4caf50' : '1px solid #333';
+                        html += '<div style="padding: 10px; margin: 8px 0; background: ' + bg + '; border: ' + border + '; border-radius: 6px;">';
+                        html += '<div style="font-weight: 600;">' + (d.name || 'Unknown') + (isWind ? ' <span style="color: #4caf50;">✓ Wind</span>' : '') + '</div>';
+                        html += '<div style="font-size: 12px; color: #78909c;">' + d.address + ' · RSSI: ' + d.rssi + '</div>';
+                        if (isWind) {
+                            html += '<button onclick="pairWind(\'' + d.address + '\')" style="margin-top: 8px; background: #1976d2; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Set as Wind Sensor</button>';
+                        }
+                        html += '</div>';
+                    });
+                    document.getElementById('bt-devices').innerHTML = html;
+                } else {
+                    document.getElementById('bt-status').textContent = 'No devices found. Make sure sensor is on and nearby.';
+                }
+            })
+            .catch(e => {
+                document.getElementById('bt-rescan').disabled = false;
+                document.getElementById('bt-status').textContent = 'Scan error: ' + e;
+            });
+    }
+
+    function closeBtModal() {
+        document.getElementById('bt-modal').style.display = 'none';
+    }
+
+    function pairWind(address) {
+        fetch('/api/bluetooth/set-wind', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({address: address})
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert('Wind sensor MAC saved! Restart wind service to connect.');
+                closeBtModal();
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Failed to save'));
+            }
+        })
+        .catch(e => alert('Error: ' + e));
     }
     </script>
 </body>
@@ -2097,6 +2244,82 @@ def api_system_shutdown():
     except Exception as e:
         logger.error(f"Shutdown error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bluetooth/scan', methods=['POST'])
+def api_bluetooth_scan():
+    """Scan for Bluetooth LE devices."""
+    import asyncio
+    try:
+        from bleak import BleakScanner
+    except ImportError:
+        return jsonify({'success': False, 'error': 'bleak not installed'}), 500
+
+    async def do_scan():
+        devices = await BleakScanner.discover(timeout=15)
+        results = []
+        for d in devices:
+            name = d.name or ''
+            is_wind = 'calypso' in name.lower() or 'ultrasonic' in name.lower() or 'wind' in name.lower()
+            results.append({
+                'name': d.name,
+                'address': d.address,
+                'rssi': d.rssi if hasattr(d, 'rssi') else None,
+                'is_wind_sensor': is_wind,
+            })
+        # Sort: wind sensors first, then by signal strength
+        results.sort(key=lambda x: (not x['is_wind_sensor'], -(x['rssi'] or -100)))
+        return results
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        devices = loop.run_until_complete(do_scan())
+        loop.close()
+        return jsonify({'success': True, 'devices': devices})
+    except Exception as e:
+        logger.error(f"Bluetooth scan error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/bluetooth/set-wind', methods=['POST'])
+def api_bluetooth_set_wind():
+    """Save wind sensor MAC address to config."""
+    data = request.get_json() or {}
+    address = data.get('address')
+    if not address:
+        return jsonify({'success': False, 'error': 'address required'}), 400
+
+    # Update config file
+    config_path = '/etc/sailframes/sailframes.yaml'
+    if not os.path.exists(config_path):
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'sailframes.yaml')
+
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        config['wind']['ble_mac_address'] = address
+
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+
+        logger.info(f"Set wind sensor MAC to {address}")
+
+        # Restart wind service to pick up new MAC
+        subprocess.run(['sudo', 'systemctl', 'restart', 'sailframes-wind'],
+                      capture_output=True, timeout=10)
+
+        return jsonify({'success': True, 'address': address})
+    except Exception as e:
+        logger.error(f"Failed to save wind MAC: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/wind/status')
+def api_wind_status():
+    """Get current wind sensor status."""
+    return jsonify(get_wind_status() or {'connected': False})
 
 
 def run(config):

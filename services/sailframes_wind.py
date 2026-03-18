@@ -8,6 +8,7 @@ Parses wind speed and direction from NMEA-like BLE characteristics.
 import os
 import sys
 import csv
+import json
 import time
 import signal
 import struct
@@ -18,6 +19,9 @@ from pathlib import Path
 
 from bleak import BleakClient, BleakScanner
 import yaml
+
+# Shared status file for dashboard to read current wind data
+WIND_STATUS_FILE = Path('/tmp/sailframes-wind-status.json')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,17 +88,52 @@ def create_csv_writer(data_dir):
     return f, writer
 
 
+def update_wind_status(parsed, device_name=None, device_address=None, connected=True):
+    """Write current wind data to status file for dashboard."""
+    try:
+        status = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'connected': connected,
+            'device_name': device_name,
+            'device_address': device_address,
+            'speed_knots': parsed.get('speed_knots') if parsed else None,
+            'speed_mps': parsed.get('speed_mps') if parsed else None,
+            'angle_deg': parsed.get('angle_deg') if parsed else None,
+            'battery': parsed.get('battery') if parsed else None,
+            'temperature': parsed.get('temperature') if parsed else None,
+        }
+        with open(WIND_STATUS_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception as e:
+        logger.warning(f"Failed to update status file: {e}")
+
+
+def clear_wind_status():
+    """Clear status file when disconnected."""
+    try:
+        status = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'connected': False,
+            'device_name': None,
+            'device_address': None,
+        }
+        with open(WIND_STATUS_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception:
+        pass
+
+
 def parse_calypso_data(data):
     """
     Parse Calypso Mini BLE wind data packet.
-    
+
     The Calypso BLE protocol sends wind data as binary packets.
     Format varies by firmware version. Common format:
     - Byte 0-1: Wind speed (uint16, 0.01 m/s resolution)
     - Byte 2-3: Wind direction (uint16, degrees)
     - Byte 4: Battery level (uint8, percent)
     - Byte 5: Temperature (int8, Celsius)
-    
+
     Note: Verify against your specific Calypso firmware version.
     The open protocol documentation is available from Calypso.
     """
@@ -176,6 +215,8 @@ async def run_async(config):
         try:
             async with BleakClient(device.address, timeout=20) as client:
                 logger.info("BLE connected")
+                device_name = device.name
+                device_address = device.address
 
                 # Define notification handler
                 def wind_callback(sender, data):
@@ -184,6 +225,9 @@ async def run_async(config):
                     parsed = parse_calypso_data(data)
                     if parsed is None:
                         return
+
+                    # Update status file for dashboard
+                    update_wind_status(parsed, device_name, device_address, connected=True)
 
                     utc_now = datetime.now(timezone.utc).isoformat()
                     writer.writerow([
@@ -222,12 +266,14 @@ async def run_async(config):
 
         except Exception as e:
             logger.warning(f"BLE connection error: {e}")
+            clear_wind_status()
 
         if running:
             logger.info(f"Reconnecting in {reconnect_interval}s...")
             await asyncio.sleep(reconnect_interval)
 
     csv_file.close()
+    clear_wind_status()
     logger.info(f"Wind service stopped. {rows_written} rows written.")
 
 
