@@ -106,8 +106,11 @@ def get_battery_info():
         # Negative current = charging (USB powering Pi + charging battery)
         charging = current_ma < 0
 
-        # Estimate remaining/charging time (UPS HAT D has 2x 18650 ~5000mAh usable)
-        BATTERY_CAPACITY_MAH = 5000
+        # Estimate remaining/charging time (UPS HAT D has 2x 18650)
+        # Conservative estimate: 3000mAh usable (accounting for cutoff voltage and efficiency)
+        BATTERY_CAPACITY_MAH = 3000
+        # Minimum realistic current draw for Pi 5 with services running
+        MIN_DISCHARGE_MA = 200
         remaining_hours = None
         remaining_str = None
         empty_time = None
@@ -118,8 +121,11 @@ def get_battery_info():
         from datetime import timedelta
 
         if not charging and current_ma > 10:  # Discharging with meaningful current
+            # Use the higher of actual current or minimum realistic draw
+            # (low readings may indicate USB-C hybrid mode)
+            effective_current = max(current_ma, MIN_DISCHARGE_MA)
             remaining_mah = (percent / 100.0) * BATTERY_CAPACITY_MAH
-            remaining_hours = remaining_mah / current_ma
+            remaining_hours = remaining_mah / effective_current
             hours = int(remaining_hours)
             minutes = int((remaining_hours - hours) * 60)
             remaining_str = f"{hours}h {minutes}m"
