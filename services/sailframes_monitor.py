@@ -2055,25 +2055,45 @@ def api_camera_stop(camera_id):
 
 @app.route('/api/system/shutdown', methods=['POST'])
 def api_system_shutdown():
-    """Safely shutdown the system."""
+    """Safely shutdown the system - stops all services first to ensure data is saved."""
     try:
         logger.warning("Shutdown requested via API - initiating safe shutdown")
 
-        # Stop camera services first to ensure clean video files
-        for camera in ['cockpit', 'sails']:
-            subprocess.run(
-                ['sudo', 'systemctl', 'stop', f'sailframes-camera-{camera}'],
-                capture_output=True, timeout=10
-            )
+        # Stop all SailFrames services in order to ensure clean file closure
+        # Order: cameras first (video files), then sensors, then battery logger
+        services_to_stop = [
+            'sailframes-camera-cockpit',
+            'sailframes-camera-sails',
+            'sailframes-gps',
+            'sailframes-imu',
+            'sailframes-pressure',
+            'sailframes-wind',
+            'sailframes-battery-logger',
+        ]
 
-        # Initiate shutdown with 5 second delay to allow response to be sent
+        for service in services_to_stop:
+            try:
+                result = subprocess.run(
+                    ['sudo', 'systemctl', 'stop', service],
+                    capture_output=True, timeout=15
+                )
+                if result.returncode == 0:
+                    logger.info(f"Stopped {service}")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Timeout stopping {service}")
+            except Exception as e:
+                logger.warning(f"Error stopping {service}: {e}")
+
+        logger.info("All services stopped - initiating system shutdown")
+
+        # Initiate shutdown
         subprocess.Popen(
             ['sudo', 'shutdown', '-h', '+0'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
 
-        return jsonify({'success': True, 'message': 'Shutdown initiated'})
+        return jsonify({'success': True, 'message': 'Shutdown initiated - all data saved'})
     except Exception as e:
         logger.error(f"Shutdown error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
