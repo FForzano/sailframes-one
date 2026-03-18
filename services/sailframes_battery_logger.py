@@ -212,7 +212,7 @@ class BatterySession:
                 ])
 
     def end(self, end_percent, end_voltage):
-        """End the session and write summary."""
+        """End the session and write summary if meaningful."""
         self.end_time = datetime.now(timezone.utc)
         self.end_percent = end_percent
         self.end_voltage = end_voltage
@@ -220,6 +220,22 @@ class BatterySession:
         duration = self.end_time - self.start_time
         duration_mins = duration.total_seconds() / 60
         percent_used = self.start_percent - self.end_percent
+
+        # Skip sessions that are too short or didn't use meaningful power
+        # This filters out noise from USB-C current fluctuations
+        MIN_SAMPLES = 2  # At least 2 samples (~1 minute at 30s interval)
+        MIN_POWER_MWH = 1.0  # At least 1 mWh used
+
+        if self.sample_count < MIN_SAMPLES or self.total_power_mwh < MIN_POWER_MWH:
+            logger.info(f"Discarding short session {self.session_id}: "
+                       f"{self.sample_count} samples, {self.total_power_mwh:.1f} mWh")
+            # Clean up temp files for discarded session
+            try:
+                self.log_file.unlink(missing_ok=True)
+                self.process_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return None
 
         summary = {
             'session_id': self.session_id,
@@ -270,6 +286,11 @@ def run():
     time.sleep(1)
 
     last_charging = None
+    # Debounce counter - require multiple consecutive readings to change state
+    # This prevents false sessions from momentary current fluctuations
+    DEBOUNCE_COUNT = 3  # Require 3 consecutive readings (~1.5 min) to confirm state change
+    discharge_count = 0
+    charge_count = 0
 
     while running:
         battery = get_battery_info()
@@ -280,22 +301,38 @@ def run():
         system = get_system_stats()
         processes = get_top_processes()
 
-        # Detect charging state change
+        # Debounced charging state detection
+        if battery['charging']:
+            charge_count += 1
+            discharge_count = 0
+        else:
+            discharge_count += 1
+            charge_count = 0
+
+        # Detect charging state change with debouncing
         if last_charging is not None:
-            if last_charging and not battery['charging']:
-                # Started discharging - begin new session
+            if last_charging and discharge_count >= DEBOUNCE_COUNT:
+                # Confirmed discharging - begin new session
                 current_session = BatterySession(
                     datetime.now(timezone.utc),
                     battery['percent'],
                     battery['voltage']
                 )
-            elif not last_charging and battery['charging']:
-                # Started charging - end session
+                logger.info(f"Started discharge session at {battery['percent']}%")
+            elif not last_charging and charge_count >= DEBOUNCE_COUNT:
+                # Confirmed charging - end session
                 if current_session:
                     current_session.end(battery['percent'], battery['voltage'])
                     current_session = None
 
-        last_charging = battery['charging']
+        # Update last_charging only when state is confirmed
+        if charge_count >= DEBOUNCE_COUNT:
+            last_charging = True
+        elif discharge_count >= DEBOUNCE_COUNT:
+            last_charging = False
+        elif last_charging is None:
+            # Initial state - use current reading
+            last_charging = battery['charging']
 
         # Log if we're in a discharge session
         if current_session and not battery['charging']:
