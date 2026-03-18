@@ -545,6 +545,41 @@ DASHBOARD_HTML = """
         </div>
     </div>
 
+    <!-- Shutdown Button -->
+    <div class="card" style="margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h2 style="margin: 0;">System</h2>
+                <div style="font-size: 12px; color: #78909c; margin-top: 4px;">Uptime: {{ (state.uptime_sec // 3600) }}h {{ ((state.uptime_sec % 3600) // 60) }}m</div>
+            </div>
+            <button onclick="confirmShutdown()" style="
+                background: #c62828;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+            ">Shutdown</button>
+        </div>
+    </div>
+
+    <!-- Shutdown confirmation modal -->
+    <div id="shutdown-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #1a2a40; padding: 24px; border-radius: 8px; text-align: center; max-width: 320px;">
+            <div style="font-size: 18px; margin-bottom: 12px;">Shutdown SailFrames?</div>
+            <div style="color: #78909c; font-size: 13px; margin-bottom: 16px;">
+                All recordings will stop. You'll need physical access to power it back on.
+            </div>
+            <div id="shutdown-status" style="color: #4caf50; font-size: 14px; margin-bottom: 16px; display: none;"></div>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button onclick="closeShutdownModal()" style="background: #455a64; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; cursor: pointer;">Cancel</button>
+                <button id="shutdown-btn" onclick="doShutdown()" style="background: #c62828; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;">Shutdown</button>
+            </div>
+        </div>
+    </div>
+
     <div class="updated">Updated {{ state.last_update }}</div>
     <div style="text-align: center; margin-top: 12px; display: flex; gap: 20px; justify-content: center;">
         <a href="/gps" style="color: #4fc3f7; font-size: 13px;">📍 GPS Details</a>
@@ -575,6 +610,43 @@ DASHBOARD_HTML = """
             .catch(e => {
                 alert('Error: ' + e);
                 btn.disabled = false;
+            });
+    }
+
+    function confirmShutdown() {
+        document.getElementById('shutdown-modal').style.display = 'block';
+        document.getElementById('shutdown-status').style.display = 'none';
+        document.getElementById('shutdown-btn').disabled = false;
+    }
+
+    function closeShutdownModal() {
+        document.getElementById('shutdown-modal').style.display = 'none';
+    }
+
+    function doShutdown() {
+        const btn = document.getElementById('shutdown-btn');
+        const status = document.getElementById('shutdown-status');
+
+        btn.disabled = true;
+        btn.textContent = 'Shutting down...';
+
+        fetch('/api/system/shutdown', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    status.style.display = 'block';
+                    status.innerHTML = '✓ Shutdown initiated.<br>Safe to turn off in 10 seconds.';
+                    btn.style.display = 'none';
+                } else {
+                    alert('Error: ' + (data.error || 'Shutdown failed'));
+                    btn.disabled = false;
+                    btn.textContent = 'Shutdown';
+                }
+            })
+            .catch(e => {
+                alert('Error: ' + e);
+                btn.disabled = false;
+                btn.textContent = 'Shutdown';
             });
     }
     </script>
@@ -1771,6 +1843,32 @@ def api_camera_stop(camera_id):
         return jsonify({'success': success, 'error': result.stderr if not success else None})
     except Exception as e:
         logger.error(f"Camera {camera_id} stop error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/system/shutdown', methods=['POST'])
+def api_system_shutdown():
+    """Safely shutdown the system."""
+    try:
+        logger.warning("Shutdown requested via API - initiating safe shutdown")
+
+        # Stop camera services first to ensure clean video files
+        for camera in ['cockpit', 'sails']:
+            subprocess.run(
+                ['sudo', 'systemctl', 'stop', f'sailframes-camera-{camera}'],
+                capture_output=True, timeout=10
+            )
+
+        # Initiate shutdown with 5 second delay to allow response to be sent
+        subprocess.Popen(
+            ['sudo', 'shutdown', '-h', '+0'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        return jsonify({'success': True, 'message': 'Shutdown initiated'})
+    except Exception as e:
+        logger.error(f"Shutdown error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
