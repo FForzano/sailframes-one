@@ -106,11 +106,16 @@ def get_battery_info():
         # Negative current = charging (USB powering Pi + charging battery)
         charging = current_ma < 0
 
-        # Estimate remaining time (UPS HAT D has 2x 18650 ~5000mAh usable)
+        # Estimate remaining/charging time (UPS HAT D has 2x 18650 ~5000mAh usable)
         BATTERY_CAPACITY_MAH = 5000
         remaining_hours = None
         remaining_str = None
         empty_time = None
+        charge_hours = None
+        charge_str = None
+        full_time = None
+
+        from datetime import timedelta
 
         if not charging and current_ma > 10:  # Discharging with meaningful current
             remaining_mah = (percent / 100.0) * BATTERY_CAPACITY_MAH
@@ -120,9 +125,21 @@ def get_battery_info():
             remaining_str = f"{hours}h {minutes}m"
 
             # Calculate estimated empty time
-            from datetime import timedelta
             empty_dt = datetime.now() + timedelta(hours=remaining_hours)
             empty_time = empty_dt.strftime('%I:%M %p')
+
+        elif charging and current_ma < -10 and percent < 100:  # Charging with meaningful current
+            # current_ma is negative when charging, so use absolute value
+            charge_current = abs(current_ma)
+            remaining_to_full = ((100 - percent) / 100.0) * BATTERY_CAPACITY_MAH
+            charge_hours = remaining_to_full / charge_current
+            hours = int(charge_hours)
+            minutes = int((charge_hours - hours) * 60)
+            charge_str = f"{hours}h {minutes}m"
+
+            # Calculate estimated full time
+            full_dt = datetime.now() + timedelta(hours=charge_hours)
+            full_time = full_dt.strftime('%I:%M %p')
 
         return {
             'voltage': round(voltage, 2),
@@ -132,6 +149,9 @@ def get_battery_info():
             'remaining_hours': round(remaining_hours, 1) if remaining_hours else None,
             'remaining_str': remaining_str,
             'empty_time': empty_time,
+            'charge_hours': round(charge_hours, 1) if charge_hours else None,
+            'charge_str': charge_str,
+            'full_time': full_time,
         }
     except Exception as e:
         logger.debug(f"Battery read error: {e}")
@@ -349,7 +369,11 @@ def monitor_loop(config):
             'imu': check_service_status('sailframes-imu'),
             'pressure': check_service_status('sailframes-pressure'),
             'wind': check_service_status('sailframes-wind'),
-            'camera': check_service_status('sailframes-camera'),
+        }
+        # Track cameras separately for individual control
+        system_state['cameras'] = {
+            'cockpit': check_service_status('sailframes-camera-cockpit'),
+            'sails': check_service_status('sailframes-camera-sails'),
         }
 
         # Low battery shutdown - only if batteries are actually present
@@ -417,6 +441,8 @@ DASHBOARD_HTML = """
             <div class="sub">{{ state.battery.voltage or '—' }}V · {{ state.battery.current_ma or '—' }}mA · {% if state.battery.charging %}<span class="charging">Charging</span>{% else %}<span class="discharging">On Battery</span>{% endif %}</div>
             {% if state.battery.remaining_str and not state.battery.charging %}
             <div class="sub" style="margin-top: 4px; color: #ff9800;">~{{ state.battery.remaining_str }} remaining · empty ~{{ state.battery.empty_time }}</div>
+            {% elif state.battery.charge_str and state.battery.charging %}
+            <div class="sub" style="margin-top: 4px; color: #1976d2;">~{{ state.battery.charge_str }} to full · ready ~{{ state.battery.full_time }}</div>
             {% endif %}
         </div>
         <div class="card">
@@ -477,26 +503,39 @@ DASHBOARD_HTML = """
     <!-- Camera Control -->
     <div class="card" style="margin-top: 12px;">
         <h2>Camera Control</h2>
-        <div style="display: flex; align-items: center; gap: 16px;">
-            <div id="camera-status" style="font-size: 18px; font-weight: 600;">
-                {% if state.services.camera %}
-                <span style="color: #4caf50;">Recording</span>
-                {% else %}
-                <span style="color: #78909c;">Stopped</span>
-                {% endif %}
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+            <!-- Cockpit Camera -->
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 80px; font-size: 14px; font-weight: 600;">Cockpit</div>
+                <div style="flex: 1; font-size: 14px;">
+                    {% if state.cameras.cockpit %}
+                    <span style="color: #4caf50;">● Recording</span>
+                    {% else %}
+                    <span style="color: #78909c;">○ Stopped</span>
+                    {% endif %}
+                </div>
+                <button id="btn-cockpit" onclick="toggleCamera('cockpit')" style="
+                    background: {% if state.cameras.cockpit %}#c62828{% else %}#1976d2{% endif %};
+                    color: white; border: none; padding: 8px 16px; border-radius: 6px;
+                    font-size: 13px; font-weight: 600; cursor: pointer; min-width: 100px;
+                ">{% if state.cameras.cockpit %}Stop{% else %}Record{% endif %}</button>
             </div>
-            <button id="camera-toggle" onclick="toggleCamera()" style="
-                background: {% if state.services.camera %}#c62828{% else %}#1976d2{% endif %};
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-            ">
-                {% if state.services.camera %}Stop Recording{% else %}Start Recording{% endif %}
-            </button>
+            <!-- Sails Camera -->
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 80px; font-size: 14px; font-weight: 600;">Sails</div>
+                <div style="flex: 1; font-size: 14px;">
+                    {% if state.cameras.sails %}
+                    <span style="color: #4caf50;">● Recording</span>
+                    {% else %}
+                    <span style="color: #78909c;">○ Stopped</span>
+                    {% endif %}
+                </div>
+                <button id="btn-sails" onclick="toggleCamera('sails')" style="
+                    background: {% if state.cameras.sails %}#c62828{% else %}#1976d2{% endif %};
+                    color: white; border: none; padding: 8px 16px; border-radius: 6px;
+                    font-size: 13px; font-weight: 600; cursor: pointer; min-width: 100px;
+                ">{% if state.cameras.sails %}Stop{% else %}Record{% endif %}</button>
+            </div>
         </div>
     </div>
 
@@ -508,15 +547,15 @@ DASHBOARD_HTML = """
     </div>
 
     <script>
-    function toggleCamera() {
-        const btn = document.getElementById('camera-toggle');
-        const isRecording = btn.textContent.trim() === 'Stop Recording';
+    function toggleCamera(camera) {
+        const btn = document.getElementById('btn-' + camera);
+        const isRecording = btn.textContent.trim() === 'Stop';
         const action = isRecording ? 'stop' : 'start';
 
         btn.disabled = true;
         btn.textContent = isRecording ? 'Stopping...' : 'Starting...';
 
-        fetch('/api/camera/' + action, { method: 'POST' })
+        fetch('/api/camera/' + camera + '/' + action, { method: 'POST' })
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
@@ -524,7 +563,7 @@ DASHBOARD_HTML = """
                 } else {
                     alert('Error: ' + (data.error || 'Unknown error'));
                     btn.disabled = false;
-                    btn.textContent = isRecording ? 'Stop Recording' : 'Start Recording';
+                    btn.textContent = isRecording ? 'Stop' : 'Record';
                 }
             })
             .catch(e => {
@@ -1068,25 +1107,54 @@ def get_video_list(data_dir, date_filter=None):
         if not video_dir.exists():
             continue
 
-        for video_file in sorted(video_dir.glob('*.mp4'), reverse=True):
-            try:
-                stat = video_file.stat()
-                size_mb = stat.st_size / (1024 * 1024)
-                # Estimate duration: ~8 Mbps = ~1 MB/s
-                duration_sec = int(size_mb)
-                videos.append({
-                    'filename': video_file.name,
-                    'filepath': str(video_file.relative_to(data_path)),
-                    'date': date_dir.name,
-                    'size_mb': round(size_mb, 1),
-                    'size_bytes': stat.st_size,
-                    'duration_sec': duration_sec,
-                    'duration_str': f"{duration_sec // 60}:{duration_sec % 60:02d}",
-                    'created': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                })
-            except Exception:
-                pass
+        # Scan both camera subdirectories and root video directory (for old videos)
+        video_locations = [
+            (video_dir / 'cockpit', 'cockpit'),
+            (video_dir / 'sails', 'sails'),
+            (video_dir, None),  # Root for old videos (cockpit_*.mp4)
+        ]
 
+        for scan_dir, camera_id in video_locations:
+            if not scan_dir.exists():
+                continue
+
+            for video_file in scan_dir.glob('*.mp4'):
+                # Skip if this is the root dir and file is in a subdirectory
+                if camera_id is None and video_file.parent != video_dir:
+                    continue
+
+                try:
+                    stat = video_file.stat()
+                    size_mb = stat.st_size / (1024 * 1024)
+                    # Estimate duration: ~8 Mbps = ~1 MB/s
+                    duration_sec = int(size_mb)
+
+                    # Detect camera from filename if not in subdirectory
+                    detected_camera = camera_id
+                    if detected_camera is None:
+                        if video_file.name.startswith('cockpit_'):
+                            detected_camera = 'cockpit'
+                        elif video_file.name.startswith('sails_'):
+                            detected_camera = 'sails'
+                        else:
+                            detected_camera = 'unknown'
+
+                    videos.append({
+                        'filename': video_file.name,
+                        'filepath': str(video_file.relative_to(data_path)),
+                        'date': date_dir.name,
+                        'camera': detected_camera,
+                        'size_mb': round(size_mb, 1),
+                        'size_bytes': stat.st_size,
+                        'duration_sec': duration_sec,
+                        'duration_str': f"{duration_sec // 60}:{duration_sec % 60:02d}",
+                        'created': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    })
+                except Exception:
+                    pass
+
+    # Sort by created time descending
+    videos.sort(key=lambda x: x['created'], reverse=True)
     return videos
 
 
@@ -1381,7 +1449,10 @@ VIDEO_PAGE_HTML = """
             {% for v in videos %}
             <div class="video-item" id="video-{{ loop.index }}">
                 <div>
-                    <div class="video-name">{{ v.filename }}</div>
+                    <div class="video-name">
+                        <span style="display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-right: 8px; background: {% if v.camera == 'cockpit' %}#1976d2{% elif v.camera == 'sails' %}#00796b{% else %}#455a64{% endif %}; color: white;">{{ v.camera|upper }}</span>
+                        {{ v.filename }}
+                    </div>
                     <div class="video-meta">{{ v.date }} | {{ v.size_mb }}MB | ~{{ v.duration_str }}</div>
                 </div>
                 <div class="video-actions">
@@ -1651,41 +1722,49 @@ def api_video_delete_date():
     return jsonify({'success': True, 'deleted': deleted})
 
 
-@app.route('/api/camera/start', methods=['POST'])
-def api_camera_start():
+@app.route('/api/camera/<camera_id>/start', methods=['POST'])
+def api_camera_start(camera_id):
     """Start camera recording service."""
+    if camera_id not in ('cockpit', 'sails'):
+        return jsonify({'success': False, 'error': 'Invalid camera ID'}), 400
+
+    service_name = f'sailframes-camera-{camera_id}'
     try:
         result = subprocess.run(
-            ['sudo', 'systemctl', 'start', 'sailframes-camera'],
+            ['sudo', 'systemctl', 'start', service_name],
             capture_output=True, text=True, timeout=10
         )
         success = result.returncode == 0
         if success:
-            logger.info("Camera service started via API")
+            logger.info(f"Camera {camera_id} started via API")
         else:
-            logger.warning(f"Failed to start camera: {result.stderr}")
+            logger.warning(f"Failed to start camera {camera_id}: {result.stderr}")
         return jsonify({'success': success, 'error': result.stderr if not success else None})
     except Exception as e:
-        logger.error(f"Camera start error: {e}")
+        logger.error(f"Camera {camera_id} start error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/camera/stop', methods=['POST'])
-def api_camera_stop():
+@app.route('/api/camera/<camera_id>/stop', methods=['POST'])
+def api_camera_stop(camera_id):
     """Stop camera recording service."""
+    if camera_id not in ('cockpit', 'sails'):
+        return jsonify({'success': False, 'error': 'Invalid camera ID'}), 400
+
+    service_name = f'sailframes-camera-{camera_id}'
     try:
         result = subprocess.run(
-            ['sudo', 'systemctl', 'stop', 'sailframes-camera'],
+            ['sudo', 'systemctl', 'stop', service_name],
             capture_output=True, text=True, timeout=10
         )
         success = result.returncode == 0
         if success:
-            logger.info("Camera service stopped via API")
+            logger.info(f"Camera {camera_id} stopped via API")
         else:
-            logger.warning(f"Failed to stop camera: {result.stderr}")
+            logger.warning(f"Failed to stop camera {camera_id}: {result.stderr}")
         return jsonify({'success': success, 'error': result.stderr if not success else None})
     except Exception as e:
-        logger.error(f"Camera stop error: {e}")
+        logger.error(f"Camera {camera_id} stop error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

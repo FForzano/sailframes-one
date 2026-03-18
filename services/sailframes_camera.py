@@ -3,7 +3,11 @@
 SailFrames Camera Service
 Records 1080p/30fps video from Pi Camera Module 3 Wide.
 Segments video into configurable-length files.
-Optionally overlays GPS timestamp on each frame.
+Supports multiple cameras (cockpit, sails) via command line argument.
+
+Usage:
+    sailframes_camera.py cockpit   # Record from camera 0 (cockpit)
+    sailframes_camera.py sails     # Record from camera 1 (sails)
 """
 
 import os
@@ -11,6 +15,7 @@ import sys
 import time
 import signal
 import logging
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +23,15 @@ from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder, Quality
 from picamera2.outputs import FfmpegOutput
 import yaml
+
+# Camera ID to index mapping (Pi 5 has CSI-0 and CSI-1)
+CAMERA_MAP = {
+    'cockpit': 0,  # CSI-0 - cockpit camera
+    'sails': 1,    # CSI-1 - sails camera
+}
+
+# Will be set from command line argument
+CAMERA_ID = 'cockpit'
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,29 +63,32 @@ def load_config():
     sys.exit(1)
 
 
-def get_data_dir(config):
+def get_data_dir(config, camera_id):
     base = config['storage']['data_dir']
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    data_dir = Path(base) / today / 'video'
+    # Store videos in camera-specific subdirectory
+    data_dir = Path(base) / today / 'video' / camera_id
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
 
-def run(config):
+def run(config, camera_id):
     global running
     cam_config = config['camera']
     width, height = cam_config['resolution']
     fps = cam_config['framerate']
     segment_min = cam_config['segment_duration_min']
     bitrate = cam_config['bitrate_mbps'] * 1_000_000
+    camera_index = CAMERA_MAP.get(camera_id, 0)
 
-    logger.info(f"Initializing camera: {width}x{height} @ {fps}fps, "
+    logger.info(f"Initializing {camera_id} camera (index {camera_index}): "
+                f"{width}x{height} @ {fps}fps, "
                 f"{cam_config['bitrate_mbps']}Mbps, {segment_min}min segments")
 
     try:
-        picam2 = Picamera2()
+        picam2 = Picamera2(camera_num=camera_index)
     except Exception as e:
-        logger.error(f"Camera initialization failed: {e}")
+        logger.error(f"Camera {camera_id} initialization failed: {e}")
         logger.error("Is the camera connected and enabled?")
         sys.exit(1)
 
@@ -102,22 +119,22 @@ def run(config):
     encoder = H264Encoder(bitrate=bitrate)
 
     picam2.start()
-    logger.info("Camera started")
+    logger.info(f"Camera {camera_id} started")
 
     # Allow auto-exposure to settle
     time.sleep(2)
 
-    data_dir = get_data_dir(config)
+    data_dir = get_data_dir(config, camera_id)
     segment_count = 0
 
     try:
         while running:
             # Create new segment file
             timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
-            filepath = data_dir / f'cockpit_{timestamp}.mp4'
+            filepath = data_dir / f'{camera_id}_{timestamp}.mp4'
             output = FfmpegOutput(str(filepath))
 
-            logger.info(f"Recording segment {segment_count}: {filepath}")
+            logger.info(f"Recording {camera_id} segment {segment_count}: {filepath}")
             picam2.start_recording(encoder, output)
 
             # Record for segment_duration_min or until shutdown
@@ -143,8 +160,8 @@ def run(config):
 
             # Rotate directory at midnight
             current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            if data_dir.parent.name != current_date:
-                data_dir = get_data_dir(config)
+            if data_dir.parent.parent.name != current_date:
+                data_dir = get_data_dir(config, camera_id)
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
@@ -158,8 +175,20 @@ def run(config):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='SailFrames Camera Service')
+    parser.add_argument('camera_id', choices=['cockpit', 'sails'],
+                        help='Camera identifier (cockpit or sails)')
+    args = parser.parse_args()
+
+    # Update logger to include camera ID
+    logging.basicConfig(
+        level=logging.INFO,
+        format=f'%(asctime)s [CAMERA-{args.camera_id.upper()}] %(levelname)s %(message)s',
+        force=True
+    )
+
     config = load_config()
     if not config['camera']['enabled']:
         logger.info("Camera disabled in config, exiting")
         sys.exit(0)
-    run(config)
+    run(config, args.camera_id)
