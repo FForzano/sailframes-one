@@ -106,11 +106,32 @@ def get_battery_info():
         # Negative current = charging (USB powering Pi + charging battery)
         charging = current_ma < 0
 
+        # Estimate remaining time (UPS HAT D has 2x 18650 ~5000mAh usable)
+        BATTERY_CAPACITY_MAH = 5000
+        remaining_hours = None
+        remaining_str = None
+        empty_time = None
+
+        if not charging and current_ma > 10:  # Discharging with meaningful current
+            remaining_mah = (percent / 100.0) * BATTERY_CAPACITY_MAH
+            remaining_hours = remaining_mah / current_ma
+            hours = int(remaining_hours)
+            minutes = int((remaining_hours - hours) * 60)
+            remaining_str = f"{hours}h {minutes}m"
+
+            # Calculate estimated empty time
+            from datetime import timedelta
+            empty_dt = datetime.now() + timedelta(hours=remaining_hours)
+            empty_time = empty_dt.strftime('%I:%M %p')
+
         return {
             'voltage': round(voltage, 2),
             'percent': round(percent, 1),
             'current_ma': round(current_ma, 0),
             'charging': charging,
+            'remaining_hours': round(remaining_hours, 1) if remaining_hours else None,
+            'remaining_str': remaining_str,
+            'empty_time': empty_time,
         }
     except Exception as e:
         logger.debug(f"Battery read error: {e}")
@@ -394,6 +415,9 @@ DASHBOARD_HTML = """
             <h2>Battery {% if state.battery.charging %}<span class="charging">⚡</span>{% endif %}</h2>
             <div class="value">{{ state.battery.percent or '—' }}<span class="unit">%</span></div>
             <div class="sub">{{ state.battery.voltage or '—' }}V · {{ state.battery.current_ma or '—' }}mA · {% if state.battery.charging %}<span class="charging">Charging</span>{% else %}<span class="discharging">On Battery</span>{% endif %}</div>
+            {% if state.battery.remaining_str and not state.battery.charging %}
+            <div class="sub" style="margin-top: 4px; color: #ff9800;">~{{ state.battery.remaining_str }} remaining · empty ~{{ state.battery.empty_time }}</div>
+            {% endif %}
         </div>
         <div class="card">
             <h2>Disk Free</h2>
