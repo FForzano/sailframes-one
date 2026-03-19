@@ -191,12 +191,42 @@ def check_service_status(service_name):
         return False
 
 
+def get_gps_status():
+    """Read current GPS data from status file written by GPS service."""
+    status_file = Path('/tmp/sailframes-gps-status.json')
+    try:
+        if not status_file.exists():
+            return {'connected': False, 'status': 'no_status_file'}
+
+        with open(status_file, 'r') as f:
+            data = json.load(f)
+
+        # Check if data is stale (older than 5 seconds for 10Hz GPS)
+        if data.get('timestamp'):
+            ts = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            data['age_seconds'] = round(age, 1)
+            if age > 5:
+                data['connected'] = False
+                data['status'] = 'stale'
+            else:
+                data['connected'] = True
+                data['status'] = 'ok'
+        else:
+            data['connected'] = False
+            data['status'] = 'no_timestamp'
+
+        return data
+    except Exception as e:
+        return {'connected': False, 'status': f'error: {e}'}
+
+
 def get_wind_status():
     """Read current wind data from status file written by wind service."""
     status_file = Path('/tmp/sailframes-wind-status.json')
     try:
         if not status_file.exists():
-            return None
+            return {'connected': False, 'status': 'no_status_file'}
 
         with open(status_file, 'r') as f:
             data = json.load(f)
@@ -205,12 +235,19 @@ def get_wind_status():
         if data.get('timestamp'):
             ts = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
             age = (datetime.now(timezone.utc) - ts).total_seconds()
+            data['age_seconds'] = round(age, 1)
             if age > 10:
                 data['connected'] = False
+                data['status'] = 'stale'
+            else:
+                data['status'] = 'ok'
+        else:
+            data['connected'] = False
+            data['status'] = 'no_timestamp'
 
         return data
-    except Exception:
-        return None
+    except Exception as e:
+        return {'connected': False, 'status': f'error: {e}'}
 
 
 def get_imu_status():
@@ -433,6 +470,7 @@ def monitor_loop(config):
         system_state['battery'] = get_battery_info()
         system_state['disk'] = get_disk_usage(data_mount)
         system_state['gps'] = get_latest_gps() or {}
+        system_state['gps_status'] = get_gps_status() or {}
         system_state['wind'] = get_wind_status() or {}
         system_state['imu'] = get_imu_status() or {}
         system_state['pressure'] = get_pressure_status() or {}
@@ -451,6 +489,8 @@ def monitor_loop(config):
             'cockpit': check_service_status('sailframes-camera-cockpit'),
             'sails': check_service_status('sailframes-camera-sails'),
         }
+        # Netdata monitoring (optional, can be toggled)
+        system_state['netdata'] = check_service_status('netdata')
 
         # Low battery shutdown - only if batteries are actually present
         # (voltage > 5V means batteries installed, not just HAT with no/dead batteries)
@@ -483,7 +523,6 @@ DASHBOARD_HTML = """
 <head>
     <title>SailFrames - {{ state.device_id }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="refresh" content="5">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, sans-serif; background: #0a1628; color: #e0e8f0; padding: 16px; }
@@ -502,10 +541,40 @@ DASHBOARD_HTML = """
         .services { margin-top: 12px; }
         .svc-row { padding: 6px 0; font-size: 14px; border-bottom: 1px solid #233; }
         .updated { font-size: 11px; color: #546e7a; margin-top: 12px; text-align: center; }
+        .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .header h1 { margin: 0; }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+        .clock { font-size: 20px; font-weight: 700; color: #4fc3f7; font-family: monospace; }
+        .conn-indicators { display: flex; gap: 8px; }
+        .conn-badge { font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 4px; }
+        .conn-ok { background: #1b5e20; color: #a5d6a7; }
+        .conn-warn { background: #e65100; color: #ffcc80; }
+        .conn-off { background: #37474f; color: #78909c; }
     </style>
 </head>
 <body>
-    <h1>⛵ SailFrames {{ state.device_id }}</h1>
+    <div class="header">
+        <h1>⛵ SailFrames {{ state.device_id }}</h1>
+        <div class="header-right">
+            <div class="conn-indicators">
+                {% if state.gps_status.connected %}
+                <span class="conn-badge conn-ok" title="GPS connected, {{ state.gps_status.satellites or '?' }} sats">📍 GPS</span>
+                {% elif state.services.gps %}
+                <span class="conn-badge conn-warn" title="GPS service running but no data">📍 GPS ⚠</span>
+                {% else %}
+                <span class="conn-badge conn-off" title="GPS service not running">📍 GPS</span>
+                {% endif %}
+                {% if state.wind.connected %}
+                <span class="conn-badge conn-ok" title="Wind sensor connected">💨 Wind</span>
+                {% elif state.services.wind %}
+                <span class="conn-badge conn-warn" title="Wind service running, searching...">💨 Wind ⚠</span>
+                {% else %}
+                <span class="conn-badge conn-off" title="Wind service not running">💨 Wind</span>
+                {% endif %}
+            </div>
+            <div class="clock" id="clock"></div>
+        </div>
+    </div>
     <div class="grid">
         <div class="card">
             <h2>CPU Temp</h2>
@@ -560,8 +629,32 @@ DASHBOARD_HTML = """
     </div>
     {% else %}
     <div class="card" style="margin-top: 12px;">
-        <h2>📍 GPS</h2>
-        <div style="color: #78909c; font-style: italic;">No GPS fix — waiting for satellites...</div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h2 style="margin: 0;">📍 GPS</h2>
+                {% if not state.gps_status.connected and state.services.gps %}
+                <div style="color: #f44336; font-size: 13px; margin-top: 4px; font-weight: 600;">
+                    ⚠️ DISCONNECTED — Check USB cable!
+                </div>
+                <div style="color: #78909c; font-size: 11px; margin-top: 2px;">
+                    Service running but no data received ({{ state.gps_status.age_seconds or '?' }}s ago)
+                </div>
+                {% elif state.services.gps %}
+                <div style="color: #ff9800; font-size: 13px; margin-top: 4px;">No fix — waiting for satellites...</div>
+                {% else %}
+                <div style="color: #78909c; font-size: 13px; margin-top: 4px;">GPS service not running</div>
+                {% endif %}
+            </div>
+            <button id="btn-gps-restart" onclick="restartGPS()" style="
+                background: #1976d2;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                cursor: pointer;
+            ">🔄 Restart</button>
+        </div>
         <div style="margin-top: 8px;"><a href="/gps" style="color: #4fc3f7; font-size: 12px;">📊 GPS Details</a></div>
     </div>
     {% endif %}
@@ -627,11 +720,14 @@ DASHBOARD_HTML = """
     <div class="card" style="margin-top: 12px;">
         <h2>💨 Wind</h2>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div style="color: #78909c; font-style: italic;">
-                {% if state.services.wind %}
-                Searching for sensor...
+            <div>
+                {% if state.wind.status == 'stale' and state.services.wind %}
+                <div style="color: #f44336; font-weight: 600;">⚠️ DISCONNECTED</div>
+                <div style="color: #78909c; font-size: 11px;">Last data {{ state.wind.age_seconds or '?' }}s ago</div>
+                {% elif state.services.wind %}
+                <div style="color: #ff9800;">Searching for sensor...</div>
                 {% else %}
-                Wind service not running
+                <div style="color: #78909c; font-style: italic;">Wind service not running</div>
                 {% endif %}
             </div>
             <button onclick="scanBluetooth()" style="
@@ -720,23 +816,57 @@ DASHBOARD_HTML = """
         </div>
         {% endif %}
         <!-- Calibration -->
-        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #233; display: flex; justify-content: space-between; align-items: center;">
-            <div style="font-size: 12px; color: #78909c;">
-                {% if state.imu.heel_offset or state.imu.pitch_offset %}
-                Calibrated: heel {{ "%.1f"|format(state.imu.heel_offset or 0) }}°, pitch {{ "%.1f"|format(state.imu.pitch_offset or 0) }}° offset
-                {% else %}
-                Not calibrated (raw values)
-                {% endif %}
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #233;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <div style="font-size: 12px; color: #78909c;">
+                    {% if state.imu.heel_offset or state.imu.pitch_offset %}
+                    Calibrated: heel {{ "%.1f"|format(state.imu.heel_offset or 0) }}°, pitch {{ "%.1f"|format(state.imu.pitch_offset or 0) }}° offset
+                    {% else %}
+                    Not calibrated (raw values)
+                    {% endif %}
+                </div>
+                <button onclick="calibrateIMU()" id="btn-imu-cal" style="
+                    background: #1976d2;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-size: 13px;
+                    cursor: pointer;
+                ">Zero Heel/Pitch</button>
             </div>
-            <button onclick="calibrateIMU()" id="btn-imu-cal" style="
-                background: #1976d2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-size: 13px;
-                cursor: pointer;
-            ">Zero Heel/Pitch</button>
+            <!-- Inversion toggles -->
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <span style="font-size: 12px; color: #78909c;">Invert:</span>
+                <button id="btn-invert-heel" onclick="toggleInvert('heel')" style="
+                    background: {% if state.imu.invert_heel %}#ff9800{% else %}#455a64{% endif %};
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    cursor: pointer;
+                ">Heel {% if state.imu.invert_heel %}✓{% endif %}</button>
+                <button id="btn-invert-pitch" onclick="toggleInvert('pitch')" style="
+                    background: {% if state.imu.invert_pitch %}#ff9800{% else %}#455a64{% endif %};
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    cursor: pointer;
+                ">Pitch {% if state.imu.invert_pitch %}✓{% endif %}</button>
+                <span style="color: #546e7a; margin: 0 4px;">|</span>
+                <button id="btn-swap-axes" onclick="toggleSwapAxes()" style="
+                    background: {% if state.imu.swap_axes %}#9c27b0{% else %}#455a64{% endif %};
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    cursor: pointer;
+                ">Swap H↔P {% if state.imu.swap_axes %}✓{% endif %}</button>
+            </div>
         </div>
     </div>
     {% else %}
@@ -823,6 +953,11 @@ DASHBOARD_HTML = """
                     <span style="color: #78909c;">○ Stopped</span>
                     {% endif %}
                 </div>
+                <button id="btn-snap-cockpit" onclick="snapCamera('cockpit')" style="
+                    background: #455a64;
+                    color: white; border: none; padding: 8px 12px; border-radius: 6px;
+                    font-size: 13px; cursor: pointer;
+                ">📷</button>
                 <button id="btn-cockpit" onclick="toggleCamera('cockpit')" style="
                     background: {% if state.cameras.cockpit %}#c62828{% else %}#1976d2{% endif %};
                     color: white; border: none; padding: 8px 16px; border-radius: 6px;
@@ -839,6 +974,11 @@ DASHBOARD_HTML = """
                     <span style="color: #78909c;">○ Stopped</span>
                     {% endif %}
                 </div>
+                <button id="btn-snap-sails" onclick="snapCamera('sails')" style="
+                    background: #455a64;
+                    color: white; border: none; padding: 8px 12px; border-radius: 6px;
+                    font-size: 13px; cursor: pointer;
+                ">📷</button>
                 <button id="btn-sails" onclick="toggleCamera('sails')" style="
                     background: {% if state.cameras.sails %}#c62828{% else %}#1976d2{% endif %};
                     color: white; border: none; padding: 8px 16px; border-radius: 6px;
@@ -867,6 +1007,33 @@ DASHBOARD_HTML = """
             </div>
         </div>
         <div id="wifi-details" style="margin-top: 8px; font-size: 12px; color: #546e7a;"></div>
+    </div>
+
+    <!-- Netdata Monitoring -->
+    <div class="card" style="margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h2 style="margin: 0;">📊 Netdata</h2>
+                <div id="netdata-status" style="font-size: 12px; color: #78909c; margin-top: 4px;">
+                    {% if state.netdata %}
+                    <span style="color: #4caf50;">● Running</span> — <a href="http://{{ request.host.split(':')[0] }}:19999" target="_blank" style="color: #4fc3f7;">Open Dashboard</a>
+                    {% else %}
+                    <span style="color: #78909c;">○ Stopped</span>
+                    {% endif %}
+                </div>
+            </div>
+            <button id="btn-netdata" onclick="toggleNetdata()" style="
+                background: {% if state.netdata %}#c62828{% else %}#1976d2{% endif %};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                min-width: 80px;
+            ">{% if state.netdata %}Stop{% else %}Start{% endif %}</button>
+        </div>
     </div>
 
     <!-- System / Shutdown -->
@@ -917,6 +1084,19 @@ DASHBOARD_HTML = """
         </div>
     </div>
 
+    <!-- Camera snapshot modal -->
+    <div id="snap-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 100;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #1a2a40; padding: 16px; border-radius: 8px; max-width: 95vw; max-height: 95vh;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div id="snap-title" style="font-size: 16px; font-weight: 600;">Camera Preview</div>
+                <button onclick="closeSnapModal()" style="background: #455a64; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 14px; cursor: pointer;">✕ Close</button>
+            </div>
+            <div id="snap-loading" style="color: #78909c; padding: 40px; text-align: center;">Capturing...</div>
+            <img id="snap-image" style="display: none; max-width: 90vw; max-height: 80vh; border-radius: 4px;" />
+            <div id="snap-error" style="display: none; color: #ff5252; padding: 20px; text-align: center;"></div>
+        </div>
+    </div>
+
     <div class="updated">Updated {{ state.last_update }}</div>
     <div style="text-align: center; margin-top: 12px; display: flex; gap: 20px; justify-content: center;">
         <a href="/gps" style="color: #4fc3f7; font-size: 13px;">📍 GPS Details</a>
@@ -948,6 +1128,47 @@ DASHBOARD_HTML = """
                 alert('Error: ' + e);
                 btn.disabled = false;
             });
+    }
+
+    function snapCamera(camera) {
+        const btn = document.getElementById('btn-snap-' + camera);
+        btn.disabled = true;
+        btn.textContent = '⏳';
+
+        // Show modal with loading state
+        document.getElementById('snap-modal').style.display = 'block';
+        document.getElementById('snap-title').textContent = camera.charAt(0).toUpperCase() + camera.slice(1) + ' Camera Preview';
+        document.getElementById('snap-loading').style.display = 'block';
+        document.getElementById('snap-image').style.display = 'none';
+        document.getElementById('snap-error').style.display = 'none';
+
+        fetch('/api/camera/' + camera + '/snapshot', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.textContent = '📷';
+                document.getElementById('snap-loading').style.display = 'none';
+
+                if (data.success) {
+                    const img = document.getElementById('snap-image');
+                    img.src = data.url + '?t=' + Date.now();
+                    img.style.display = 'block';
+                } else {
+                    document.getElementById('snap-error').textContent = 'Error: ' + (data.error || 'Failed to capture');
+                    document.getElementById('snap-error').style.display = 'block';
+                }
+            })
+            .catch(e => {
+                btn.disabled = false;
+                btn.textContent = '📷';
+                document.getElementById('snap-loading').style.display = 'none';
+                document.getElementById('snap-error').textContent = 'Error: ' + e;
+                document.getElementById('snap-error').style.display = 'block';
+            });
+    }
+
+    function closeSnapModal() {
+        document.getElementById('snap-modal').style.display = 'none';
     }
 
     function confirmShutdown() {
@@ -1008,7 +1229,7 @@ DASHBOARD_HTML = """
                         html += '<div style="font-weight: 600;">' + (d.name || 'Unknown') + (isWind ? ' <span style="color: #4caf50;">✓ Wind</span>' : '') + '</div>';
                         html += '<div style="font-size: 12px; color: #78909c;">' + d.address + ' · RSSI: ' + d.rssi + '</div>';
                         if (isWind) {
-                            html += '<button onclick="pairWind(\'' + d.address + '\')" style="margin-top: 8px; background: #1976d2; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Set as Wind Sensor</button>';
+                            html += '<button onclick="pairWind(\\'' + d.address + '\\')" style="margin-top: 8px; background: #1976d2; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;">Set as Wind Sensor</button>';
                         }
                         html += '</div>';
                     });
@@ -1071,6 +1292,74 @@ DASHBOARD_HTML = """
                 btn.disabled = false;
                 btn.textContent = 'Zero Heel/Pitch';
             });
+    }
+
+    function toggleInvert(axis) {
+        const btn = document.getElementById('btn-invert-' + axis);
+        btn.disabled = true;
+
+        fetch('/api/imu/invert', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({axis: axis})
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Failed to toggle inversion'));
+                btn.disabled = false;
+            }
+        })
+        .catch(e => {
+            alert('Error: ' + e);
+            btn.disabled = false;
+        });
+    }
+
+    function toggleSwapAxes() {
+        const btn = document.getElementById('btn-swap-axes');
+        btn.disabled = true;
+
+        fetch('/api/imu/swap', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Failed to toggle swap'));
+                btn.disabled = false;
+            }
+        })
+        .catch(e => {
+            alert('Error: ' + e);
+            btn.disabled = false;
+        });
+    }
+
+    function restartGPS() {
+        const btn = document.getElementById('btn-gps-restart');
+        btn.disabled = true;
+        btn.textContent = '⏳ Restarting...';
+
+        fetch('/api/gps/restart', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert('GPS service restarted. Wait for satellite fix...');
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Failed to restart GPS'));
+                btn.disabled = false;
+                btn.textContent = '🔄 Restart';
+            }
+        })
+        .catch(e => {
+            alert('Error: ' + e);
+            btn.disabled = false;
+            btn.textContent = '🔄 Restart';
+        });
     }
 
     // WiFi Mode
@@ -1142,6 +1431,45 @@ DASHBOARD_HTML = """
         });
     }
 
+    function toggleNetdata() {
+        const btn = document.getElementById('btn-netdata');
+        const isRunning = btn.textContent.trim() === 'Stop';
+        const action = isRunning ? 'stop' : 'start';
+
+        btn.disabled = true;
+        btn.textContent = isRunning ? 'Stopping...' : 'Starting...';
+
+        fetch('/api/netdata/' + action, { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                    btn.disabled = false;
+                    btn.textContent = isRunning ? 'Stop' : 'Start';
+                }
+            })
+            .catch(e => {
+                alert('Error: ' + e);
+                btn.disabled = false;
+                btn.textContent = isRunning ? 'Stop' : 'Start';
+            });
+    }
+
+    // Clock - update every second
+    function updateClock() {
+        const now = new Date();
+        const hours = now.getHours();
+        const mins = now.getMinutes().toString().padStart(2, '0');
+        const secs = now.getSeconds().toString().padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const h12 = hours % 12 || 12;
+        document.getElementById('clock').textContent = h12 + ':' + mins + ':' + secs + ' ' + ampm;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
     // Load WiFi status on page load
     document.addEventListener('DOMContentLoaded', loadWiFiStatus);
 
@@ -1212,6 +1540,14 @@ DASHBOARD_HTML = """
             })
             .catch(e => console.log('IMU update error:', e));
     }
+
+    // Smart auto-refresh: only refresh if no modal is open
+    setInterval(function() {
+        const snapModalOpen = document.getElementById('snap-modal').style.display !== 'none';
+        if (!imuLiveActive && !snapModalOpen) {
+            location.reload();
+        }
+    }, 5000);
     </script>
 </body>
 </html>
@@ -2616,6 +2952,68 @@ def api_camera_stop(camera_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/camera/<camera_id>/snapshot', methods=['POST'])
+def api_camera_snapshot(camera_id):
+    """Capture a single frame from the camera."""
+    if camera_id not in ('cockpit', 'sails'):
+        return jsonify({'success': False, 'error': 'Invalid camera'}), 400
+
+    try:
+        # Camera index mapping: cockpit=0, sails=1
+        camera_index = 0 if camera_id == 'cockpit' else 1
+
+        # Output path
+        snap_dir = Path('/tmp/sailframes-snapshots')
+        snap_dir.mkdir(exist_ok=True)
+        snap_path = snap_dir / f'{camera_id}.jpg'
+
+        # Capture using rpicam-still
+        result = subprocess.run(
+            [
+                'rpicam-still',
+                '--camera', str(camera_index),
+                '-o', str(snap_path),
+                '--width', '1920',
+                '--height', '1080',
+                '--timeout', '1000',  # 1 second timeout
+                '--nopreview',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0 and snap_path.exists():
+            logger.info(f"Snapshot captured for {camera_id}")
+            return jsonify({
+                'success': True,
+                'url': f'/api/camera/{camera_id}/snapshot.jpg'
+            })
+        else:
+            error = result.stderr or 'Capture failed'
+            logger.warning(f"Snapshot failed for {camera_id}: {error}")
+            return jsonify({'success': False, 'error': error}), 500
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': 'Camera timeout'}), 500
+    except Exception as e:
+        logger.error(f"Snapshot error for {camera_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/camera/<camera_id>/snapshot.jpg')
+def api_camera_snapshot_image(camera_id):
+    """Serve the captured snapshot image."""
+    if camera_id not in ('cockpit', 'sails'):
+        return 'Invalid camera', 404
+
+    snap_path = Path(f'/tmp/sailframes-snapshots/{camera_id}.jpg')
+    if snap_path.exists():
+        return send_file(snap_path, mimetype='image/jpeg')
+    else:
+        return 'No snapshot available', 404
+
+
 @app.route('/api/system/shutdown', methods=['POST'])
 def api_system_shutdown():
     """Safely shutdown the system - stops all services first to ensure data is saved."""
@@ -2762,20 +3160,41 @@ def api_imu_calibrate():
         if raw_heel is None or raw_pitch is None:
             return jsonify({'success': False, 'error': 'No IMU readings available'}), 400
 
-        # Save new calibration offsets
+        calibration_file = Path('/etc/sailframes/imu-calibration.json')
+        calibration_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing calibration to preserve settings like swap_axes, invert_*
+        existing = {}
+        if calibration_file.exists():
+            try:
+                with open(calibration_file, 'r') as f:
+                    existing = json.load(f)
+            except:
+                pass
+
+        # If swap is enabled, swap the raw values before calculating offsets
+        swap_enabled = existing.get('swap_axes', False)
+        if swap_enabled:
+            raw_heel, raw_pitch = raw_pitch, raw_heel
+
+        # If inversion is enabled, apply it before calculating offsets
+        if existing.get('invert_heel', False):
+            raw_heel = -raw_heel
+        if existing.get('invert_pitch', False):
+            raw_pitch = -raw_pitch
+
+        # Update calibration, preserving other settings
         calibration = {
+            **existing,  # Preserve swap_axes, invert_heel, invert_pitch
             'heel_offset': raw_heel,
             'pitch_offset': raw_pitch,
             'calibrated_at': datetime.now(timezone.utc).isoformat(),
         }
 
-        calibration_file = Path('/etc/sailframes/imu-calibration.json')
-        calibration_file.parent.mkdir(parents=True, exist_ok=True)
-
         with open(calibration_file, 'w') as f:
             json.dump(calibration, f, indent=2)
 
-        logger.info(f"IMU calibrated: heel_offset={raw_heel:.2f}°, pitch_offset={raw_pitch:.2f}°")
+        logger.info(f"IMU calibrated: heel_offset={raw_heel:.2f}°, pitch_offset={raw_pitch:.2f}° (swap={swap_enabled})")
 
         return jsonify({
             'success': True,
@@ -2812,6 +3231,90 @@ def api_imu_calibration_reset():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/imu/invert', methods=['POST'])
+def api_imu_invert():
+    """Toggle inversion of heel or pitch axis."""
+    try:
+        data = request.get_json()
+        axis = data.get('axis')  # 'heel' or 'pitch'
+        if axis not in ('heel', 'pitch'):
+            return jsonify({'success': False, 'error': 'Invalid axis'}), 400
+
+        calibration_file = Path('/etc/sailframes/imu-calibration.json')
+
+        # Load existing calibration
+        if calibration_file.exists():
+            with open(calibration_file, 'r') as f:
+                cal_data = json.load(f)
+        else:
+            cal_data = {}
+
+        # Toggle the inversion
+        key = f'invert_{axis}'
+        cal_data[key] = not cal_data.get(key, False)
+
+        # Save
+        with open(calibration_file, 'w') as f:
+            json.dump(cal_data, f, indent=2)
+
+        logger.info(f"IMU {axis} inversion set to {cal_data[key]}")
+        return jsonify({'success': True, 'axis': axis, 'inverted': cal_data[key]})
+    except Exception as e:
+        logger.error(f"Failed to toggle IMU inversion: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/imu/swap', methods=['POST'])
+def api_imu_swap():
+    """Toggle swapping of heel and pitch axes."""
+    try:
+        calibration_file = Path('/etc/sailframes/imu-calibration.json')
+
+        # Load existing calibration
+        if calibration_file.exists():
+            with open(calibration_file, 'r') as f:
+                cal_data = json.load(f)
+        else:
+            cal_data = {}
+
+        # Toggle the swap
+        cal_data['swap_axes'] = not cal_data.get('swap_axes', False)
+
+        # Save
+        with open(calibration_file, 'w') as f:
+            json.dump(cal_data, f, indent=2)
+
+        logger.info(f"IMU swap_axes set to {cal_data['swap_axes']}")
+        return jsonify({'success': True, 'swap_axes': cal_data['swap_axes']})
+    except Exception as e:
+        logger.error(f"Failed to toggle IMU swap: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/gps/restart', methods=['POST'])
+def api_gps_restart():
+    """Restart the GPS service."""
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'restart', 'sailframes-gps'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("GPS service restarted")
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': result.stderr}), 500
+    except Exception as e:
+        logger.error(f"Failed to restart GPS: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/gps/status')
+def api_gps_status():
+    """Get current GPS connection status."""
+    return jsonify(get_gps_status())
 
 
 # ── WiFi Mode API ──
@@ -2900,6 +3403,42 @@ def api_wifi_mode():
         return jsonify({'success': False, 'error': 'WiFi switch timed out'}), 500
     except Exception as e:
         logger.error(f"WiFi mode switch failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/netdata/start', methods=['POST'])
+def netdata_start():
+    """Start netdata service."""
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'start', 'netdata'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("Netdata started")
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': result.stderr}), 500
+    except Exception as e:
+        logger.error(f"Failed to start netdata: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/netdata/stop', methods=['POST'])
+def netdata_stop():
+    """Stop netdata service."""
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'stop', 'netdata'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("Netdata stopped")
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': result.stderr}), 500
+    except Exception as e:
+        logger.error(f"Failed to stop netdata: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

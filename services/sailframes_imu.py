@@ -27,7 +27,13 @@ IMU_STATUS_FILE = Path('/tmp/sailframes-imu-status.json')
 IMU_CALIBRATION_FILE = Path('/etc/sailframes/imu-calibration.json')
 
 # Global calibration offsets (loaded at startup and when file changes)
-calibration_offsets = {'heel_offset': 0.0, 'pitch_offset': 0.0}
+calibration_offsets = {
+    'heel_offset': 0.0,
+    'pitch_offset': 0.0,
+    'invert_heel': False,
+    'invert_pitch': False,
+    'swap_axes': False,
+}
 calibration_mtime = 0
 
 logging.basicConfig(
@@ -138,9 +144,15 @@ def load_calibration_offsets():
 
         calibration_offsets['heel_offset'] = float(data.get('heel_offset', 0.0))
         calibration_offsets['pitch_offset'] = float(data.get('pitch_offset', 0.0))
+        calibration_offsets['invert_heel'] = bool(data.get('invert_heel', False))
+        calibration_offsets['invert_pitch'] = bool(data.get('invert_pitch', False))
+        calibration_offsets['swap_axes'] = bool(data.get('swap_axes', False))
         calibration_mtime = mtime
         logger.info(f"Loaded calibration: heel_offset={calibration_offsets['heel_offset']:.2f}°, "
-                   f"pitch_offset={calibration_offsets['pitch_offset']:.2f}°")
+                   f"pitch_offset={calibration_offsets['pitch_offset']:.2f}°, "
+                   f"invert_heel={calibration_offsets['invert_heel']}, "
+                   f"invert_pitch={calibration_offsets['invert_pitch']}, "
+                   f"swap_axes={calibration_offsets['swap_axes']}")
     except Exception as e:
         logger.warning(f"Failed to load calibration: {e}")
 
@@ -148,8 +160,17 @@ def load_calibration_offsets():
 
 
 def apply_calibration(heel, pitch):
-    """Apply calibration offsets to heel and pitch values."""
+    """Apply calibration offsets, inversions, and axis swap to heel and pitch values."""
     cal = load_calibration_offsets()
+    # Swap axes first if needed (IMU mounted rotated 90°)
+    if cal['swap_axes']:
+        heel, pitch = pitch, heel
+    # Apply inversion (before offset)
+    if cal['invert_heel']:
+        heel = -heel
+    if cal['invert_pitch']:
+        pitch = -pitch
+    # Then apply offset
     calibrated_heel = heel - cal['heel_offset']
     calibrated_pitch = pitch - cal['pitch_offset']
     return calibrated_heel, calibrated_pitch
@@ -180,9 +201,12 @@ def update_imu_status(heading, pitch, heel, quat, accel, accuracy, connected=Tru
             # Raw (uncalibrated) values
             'raw_pitch_deg': round(pitch, 2) if pitch is not None else None,
             'raw_heel_deg': round(heel, 2) if heel is not None else None,
-            # Current calibration offsets
+            # Current calibration offsets and inversions
             'heel_offset': cal['heel_offset'],
             'pitch_offset': cal['pitch_offset'],
+            'invert_heel': cal['invert_heel'],
+            'invert_pitch': cal['invert_pitch'],
+            'swap_axes': cal['swap_axes'],
             # Quaternion components (for advanced users)
             'quat_i': round(i, 6) if i is not None else None,
             'quat_j': round(j, 6) if j is not None else None,

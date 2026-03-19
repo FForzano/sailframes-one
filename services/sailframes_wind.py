@@ -184,6 +184,31 @@ def parse_calypso_data(data):
         return None
 
 
+def save_calypso_mac(mac_address):
+    """Save discovered Calypso MAC address to config for faster reconnection."""
+    config_path = '/etc/sailframes/sailframes.yaml'
+    try:
+        with open(config_path, 'r') as f:
+            config_content = f.read()
+
+        # Replace empty ble_mac_address with discovered MAC
+        import re
+        new_content = re.sub(
+            r'(ble_mac_address:\s*)"?"?\s*"?',
+            f'\\1"{mac_address}"',
+            config_content
+        )
+
+        with open(config_path, 'w') as f:
+            f.write(new_content)
+
+        logger.info(f"Saved Calypso MAC {mac_address} to config for auto-reconnect")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not save MAC to config: {e}")
+        return False
+
+
 async def scan_for_calypso(config):
     """Scan for Calypso Mini sensor by name or MAC address."""
     wind_config = config['wind']
@@ -195,6 +220,7 @@ async def scan_for_calypso(config):
         device = await BleakScanner.find_device_by_address(mac, timeout=timeout)
         if device:
             return device
+        logger.warning(f"Saved MAC {mac} not found, scanning by name...")
 
     # Scan by name if MAC not set or not found
     logger.info("Scanning for Calypso devices...")
@@ -203,7 +229,8 @@ async def scan_for_calypso(config):
         name = device.name or ''
         if 'calypso' in name.lower() or 'ultrasonic' in name.lower():
             logger.info(f"Found Calypso: {device.name} at {device.address}")
-            logger.info(f"Set ble_mac_address: \"{device.address}\" in config for faster reconnect")
+            # Auto-save MAC for faster reconnection next time
+            save_calypso_mac(device.address)
             return device
 
     return None

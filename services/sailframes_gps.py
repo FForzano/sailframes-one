@@ -13,9 +13,13 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+import json
 import serial
 import pynmea2
 import yaml
+
+# Status file for dashboard
+GPS_STATUS_FILE = Path('/tmp/sailframes-gps-status.json')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,6 +108,57 @@ def parse_rmc(msg):
     }
 
 
+def update_gps_status(current):
+    """Write current GPS state to status file for dashboard."""
+    try:
+        fix_quality = current.get('fix_quality', 0)
+        fix_types = {0: 'No Fix', 1: 'GPS', 2: 'DGPS', 4: 'RTK Fixed', 5: 'RTK Float'}
+        fix_type = fix_types.get(fix_quality, f'Unknown ({fix_quality})')
+
+        # HDOP quality rating
+        hdop = current.get('hdop')
+        if hdop is None:
+            hdop_rating = 'N/A'
+        elif hdop < 1:
+            hdop_rating = 'Ideal'
+        elif hdop < 2:
+            hdop_rating = 'Excellent'
+        elif hdop < 5:
+            hdop_rating = 'Good'
+        elif hdop < 10:
+            hdop_rating = 'Moderate'
+        else:
+            hdop_rating = 'Poor'
+
+        # Calculate accuracy estimate (rough: HDOP * 2.5m for consumer GPS)
+        accuracy_cm = int(hdop * 250) if hdop else None
+
+        # Speed in different units
+        speed_knots = current.get('speed_knots')
+        speed_mph = round(speed_knots * 1.15078, 1) if speed_knots else None
+
+        status = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'latitude': current.get('latitude'),
+            'longitude': current.get('longitude'),
+            'altitude_m': current.get('altitude_m'),
+            'speed_knots': round(speed_knots, 2) if speed_knots else None,
+            'speed_mph': speed_mph,
+            'course_deg': current.get('course_deg'),
+            'fix_quality': fix_quality,
+            'fix_type': fix_type,
+            'satellites': current.get('satellites', 0),
+            'hdop': hdop,
+            'hdop_rating': hdop_rating,
+            'accuracy_cm': accuracy_cm,
+        }
+
+        with open(GPS_STATUS_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception as e:
+        logger.warning(f"Failed to update GPS status file: {e}")
+
+
 def run(config):
     """Main GPS acquisition loop."""
     gps_config = config['gps']
@@ -190,6 +245,10 @@ def run(config):
                 ])
                 rows_written += 1
                 last_write = now
+
+                # Update status file for dashboard (every 10th write to reduce I/O)
+                if rows_written % 10 == 0:
+                    update_gps_status(current)
 
                 # Flush periodically
                 if rows_written % 100 == 0:

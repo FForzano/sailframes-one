@@ -65,7 +65,7 @@ def load_config():
 
 def get_data_dir(config, camera_id):
     base = config['storage']['data_dir']
-    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    today = datetime.now().strftime('%Y-%m-%d')  # Local time
     # Store videos in camera-specific subdirectory
     data_dir = Path(base) / today / 'video' / camera_id
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -129,8 +129,8 @@ def run(config, camera_id):
 
     try:
         while running:
-            # Create new segment file
-            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            # Create new segment file (local time for readability)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filepath = data_dir / f'{camera_id}_{timestamp}.mp4'
             output = FfmpegOutput(str(filepath))
 
@@ -158,8 +158,8 @@ def run(config, camera_id):
             file_size_mb = filepath.stat().st_size / (1024 * 1024)
             logger.info(f"Segment complete: {file_size_mb:.1f}MB")
 
-            # Rotate directory at midnight
-            current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            # Rotate directory at midnight (local time)
+            current_date = datetime.now().strftime('%Y-%m-%d')
             if data_dir.parent.parent.name != current_date:
                 data_dir = get_data_dir(config, camera_id)
 
