@@ -849,14 +849,15 @@ DASHBOARD_HTML = """
                 <h2 style="margin: 0;">📶 WiFi Mode</h2>
                 <div id="wifi-status" style="font-size: 12px; color: #78909c; margin-top: 4px;">Loading...</div>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <span id="wifi-mode-label" style="font-size: 13px; color: #78909c;">Client</span>
-                <label style="position: relative; display: inline-block; width: 50px; height: 26px;">
-                    <input type="checkbox" id="wifi-toggle" onchange="toggleWiFi()" style="opacity: 0; width: 0; height: 0;">
-                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #455a64; transition: .3s; border-radius: 26px;"></span>
-                    <span id="wifi-slider" style="position: absolute; content: ''; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%;"></span>
-                </label>
-                <span style="font-size: 13px; color: #4fc3f7;">AP</span>
+            <div style="display: flex; gap: 8px;">
+                <button id="btn-wifi-client" onclick="setWiFiMode('client')" style="
+                    background: #455a64; color: white; border: none; padding: 8px 14px;
+                    border-radius: 6px; font-size: 13px; cursor: pointer;
+                ">Client</button>
+                <button id="btn-wifi-ap" onclick="setWiFiMode('ap')" style="
+                    background: #455a64; color: white; border: none; padding: 8px 14px;
+                    border-radius: 6px; font-size: 13px; cursor: pointer;
+                ">AP Mode</button>
             </div>
         </div>
         <div id="wifi-details" style="margin-top: 8px; font-size: 12px; color: #546e7a;"></div>
@@ -1066,38 +1067,32 @@ DASHBOARD_HTML = """
             });
     }
 
-    // WiFi Mode Toggle
+    // WiFi Mode
     function loadWiFiStatus() {
         fetch('/api/wifi/status')
             .then(r => r.json())
             .then(data => {
-                const toggle = document.getElementById('wifi-toggle');
-                const slider = document.getElementById('wifi-slider');
-                const label = document.getElementById('wifi-mode-label');
                 const status = document.getElementById('wifi-status');
                 const details = document.getElementById('wifi-details');
+                const btnClient = document.getElementById('btn-wifi-client');
+                const btnAP = document.getElementById('btn-wifi-ap');
 
                 const isAP = data.current_mode === 'ap';
-                toggle.checked = isAP;
 
-                // Update slider position
-                slider.style.transform = isAP ? 'translateX(24px)' : 'translateX(0)';
-                slider.parentElement.previousElementSibling.style.backgroundColor = isAP ? '#1976d2' : '#455a64';
-
-                // Update labels
-                label.textContent = isAP ? 'AP' : 'Client';
-                label.style.color = isAP ? '#78909c' : '#78909c';
+                // Highlight active button
+                btnClient.style.background = isAP ? '#455a64' : '#1976d2';
+                btnAP.style.background = isAP ? '#1976d2' : '#455a64';
 
                 if (isAP) {
                     status.textContent = 'Access Point: ' + data.ap_ssid;
                     details.innerHTML = 'SSID: <strong>' + data.ap_ssid + '</strong> · Password: <strong>' + data.ap_password + '</strong> · IP: 192.168.4.1';
                 } else {
-                    status.textContent = 'Connected to: ' + (data.connection || data.client_ssid);
+                    status.textContent = 'Client: ' + (data.connection || data.client_ssid);
                     details.innerHTML = 'IP: <strong>' + (data.ip_address || 'obtaining...') + '</strong>';
                 }
 
                 if (data.saved_mode !== data.current_mode) {
-                    details.innerHTML += ' <span style="color: #ff9800;">(boot: ' + data.saved_mode + ')</span>';
+                    details.innerHTML += ' <span style="color: #ff9800;">(boot default: ' + data.saved_mode + ')</span>';
                 }
             })
             .catch(e => {
@@ -1105,33 +1100,38 @@ DASHBOARD_HTML = """
             });
     }
 
-    function toggleWiFi() {
-        const toggle = document.getElementById('wifi-toggle');
-        const newMode = toggle.checked ? 'ap' : 'client';
+    function setWiFiMode(mode) {
+        const isAP = mode === 'ap';
+        const msg = isAP
+            ? 'Switch to Access Point mode?\\n\\nSSID: s1\\nPassword: hellowifi\\nIP: 192.168.4.1\\n\\nIf connected via Home-IOT, you will lose connection.'
+            : 'Switch to Client mode?\\n\\nWill connect to Home-IOT.\\nIf connected via s1 AP, you will lose connection.';
 
-        document.getElementById('wifi-status').textContent = 'Switching to ' + (newMode === 'ap' ? 'Access Point' : 'Client') + ' mode...';
+        if (!confirm(msg)) return;
+
+        document.getElementById('wifi-status').textContent = 'Switching...';
+        document.getElementById('btn-wifi-client').disabled = true;
+        document.getElementById('btn-wifi-ap').disabled = true;
 
         fetch('/api/wifi/mode', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({mode: newMode})
+            body: JSON.stringify({mode: mode})
         })
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                if (newMode === 'ap') {
-                    alert('Switched to Access Point mode!\\n\\nSSID: s1\\nPassword: hellowifi\\nIP: 192.168.4.1\\n\\nConnect to the s1 WiFi network to access dashboard.');
-                } else {
-                    alert('Switched to Client mode!\\n\\nConnecting to Home-IOT...\\nPage will reload when connected.');
-                }
-                setTimeout(() => location.reload(), 2000);
+                const info = isAP
+                    ? 'Switched to AP mode!\\n\\nConnect to WiFi: s1\\nPassword: hellowifi\\nDashboard: http://192.168.4.1:8080'
+                    : 'Switched to Client mode!\\n\\nConnecting to Home-IOT...';
+                alert(info);
+                setTimeout(() => location.reload(), 3000);
             } else {
-                alert('WiFi switch failed: ' + (data.error || 'Unknown error'));
-                loadWiFiStatus();  // Reload to get correct state
+                alert('Failed: ' + (data.error || 'Unknown error'));
+                loadWiFiStatus();
             }
         })
         .catch(e => {
-            alert('WiFi switch error: ' + e);
+            alert('Error: ' + e);
             loadWiFiStatus();
         });
     }
