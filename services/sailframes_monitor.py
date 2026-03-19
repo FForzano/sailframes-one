@@ -557,20 +557,8 @@ DASHBOARD_HTML = """
         <h1>⛵ SailFrames {{ state.device_id }}</h1>
         <div class="header-right">
             <div class="conn-indicators">
-                {% if state.gps_status.connected %}
-                <span class="conn-badge conn-ok" title="GPS connected, {{ state.gps_status.satellites or '?' }} sats">📍 GPS</span>
-                {% elif state.services.gps %}
-                <span class="conn-badge conn-warn" title="GPS service running but no data">📍 GPS ⚠</span>
-                {% else %}
-                <span class="conn-badge conn-off" title="GPS service not running">📍 GPS</span>
-                {% endif %}
-                {% if state.wind.connected %}
-                <span class="conn-badge conn-ok" title="Wind sensor connected">💨 Wind</span>
-                {% elif state.services.wind %}
-                <span class="conn-badge conn-warn" title="Wind service running, searching...">💨 Wind ⚠</span>
-                {% else %}
-                <span class="conn-badge conn-off" title="Wind service not running">💨 Wind</span>
-                {% endif %}
+                <span id="gps-indicator" class="conn-badge {% if state.gps_status.connected %}conn-ok{% elif state.services.gps %}conn-warn{% else %}conn-off{% endif %}" title="GPS status">📍 GPS{% if state.services.gps and not state.gps_status.connected %} ⚠{% endif %}</span>
+                <span id="wind-indicator" class="conn-badge {% if state.wind.connected %}conn-ok{% elif state.services.wind %}conn-warn{% else %}conn-off{% endif %}" title="Wind status">💨 Wind{% if state.services.wind and not state.wind.connected %} ⚠{% endif %}</span>
             </div>
             <div class="clock" id="clock"></div>
         </div>
@@ -578,170 +566,121 @@ DASHBOARD_HTML = """
     <div class="grid">
         <div class="card">
             <h2>CPU Temp</h2>
-            <div class="value">{{ state.cpu_temp_c or '—' }}<span class="unit">°C</span></div>
+            <div class="value"><span id="cpu-temp">{{ state.cpu_temp_c or '—' }}</span><span class="unit">°C</span></div>
         </div>
         <div class="card">
-            <h2>Battery {% if state.battery.charging %}<span class="charging">⚡</span>{% endif %}</h2>
-            <div class="value">{{ state.battery.percent or '—' }}<span class="unit">%</span></div>
-            <div class="sub">{{ state.battery.voltage or '—' }}V · {{ state.battery.current_ma or '—' }}mA · {% if state.battery.charging %}<span class="charging">Charging</span>{% else %}<span class="discharging">On Battery</span>{% endif %}</div>
+            <h2>Battery <span id="battery-charging-icon" style="display: {{ 'inline' if state.battery.charging else 'none' }};" class="charging">⚡</span></h2>
+            <div class="value"><span id="battery-percent">{{ state.battery.percent or '—' }}</span><span class="unit">%</span></div>
+            <div class="sub"><span id="battery-voltage">{{ state.battery.voltage or '—' }}</span>V · <span id="battery-current">{{ state.battery.current_ma or '—' }}</span>mA · <span id="battery-status">{% if state.battery.charging %}<span class="charging">Charging</span>{% else %}<span class="discharging">On Battery</span>{% endif %}</span></div>
+            <div id="battery-estimate" class="sub" style="margin-top: 4px;">
             {% if state.battery.remaining_str and not state.battery.charging %}
-            <div class="sub" style="margin-top: 4px; color: #ff9800;">~{{ state.battery.remaining_str }} remaining · empty ~{{ state.battery.empty_time }}</div>
+            <span style="color: #ff9800;">~{{ state.battery.remaining_str }} remaining · empty ~{{ state.battery.empty_time }}</span>
             {% elif state.battery.charge_str and state.battery.charging %}
-            <div class="sub" style="margin-top: 4px; color: #1976d2;">~{{ state.battery.charge_str }} to full · ready ~{{ state.battery.full_time }}</div>
+            <span style="color: #1976d2;">~{{ state.battery.charge_str }} to full · ready ~{{ state.battery.full_time }}</span>
             {% endif %}
+            </div>
         </div>
         <div class="card">
             <h2>Disk Free</h2>
-            <div class="value">{{ state.disk.free_gb or '—' }}<span class="unit">GB</span></div>
+            <div class="value"><span id="disk-free">{{ state.disk.free_gb or '—' }}</span><span class="unit">GB</span></div>
         </div>
         <div class="card">
             <h2>RAM</h2>
-            <div class="value">{{ state.ram_percent or '—' }}<span class="unit">%</span></div>
+            <div class="value"><span id="ram-percent">{{ state.ram_percent or '—' }}</span><span class="unit">%</span></div>
         </div>
     </div>
 
     <!-- GPS Section -->
-    {% if state.gps %}
-    <div class="card" style="margin-top: 12px;">
-        <h2>📍 GPS — {{ state.gps.fix_type }} ({{ state.gps.satellites }} sats) · ±{{ state.gps.accuracy_cm or '?' }}cm</h2>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-            <div>
-                <div style="font-size: 11px; color: #78909c;">POSITION</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.6f"|format(state.gps.latitude) }}, {{ "%.6f"|format(state.gps.longitude) }}</div>
+    <div id="gps-section" class="card" style="margin-top: 12px;">
+        <div id="gps-connected" style="display: {{ 'block' if state.gps else 'none' }};">
+            <h2>📍 GPS — <span id="gps-fix-type">{{ state.gps.fix_type if state.gps else '' }}</span> (<span id="gps-sats">{{ state.gps.satellites if state.gps else 0 }}</span> sats) · ±<span id="gps-accuracy">{{ state.gps.accuracy_cm if state.gps else '?' }}</span>cm</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                <div>
+                    <div style="font-size: 11px; color: #78909c;">POSITION</div>
+                    <div style="font-size: 14px; font-weight: 600;"><span id="gps-position">{{ "%.6f, %.6f"|format(state.gps.latitude, state.gps.longitude) if state.gps and state.gps.latitude else '—' }}</span></div>
+                </div>
+                <div>
+                    <div style="font-size: 11px; color: #78909c;">ACCURACY</div>
+                    <div style="font-size: 14px; font-weight: 600;">±<span id="gps-accuracy2">{{ state.gps.accuracy_cm if state.gps else '?' }}</span>cm (<span id="gps-hdop-rating">{{ state.gps.hdop_rating if state.gps else '' }}</span>)</div>
+                </div>
+                <div>
+                    <div style="font-size: 11px; color: #78909c;">SPEED</div>
+                    <div style="font-size: 14px; font-weight: 600;"><span id="gps-speed">{{ state.gps.speed_knots if state.gps else 0 }}</span> kts · <span id="gps-speed-mph">{{ state.gps.speed_mph if state.gps else 0 }}</span> mph</div>
+                </div>
+                <div>
+                    <div style="font-size: 11px; color: #78909c;">ALTITUDE</div>
+                    <div style="font-size: 14px; font-weight: 600;"><span id="gps-altitude">{{ state.gps.altitude_m|round(1) if state.gps and state.gps.altitude_m else '—' }}</span> m</div>
+                </div>
             </div>
-            <div>
-                <div style="font-size: 11px; color: #78909c;">ACCURACY</div>
-                <div style="font-size: 14px; font-weight: 600;">±{{ state.gps.accuracy_cm }}cm ({{ state.gps.hdop_rating }})</div>
-            </div>
-            <div>
-                <div style="font-size: 11px; color: #78909c;">SPEED</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ state.gps.speed_knots }} kts · {{ state.gps.speed_mph }} mph</div>
-            </div>
-            <div>
-                <div style="font-size: 11px; color: #78909c;">ALTITUDE</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ state.gps.altitude_m|round(1) }} m</div>
+            <div style="margin-top: 10px; display: flex; gap: 16px; font-size: 12px;">
+                <a href="/gps" style="color: #4fc3f7;">📊 GPS Details</a>
+                <a id="gps-map-link" href="https://www.google.com/maps?q={{ state.gps.latitude if state.gps else 0 }},{{ state.gps.longitude if state.gps else 0 }}" target="_blank" style="color: #4fc3f7;">🗺 Open Map ↗</a>
             </div>
         </div>
-        <div style="margin-top: 10px; display: flex; gap: 16px; font-size: 12px;">
-            <a href="/gps" style="color: #4fc3f7;">📊 GPS Details</a>
-            <a href="https://www.google.com/maps?q={{ state.gps.latitude }},{{ state.gps.longitude }}" target="_blank" style="color: #4fc3f7;">🗺 Open Map ↗</a>
+        <div id="gps-disconnected" style="display: {{ 'none' if state.gps else 'block' }};">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2 style="margin: 0;">📍 GPS</h2>
+                    <div id="gps-status-msg" style="font-size: 13px; margin-top: 4px;">
+                        {% if not state.gps_status.connected and state.services.gps %}
+                        <span style="color: #f44336; font-weight: 600;">⚠️ DISCONNECTED — Check USB cable!</span>
+                        <div style="color: #78909c; font-size: 11px; margin-top: 2px;">Service running but no data received</div>
+                        {% elif state.services.gps %}
+                        <span style="color: #ff9800;">No fix — waiting for satellites...</span>
+                        {% else %}
+                        <span style="color: #78909c;">GPS service not running</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <button id="btn-gps-restart" onclick="restartGPS()" style="background: #1976d2; color: white; border: none; padding: 8px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;">🔄 Restart</button>
+            </div>
+            <div style="margin-top: 8px;"><a href="/gps" style="color: #4fc3f7; font-size: 12px;">📊 GPS Details</a></div>
         </div>
     </div>
-    {% else %}
-    <div class="card" style="margin-top: 12px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <h2 style="margin: 0;">📍 GPS</h2>
-                {% if not state.gps_status.connected and state.services.gps %}
-                <div style="color: #f44336; font-size: 13px; margin-top: 4px; font-weight: 600;">
-                    ⚠️ DISCONNECTED — Check USB cable!
-                </div>
-                <div style="color: #78909c; font-size: 11px; margin-top: 2px;">
-                    Service running but no data received ({{ state.gps_status.age_seconds or '?' }}s ago)
-                </div>
-                {% elif state.services.gps %}
-                <div style="color: #ff9800; font-size: 13px; margin-top: 4px;">No fix — waiting for satellites...</div>
-                {% else %}
-                <div style="color: #78909c; font-size: 13px; margin-top: 4px;">GPS service not running</div>
-                {% endif %}
-            </div>
-            <button id="btn-gps-restart" onclick="restartGPS()" style="
-                background: #1976d2;
-                color: white;
-                border: none;
-                padding: 8px 12px;
-                border-radius: 6px;
-                font-size: 12px;
-                cursor: pointer;
-            ">🔄 Restart</button>
-        </div>
-        <div style="margin-top: 8px;"><a href="/gps" style="color: #4fc3f7; font-size: 12px;">📊 GPS Details</a></div>
-    </div>
-    {% endif %}
 
     <!-- Wind Section -->
-    {% if state.wind and state.wind.connected %}
-    <div class="card" style="margin-top: 12px;">
-        <h2>💨 Wind — {{ state.wind.device_name or 'Connected' }}</h2>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-            <div>
-                <div style="font-size: 11px; color: #78909c;">APPARENT WIND SPEED</div>
-                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.wind.speed_knots or 0) }} <span style="font-size: 14px; font-weight: 400;">kts</span></div>
+    <div id="wind-section" class="card" style="margin-top: 12px;">
+        <div id="wind-connected" style="display: {{ 'block' if state.wind and state.wind.connected else 'none' }};">
+            <h2>💨 Wind — <span id="wind-device-name">{{ state.wind.device_name if state.wind else 'Connected' }}</span></h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+                <div>
+                    <div style="font-size: 11px; color: #78909c;">APPARENT WIND SPEED</div>
+                    <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;"><span id="wind-speed">{{ "%.1f"|format(state.wind.speed_knots or 0) if state.wind else '0.0' }}</span> <span style="font-size: 14px; font-weight: 400;">kts</span></div>
+                </div>
+                <div>
+                    <div style="font-size: 11px; color: #78909c;">APPARENT WIND ANGLE</div>
+                    <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;"><span id="wind-angle">{{ state.wind.angle_deg if state.wind else 0 }}</span>°</div>
+                </div>
+                <div id="wind-compass-row" style="display: {{ 'block' if state.wind and state.wind.compass_deg is not none else 'none' }};">
+                    <div style="font-size: 11px; color: #78909c;">COMPASS HEADING</div>
+                    <div style="font-size: 14px; font-weight: 600;"><span id="wind-compass">{{ "%.1f"|format(state.wind.compass_deg) if state.wind and state.wind.compass_deg else '' }}</span>°</div>
+                </div>
+                <div id="wind-temp-row" style="display: {{ 'block' if state.wind and state.wind.temperature is not none else 'none' }};">
+                    <div style="font-size: 11px; color: #78909c;">TEMPERATURE</div>
+                    <div style="font-size: 14px; font-weight: 600;"><span id="wind-temp">{{ "%.1f"|format(state.wind.temperature) if state.wind and state.wind.temperature else '' }}</span>°C</div>
+                </div>
+                <div id="wind-battery-row" style="display: {{ 'block' if state.wind and state.wind.battery is not none else 'none' }};">
+                    <div style="font-size: 11px; color: #78909c;">BATTERY</div>
+                    <div style="font-size: 14px; font-weight: 600;"><span id="wind-battery">{{ state.wind.battery if state.wind else '' }}</span>%</div>
+                </div>
             </div>
-            <div>
-                <div style="font-size: 11px; color: #78909c;">APPARENT WIND ANGLE</div>
-                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ state.wind.angle_deg or 0 }}°</div>
+        </div>
+        <div id="wind-disconnected" style="display: {{ 'none' if state.wind and state.wind.connected else 'block' }};">
+            <h2>💨 Wind</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div id="wind-status-msg">
+                    {% if state.wind and state.wind.status == 'stale' and state.services.wind %}
+                    <div style="color: #f44336; font-weight: 600;">⚠️ DISCONNECTED</div>
+                    {% elif state.services.wind %}
+                    <div style="color: #ff9800;">Searching for sensor...</div>
+                    {% else %}
+                    <div style="color: #78909c; font-style: italic;">Wind service not running</div>
+                    {% endif %}
+                </div>
+                <button onclick="scanBluetooth()" style="background: #1976d2; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;">Scan Bluetooth</button>
             </div>
-            {% if state.wind.compass_deg is not none %}
-            <div>
-                <div style="font-size: 11px; color: #78909c;">COMPASS HEADING</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.compass_deg) }}°</div>
-            </div>
-            {% endif %}
-            {% if state.wind.temperature is not none %}
-            <div>
-                <div style="font-size: 11px; color: #78909c;">TEMPERATURE</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.temperature) }}°C</div>
-            </div>
-            {% endif %}
-            {% if state.wind.roll_deg is not none %}
-            <div>
-                <div style="font-size: 11px; color: #78909c;">ROLL</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.roll_deg) }}°</div>
-            </div>
-            {% endif %}
-            {% if state.wind.pitch_deg is not none %}
-            <div>
-                <div style="font-size: 11px; color: #78909c;">PITCH</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.pitch_deg) }}°</div>
-            </div>
-            {% endif %}
-            {% if state.wind.rate_of_turn is not none %}
-            <div>
-                <div style="font-size: 11px; color: #78909c;">RATE OF TURN</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.1f"|format(state.wind.rate_of_turn) }}°/s</div>
-            </div>
-            {% endif %}
-            {% if state.wind.battery is not none %}
-            <div>
-                <div style="font-size: 11px; color: #78909c;">BATTERY</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ state.wind.battery }}%</div>
-            </div>
-            {% endif %}
-            {% if state.wind.compass_cal is not none %}
-            <div>
-                <div style="font-size: 11px; color: #78909c;">COMPASS CAL</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ state.wind.compass_cal }}</div>
-            </div>
-            {% endif %}
         </div>
     </div>
-    {% else %}
-    <div class="card" style="margin-top: 12px;">
-        <h2>💨 Wind</h2>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                {% if state.wind.status == 'stale' and state.services.wind %}
-                <div style="color: #f44336; font-weight: 600;">⚠️ DISCONNECTED</div>
-                <div style="color: #78909c; font-size: 11px;">Last data {{ state.wind.age_seconds or '?' }}s ago</div>
-                {% elif state.services.wind %}
-                <div style="color: #ff9800;">Searching for sensor...</div>
-                {% else %}
-                <div style="color: #78909c; font-style: italic;">Wind service not running</div>
-                {% endif %}
-            </div>
-            <button onclick="scanBluetooth()" style="
-                background: #1976d2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-size: 13px;
-                cursor: pointer;
-            ">Scan Bluetooth</button>
-        </div>
-    </div>
-    {% endif %}
 
     <!-- IMU Section -->
     {% if state.imu and state.imu.connected %}
@@ -1541,13 +1480,131 @@ DASHBOARD_HTML = """
             .catch(e => console.log('IMU update error:', e));
     }
 
-    // Smart auto-refresh: only refresh if no modal is open
-    setInterval(function() {
-        const snapModalOpen = document.getElementById('snap-modal').style.display !== 'none';
-        if (!imuLiveActive && !snapModalOpen) {
-            location.reload();
-        }
-    }, 5000);
+    // AJAX Dashboard Update (no page reload)
+    function updateDashboard() {
+        fetch('/api/status')
+            .then(r => r.json())
+            .then(data => {
+                // System metrics
+                document.getElementById('cpu-temp').textContent = data.cpu_temp_c || '—';
+                document.getElementById('ram-percent').textContent = data.ram_percent || '—';
+                document.getElementById('disk-free').textContent = data.disk ? data.disk.free_gb : '—';
+
+                // Battery
+                if (data.battery) {
+                    document.getElementById('battery-percent').textContent = data.battery.percent || '—';
+                    document.getElementById('battery-voltage').textContent = data.battery.voltage || '—';
+                    document.getElementById('battery-current').textContent = data.battery.current_ma || '—';
+                    document.getElementById('battery-charging-icon').style.display = data.battery.charging ? 'inline' : 'none';
+                    document.getElementById('battery-status').innerHTML = data.battery.charging
+                        ? '<span class="charging">Charging</span>'
+                        : '<span class="discharging">On Battery</span>';
+
+                    let estimate = '';
+                    if (data.battery.remaining_str && !data.battery.charging) {
+                        estimate = '<span style="color: #ff9800;">~' + data.battery.remaining_str + ' remaining · empty ~' + data.battery.empty_time + '</span>';
+                    } else if (data.battery.charge_str && data.battery.charging) {
+                        estimate = '<span style="color: #1976d2;">~' + data.battery.charge_str + ' to full · ready ~' + data.battery.full_time + '</span>';
+                    }
+                    document.getElementById('battery-estimate').innerHTML = estimate;
+                }
+
+                // GPS indicator
+                const gpsInd = document.getElementById('gps-indicator');
+                if (data.gps_status && data.gps_status.connected) {
+                    gpsInd.className = 'conn-badge conn-ok';
+                    gpsInd.innerHTML = '📍 GPS';
+                } else if (data.services && data.services.gps) {
+                    gpsInd.className = 'conn-badge conn-warn';
+                    gpsInd.innerHTML = '📍 GPS ⚠';
+                } else {
+                    gpsInd.className = 'conn-badge conn-off';
+                    gpsInd.innerHTML = '📍 GPS';
+                }
+
+                // Wind indicator
+                const windInd = document.getElementById('wind-indicator');
+                if (data.wind && data.wind.connected) {
+                    windInd.className = 'conn-badge conn-ok';
+                    windInd.innerHTML = '💨 Wind';
+                } else if (data.services && data.services.wind) {
+                    windInd.className = 'conn-badge conn-warn';
+                    windInd.innerHTML = '💨 Wind ⚠';
+                } else {
+                    windInd.className = 'conn-badge conn-off';
+                    windInd.innerHTML = '💨 Wind';
+                }
+
+                // GPS data
+                if (data.gps && data.gps.latitude) {
+                    document.getElementById('gps-connected').style.display = 'block';
+                    document.getElementById('gps-disconnected').style.display = 'none';
+                    document.getElementById('gps-fix-type').textContent = data.gps.fix_type || '';
+                    document.getElementById('gps-sats').textContent = data.gps.satellites || 0;
+                    document.getElementById('gps-accuracy').textContent = data.gps.accuracy_cm || '?';
+                    document.getElementById('gps-accuracy2').textContent = data.gps.accuracy_cm || '?';
+                    document.getElementById('gps-hdop-rating').textContent = data.gps.hdop_rating || '';
+                    document.getElementById('gps-position').textContent = data.gps.latitude.toFixed(6) + ', ' + data.gps.longitude.toFixed(6);
+                    document.getElementById('gps-speed').textContent = data.gps.speed_knots || 0;
+                    document.getElementById('gps-speed-mph').textContent = data.gps.speed_mph || 0;
+                    document.getElementById('gps-altitude').textContent = data.gps.altitude_m ? data.gps.altitude_m.toFixed(1) : '—';
+                    document.getElementById('gps-map-link').href = 'https://www.google.com/maps?q=' + data.gps.latitude + ',' + data.gps.longitude;
+                } else {
+                    document.getElementById('gps-connected').style.display = 'none';
+                    document.getElementById('gps-disconnected').style.display = 'block';
+                    let gpsMsg = '';
+                    if (data.gps_status && !data.gps_status.connected && data.services && data.services.gps) {
+                        gpsMsg = '<span style="color: #f44336; font-weight: 600;">⚠️ DISCONNECTED — Check USB cable!</span><div style="color: #78909c; font-size: 11px; margin-top: 2px;">Service running but no data received</div>';
+                    } else if (data.services && data.services.gps) {
+                        gpsMsg = '<span style="color: #ff9800;">No fix — waiting for satellites...</span>';
+                    } else {
+                        gpsMsg = '<span style="color: #78909c;">GPS service not running</span>';
+                    }
+                    document.getElementById('gps-status-msg').innerHTML = gpsMsg;
+                }
+
+                // Wind data
+                if (data.wind && data.wind.connected) {
+                    document.getElementById('wind-connected').style.display = 'block';
+                    document.getElementById('wind-disconnected').style.display = 'none';
+                    document.getElementById('wind-speed').textContent = (data.wind.speed_knots || 0).toFixed(1);
+                    document.getElementById('wind-angle').textContent = data.wind.angle_deg || 0;
+                    if (data.wind.device_name) document.getElementById('wind-device-name').textContent = data.wind.device_name;
+                    if (data.wind.compass_deg != null) {
+                        document.getElementById('wind-compass-row').style.display = 'block';
+                        document.getElementById('wind-compass').textContent = data.wind.compass_deg.toFixed(1);
+                    }
+                    if (data.wind.temperature != null) {
+                        document.getElementById('wind-temp-row').style.display = 'block';
+                        document.getElementById('wind-temp').textContent = data.wind.temperature.toFixed(1);
+                    }
+                    if (data.wind.battery != null) {
+                        document.getElementById('wind-battery-row').style.display = 'block';
+                        document.getElementById('wind-battery').textContent = data.wind.battery;
+                    }
+                } else {
+                    document.getElementById('wind-connected').style.display = 'none';
+                    document.getElementById('wind-disconnected').style.display = 'block';
+                    let windMsg = '';
+                    if (data.wind && data.wind.status === 'stale' && data.services && data.services.wind) {
+                        windMsg = '<div style="color: #f44336; font-weight: 600;">⚠️ DISCONNECTED</div>';
+                    } else if (data.services && data.services.wind) {
+                        windMsg = '<div style="color: #ff9800;">Searching for sensor...</div>';
+                    } else {
+                        windMsg = '<div style="color: #78909c; font-style: italic;">Wind service not running</div>';
+                    }
+                    document.getElementById('wind-status-msg').innerHTML = windMsg;
+                }
+
+                // Update timestamp
+                const updated = document.querySelector('.updated');
+                if (updated) updated.textContent = 'Updated ' + data.last_update;
+            })
+            .catch(e => console.log('Dashboard update error:', e));
+    }
+
+    // Update dashboard every 2 seconds (no page reload)
+    setInterval(updateDashboard, 2000);
     </script>
 </body>
 </html>
