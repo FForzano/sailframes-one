@@ -661,7 +661,11 @@ DASHBOARD_HTML = """
                 </div>
                 <div id="wind-battery-row" style="display: {{ 'block' if state.wind and state.wind.battery is not none else 'none' }};">
                     <div style="font-size: 11px; color: #78909c;">BATTERY</div>
-                    <div style="font-size: 14px; font-weight: 600;"><span id="wind-battery">{{ state.wind.battery if state.wind else '' }}</span>%</div>
+                    <div id="wind-battery-val" style="font-size: 14px; font-weight: 600; color: {{ '#f44336' if state.wind and state.wind.low_power_warning else 'inherit' }};"><span id="wind-battery">{{ state.wind.battery if state.wind else '' }}</span>%<span id="wind-battery-warn" style="display: {{ 'inline' if state.wind and state.wind.low_power_warning else 'none' }};"> ⚠️</span></div>
+                </div>
+                <div id="wind-firmware-row" style="display: {{ 'block' if state.wind and state.wind.firmware else 'none' }}; grid-column: span 2;">
+                    <div style="font-size: 11px; color: #78909c;">DEVICE INFO</div>
+                    <div style="font-size: 12px; color: #90a4ae;"><span id="wind-firmware">{{ state.wind.model if state.wind and state.wind.model else '' }}{% if state.wind and state.wind.firmware %} (fw {{ state.wind.firmware }}){% endif %}</span></div>
                 </div>
             </div>
         </div>
@@ -1581,6 +1585,23 @@ DASHBOARD_HTML = """
                     if (data.wind.battery != null) {
                         document.getElementById('wind-battery-row').style.display = 'block';
                         document.getElementById('wind-battery').textContent = data.wind.battery;
+                        // Low battery warning
+                        const batteryVal = document.getElementById('wind-battery-val');
+                        const batteryWarn = document.getElementById('wind-battery-warn');
+                        if (data.wind.low_power_warning) {
+                            batteryVal.style.color = '#f44336';
+                            batteryWarn.style.display = 'inline';
+                        } else {
+                            batteryVal.style.color = 'inherit';
+                            batteryWarn.style.display = 'none';
+                        }
+                    }
+                    // Device firmware info
+                    if (data.wind.model || data.wind.firmware) {
+                        document.getElementById('wind-firmware-row').style.display = 'block';
+                        let info = data.wind.model || '';
+                        if (data.wind.firmware) info += (info ? ' (fw ' + data.wind.firmware + ')' : 'fw ' + data.wind.firmware);
+                        document.getElementById('wind-firmware').textContent = info;
                     }
                 } else {
                     document.getElementById('wind-connected').style.display = 'none';

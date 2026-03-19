@@ -54,18 +54,32 @@ def load_config():
 
 
 # Calypso Ultrasonic Portable Mini BLE UUIDs
-# Standard Bluetooth Environmental Sensing Service (0x181a)
-WIND_SPEED_CHAR_UUID = "00002a72-0000-1000-8000-00805f9b34fb"      # Apparent Wind Speed
-WIND_DIRECTION_CHAR_UUID = "00002a73-0000-1000-8000-00805f9b34fb"  # Apparent Wind Direction
-BATTERY_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"         # Battery Level
+# Environmental Sensing Service (0x181A)
+WIND_SPEED_CHAR_UUID = "00002a72-0000-1000-8000-00805f9b34fb"      # Apparent Wind Speed (uint16, m/s * 100)
+WIND_DIRECTION_CHAR_UUID = "00002a73-0000-1000-8000-00805f9b34fb"  # Apparent Wind Direction (uint16, deg * 100)
 
-# Calypso custom characteristics (under service 0x180d)
-COMPASS_CHAR_UUID = "0000a001-0000-1000-8000-00805f9b34fb"         # Compass Heading (degrees)
-TEMPERATURE_CHAR_UUID = "0000a002-0000-1000-8000-00805f9b34fb"     # Temperature (°C)
-ROLL_CHAR_UUID = "0000a003-0000-1000-8000-00805f9b34fb"            # Roll angle (degrees)
-PITCH_CHAR_UUID = "0000a007-0000-1000-8000-00805f9b34fb"           # Pitch angle (degrees)
-COMPASS_CAL_CHAR_UUID = "0000a008-0000-1000-8000-00805f9b34fb"     # Compass calibration status
-RATE_OF_TURN_CHAR_UUID = "0000a009-0000-1000-8000-00805f9b34fb"    # Rate of turn (deg/s)
+# Battery Service (0x180F)
+BATTERY_CHAR_UUID = "00002a19-0000-1000-8000-00805f9b34fb"         # Battery Level (uint8, 0-100%)
+
+# Data Service (0x180D) - Combined wind data notification
+# Uses Heart Rate Control Point characteristic for combined speed + direction + battery
+COMBINED_DATA_CHAR_UUID = "00002a39-0000-1000-8000-00805f9b34fb"   # Combined: speed(2) + dir(2) + batt(1)
+
+# Device status characteristic
+STATUS_CHAR_UUID = "0000a001-0000-1000-8000-00805f9b34fb"          # 0x00=Sleep, 0x02=Normal
+
+# Device Information Service (0x180A)
+FIRMWARE_REV_CHAR_UUID = "00002a26-0000-1000-8000-00805f9b34fb"    # Firmware Revision
+MODEL_NUMBER_CHAR_UUID = "00002a24-0000-1000-8000-00805f9b34fb"    # Model Number
+MANUFACTURER_CHAR_UUID = "00002a29-0000-1000-8000-00805f9b34fb"    # Manufacturer Name
+
+# Device modes
+DEVICE_MODE_SLEEP = 0x00    # Only advertising, <10% battery
+DEVICE_MODE_NORMAL = 0x02   # All sensors available
+
+# Battery thresholds
+BATTERY_LOW_POWER = 20      # Device enters low power mode
+BATTERY_SLEEP = 10          # Device enters sleep mode
 
 
 def get_data_dir(config):
@@ -98,7 +112,7 @@ def create_csv_writer(data_dir):
     return f, writer
 
 
-def update_wind_status(parsed, device_name=None, device_address=None, connected=True):
+def update_wind_status(parsed, device_name=None, device_address=None, connected=True, device_info=None):
     """Write current wind data to status file for dashboard."""
     try:
         status = {
@@ -116,7 +130,13 @@ def update_wind_status(parsed, device_name=None, device_address=None, connected=
             'rate_of_turn': parsed.get('rate_of_turn') if parsed else None,
             'compass_cal': parsed.get('compass_cal') if parsed else None,
             'battery': parsed.get('battery') if parsed else None,
+            'device_mode': parsed.get('device_mode') if parsed else None,
+            'low_power_warning': parsed.get('battery', 100) is not None and parsed.get('battery', 100) < BATTERY_LOW_POWER if parsed else False,
         }
+        if device_info:
+            status['firmware'] = device_info.get('firmware')
+            status['model'] = device_info.get('model')
+            status['manufacturer'] = device_info.get('manufacturer')
         with open(WIND_STATUS_FILE, 'w') as f:
             json.dump(status, f)
     except Exception as e:
@@ -256,8 +276,11 @@ async def run_async(config):
         'rate_of_turn': None,
         'compass_cal': None,
         'battery': None,
+        'device_mode': None,
     }
+    device_info = {}
     last_write = 0
+    last_battery_warning = 0
 
     while running:
         # Find sensor
@@ -274,6 +297,58 @@ async def run_async(config):
                 logger.info("BLE connected")
                 device_name = device.name
                 device_address = device.address
+
+                # Read device information at connect time
+                device_info = {}
+                for uuid, key, name in [
+                    (FIRMWARE_REV_CHAR_UUID, 'firmware', 'firmware revision'),
+                    (MODEL_NUMBER_CHAR_UUID, 'model', 'model number'),
+                    (MANUFACTURER_CHAR_UUID, 'manufacturer', 'manufacturer'),
+                ]:
+                    try:
+                        data = await client.read_gatt_char(uuid)
+                        device_info[key] = data.decode('utf-8').strip()
+                        logger.info(f"Device {name}: {device_info[key]}")
+                    except Exception:
+                        pass
+
+                # Check device status (sleep vs normal mode)
+                try:
+                    status_data = await client.read_gatt_char(STATUS_CHAR_UUID)
+                    mode = status_data[0] if status_data else None
+                    wind_state['device_mode'] = 'normal' if mode == DEVICE_MODE_NORMAL else 'sleep' if mode == DEVICE_MODE_SLEEP else f'unknown({mode})'
+                    logger.info(f"Device mode: {wind_state['device_mode']}")
+                    if mode == DEVICE_MODE_SLEEP:
+                        logger.warning("Device in sleep mode (battery <10%) - limited data available")
+                except Exception:
+                    wind_state['device_mode'] = None
+
+                # Combined data notification handler (most efficient - all data in one packet)
+                # Format: speed(2 bytes LE, m/s*100) + direction(2 bytes LE, degrees) + battery(1 byte, *10 for %)
+                def combined_callback(sender, data):
+                    nonlocal last_write, rows_written, csv_file, writer, data_dir
+                    if len(data) >= 5:
+                        speed_raw = struct.unpack('<H', data[0:2])[0]
+                        dir_raw = struct.unpack('<H', data[2:4])[0]
+                        battery_raw = data[4]
+
+                        wind_state['speed_mps'] = speed_raw / 100.0
+                        wind_state['speed_knots'] = wind_state['speed_mps'] * 1.94384
+                        wind_state['angle_deg'] = dir_raw  # 1° resolution in combined packet
+                        wind_state['battery'] = min(battery_raw * 10, 100)  # 10% steps, cap at 100
+
+                        # Battery warnings (throttled to once per minute)
+                        nonlocal last_battery_warning
+                        now = time.time()
+                        battery_pct = wind_state['battery']
+                        if battery_pct < BATTERY_LOW_POWER and now - last_battery_warning > 60:
+                            last_battery_warning = now
+                            if battery_pct < BATTERY_SLEEP:
+                                logger.warning(f"Wind sensor battery critical: {battery_pct}% (sleep mode)")
+                            else:
+                                logger.warning(f"Wind sensor battery low: {battery_pct}% (low power mode)")
+
+                        write_wind_data()
 
                 # Wind speed notification handler (uint16, 0.01 m/s resolution)
                 def speed_callback(sender, data):
@@ -342,7 +417,7 @@ async def run_async(config):
                     last_write = now
 
                     # Update status file for dashboard
-                    update_wind_status(wind_state, device_name, device_address, connected=True)
+                    update_wind_status(wind_state, device_name, device_address, connected=True, device_info=device_info)
 
                     utc_now = datetime.now(timezone.utc).isoformat()
                     writer.writerow([
@@ -368,34 +443,33 @@ async def run_async(config):
                             f"Batt={wind_state['battery']}%"
                         )
 
-                # Subscribe to standard BLE characteristics
-                await client.start_notify(WIND_SPEED_CHAR_UUID, speed_callback)
-                logger.info("Subscribed to wind speed")
-                await client.start_notify(WIND_DIRECTION_CHAR_UUID, direction_callback)
-                logger.info("Subscribed to wind direction")
+                # Try combined data notification first (most efficient)
+                use_combined = False
+                try:
+                    await client.start_notify(COMBINED_DATA_CHAR_UUID, combined_callback)
+                    logger.info("Subscribed to combined data notification (speed+direction+battery)")
+                    use_combined = True
+                except Exception as e:
+                    logger.debug(f"Combined notification not available: {e}")
 
-                # Subscribe to optional characteristics (may not all be available)
-                optional_subs = [
-                    (BATTERY_CHAR_UUID, battery_callback, "battery"),
-                    (COMPASS_CHAR_UUID, compass_callback, "compass"),
-                    (TEMPERATURE_CHAR_UUID, temperature_callback, "temperature"),
-                    (ROLL_CHAR_UUID, roll_callback, "roll"),
-                    (PITCH_CHAR_UUID, pitch_callback, "pitch"),
-                    (RATE_OF_TURN_CHAR_UUID, rot_callback, "rate of turn"),
-                    (COMPASS_CAL_CHAR_UUID, compass_cal_callback, "compass cal"),
-                ]
-                for uuid, callback, name in optional_subs:
+                # Fall back to individual characteristics if combined not available
+                if not use_combined:
+                    await client.start_notify(WIND_SPEED_CHAR_UUID, speed_callback)
+                    logger.info("Subscribed to wind speed")
+                    await client.start_notify(WIND_DIRECTION_CHAR_UUID, direction_callback)
+                    logger.info("Subscribed to wind direction")
+
+                    # Subscribe to battery separately
                     try:
-                        await client.start_notify(uuid, callback)
-                        logger.info(f"Subscribed to {name}")
+                        await client.start_notify(BATTERY_CHAR_UUID, battery_callback)
+                        logger.info("Subscribed to battery")
                     except Exception:
-                        # Try reading instead of notifying
                         try:
-                            data = await client.read_gatt_char(uuid)
-                            callback(None, data)
-                            logger.info(f"Read {name}: {data.hex()}")
+                            data = await client.read_gatt_char(BATTERY_CHAR_UUID)
+                            battery_callback(None, data)
+                            logger.info(f"Read battery: {wind_state['battery']}%")
                         except Exception:
-                            logger.debug(f"{name} not available")
+                            logger.debug("Battery not available")
 
                 logger.info("Wind sensor connected and streaming")
 
