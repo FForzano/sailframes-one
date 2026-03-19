@@ -17,7 +17,8 @@ from pathlib import Path
 
 import board
 import busio
-import adafruit_dps310
+from adafruit_dps310 import DPS310
+from adafruit_dps310.advanced import Rate, SampleCount, Mode
 import yaml
 
 # Shared status file for dashboard to read current pressure data
@@ -163,7 +164,7 @@ def run(config):
     dps = None
     while dps is None and running:
         try:
-            dps = adafruit_dps310.DPS310(i2c, address=press_config['i2c_address'])
+            dps = DPS310(i2c, address=press_config['i2c_address'])
             logger.info("DPS310 connected")
         except Exception as e:
             retries += 1
@@ -175,11 +176,11 @@ def run(config):
         return
 
     # Configure for highest precision
-    dps.pressure_rate = adafruit_dps310.Rate.RATE_1_HZ
-    dps.pressure_oversample_count = adafruit_dps310.SampleCount.COUNT_128
-    dps.temperature_rate = adafruit_dps310.Rate.RATE_1_HZ
-    dps.temperature_oversample_count = adafruit_dps310.SampleCount.COUNT_128
-    dps.mode = adafruit_dps310.Mode.CONT_PRESTEMP
+    dps.pressure_rate = Rate.RATE_1_HZ
+    dps.pressure_oversample_count = SampleCount.COUNT_128
+    dps.temperature_rate = Rate.RATE_1_HZ
+    dps.temperature_oversample_count = SampleCount.COUNT_128
+    dps.mode = Mode.CONT_PRESTEMP
     logger.info("DPS310 configured for high-precision continuous mode")
 
     data_dir = get_data_dir(config)
