@@ -7,6 +7,7 @@ Reads BNO085 via I2C, logs heel/pitch/heading and linear acceleration.
 import os
 import sys
 import csv
+import json
 import math
 import time
 import signal
@@ -19,6 +20,9 @@ import busio
 import adafruit_bno08x
 from adafruit_bno08x.i2c import BNO08X_I2C
 import yaml
+
+# Shared status file for dashboard to read current IMU data
+IMU_STATUS_FILE = Path('/tmp/sailframes-imu-status.json')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,6 +115,56 @@ def quaternion_to_euler(i, j, k, real):
     return heading, pitch, heel
 
 
+def update_imu_status(heading, pitch, heel, quat, accel, accuracy, connected=True):
+    """Write current IMU data to status file for dashboard."""
+    try:
+        i, j, k, real = quat if quat else (None, None, None, None)
+        ax, ay, az = accel if accel else (None, None, None)
+
+        # Calculate total linear acceleration magnitude
+        accel_magnitude = None
+        if ax is not None and ay is not None and az is not None:
+            accel_magnitude = math.sqrt(ax*ax + ay*ay + az*az)
+
+        status = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'connected': connected,
+            # Euler angles (most useful for sailors)
+            'heading_deg': round(heading, 2) if heading is not None else None,
+            'pitch_deg': round(pitch, 2) if pitch is not None else None,
+            'heel_deg': round(heel, 2) if heel is not None else None,
+            # Quaternion components (for advanced users)
+            'quat_i': round(i, 6) if i is not None else None,
+            'quat_j': round(j, 6) if j is not None else None,
+            'quat_k': round(k, 6) if k is not None else None,
+            'quat_real': round(real, 6) if real is not None else None,
+            # Linear acceleration (gravity removed)
+            'accel_x_mps2': round(ax, 4) if ax is not None else None,
+            'accel_y_mps2': round(ay, 4) if ay is not None else None,
+            'accel_z_mps2': round(az, 4) if az is not None else None,
+            'accel_magnitude_mps2': round(accel_magnitude, 4) if accel_magnitude is not None else None,
+            # Accuracy
+            'accuracy_rad': round(accuracy, 4) if accuracy is not None and accuracy != '' else None,
+        }
+        with open(IMU_STATUS_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception as e:
+        logger.warning(f"Failed to update status file: {e}")
+
+
+def clear_imu_status():
+    """Clear status file when disconnected."""
+    try:
+        status = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'connected': False,
+        }
+        with open(IMU_STATUS_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception:
+        pass
+
+
 def run(config):
     imu_config = config['imu']
     sample_rate = imu_config['sample_rate_hz']
@@ -186,6 +240,10 @@ def run(config):
             ])
             rows_written += 1
 
+            # Update status file for dashboard (every 10th sample to reduce I/O)
+            if rows_written % 10 == 0:
+                update_imu_status(heading, pitch, heel, quat, linear_accel, accuracy)
+
             if rows_written % 500 == 0:
                 csv_file.flush()
 
@@ -207,6 +265,7 @@ def run(config):
         logger.error(f"Unexpected error: {e}", exc_info=True)
     finally:
         csv_file.close()
+        clear_imu_status()
         logger.info(f"IMU service stopped. {rows_written} rows written.")
 
 

@@ -8,6 +8,7 @@ Logs pressure, temperature, and computed sea-level pressure.
 import os
 import sys
 import csv
+import json
 import time
 import signal
 import logging
@@ -18,6 +19,9 @@ import board
 import busio
 import adafruit_dps310
 import yaml
+
+# Shared status file for dashboard to read current pressure data
+PRESSURE_STATUS_FILE = Path('/tmp/sailframes-pressure-status.json')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,6 +86,67 @@ def compute_sea_level_pressure(station_pressure_hpa, temp_c, elevation_m=2.0):
         1 - (0.0065 * elevation_m) / (temp_c + 273.15 + 0.0065 * elevation_m)
     ) ** -5.257
     return round(sea_level, 3)
+
+
+def pressure_to_inhg(hpa):
+    """Convert hectopascals to inches of mercury."""
+    return round(hpa * 0.02953, 2)
+
+
+def describe_pressure_trend(trend_hpa):
+    """Describe pressure trend in human-readable terms."""
+    if trend_hpa is None or trend_hpa == '':
+        return None
+    trend = float(trend_hpa)
+    if trend > 2.0:
+        return 'Rapidly Rising'
+    elif trend > 0.5:
+        return 'Rising'
+    elif trend > -0.5:
+        return 'Steady'
+    elif trend > -2.0:
+        return 'Falling'
+    else:
+        return 'Rapidly Falling'
+
+
+def update_pressure_status(pressure, temperature, sea_level, trend, connected=True):
+    """Write current pressure data to status file for dashboard."""
+    try:
+        trend_desc = describe_pressure_trend(trend)
+
+        status = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'connected': connected,
+            # Pressure measurements
+            'pressure_hpa': round(pressure, 2) if pressure is not None else None,
+            'pressure_inhg': pressure_to_inhg(pressure) if pressure is not None else None,
+            'sea_level_hpa': round(sea_level, 2) if sea_level is not None else None,
+            'sea_level_inhg': pressure_to_inhg(sea_level) if sea_level is not None else None,
+            # Temperature
+            'temperature_c': round(temperature, 2) if temperature is not None else None,
+            'temperature_f': round(temperature * 9/5 + 32, 1) if temperature is not None else None,
+            # Trend (10-minute change)
+            'trend_hpa': round(float(trend), 4) if trend is not None and trend != '' else None,
+            'trend_desc': trend_desc,
+        }
+        with open(PRESSURE_STATUS_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception as e:
+        logger.warning(f"Failed to update status file: {e}")
+
+
+def clear_pressure_status():
+    """Clear status file when disconnected."""
+    try:
+        status = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'connected': False,
+        }
+        with open(PRESSURE_STATUS_FILE, 'w') as f:
+            json.dump(status, f)
+    except Exception:
+        pass
 
 
 def run(config):
@@ -163,6 +228,9 @@ def run(config):
             ])
             rows_written += 1
 
+            # Update status file for dashboard every reading (1Hz is already low rate)
+            update_pressure_status(pressure, temperature, sea_level, trend)
+
             if rows_written % 60 == 0:  # Flush every minute
                 csv_file.flush()
                 logger.debug(f"P={pressure:.2f}hPa T={temperature:.1f}°C "
@@ -185,6 +253,7 @@ def run(config):
         logger.error(f"Unexpected error: {e}", exc_info=True)
     finally:
         csv_file.close()
+        clear_pressure_status()
         logger.info(f"Pressure service stopped. {rows_written} rows written.")
 
 

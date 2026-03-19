@@ -213,6 +213,50 @@ def get_wind_status():
         return None
 
 
+def get_imu_status():
+    """Read current IMU data from status file written by IMU service."""
+    status_file = Path('/tmp/sailframes-imu-status.json')
+    try:
+        if not status_file.exists():
+            return None
+
+        with open(status_file, 'r') as f:
+            data = json.load(f)
+
+        # Check if data is stale (older than 2 seconds for 50Hz sensor)
+        if data.get('timestamp'):
+            ts = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age > 2:
+                data['connected'] = False
+
+        return data
+    except Exception:
+        return None
+
+
+def get_pressure_status():
+    """Read current pressure data from status file written by pressure service."""
+    status_file = Path('/tmp/sailframes-pressure-status.json')
+    try:
+        if not status_file.exists():
+            return None
+
+        with open(status_file, 'r') as f:
+            data = json.load(f)
+
+        # Check if data is stale (older than 5 seconds for 1Hz sensor)
+        if data.get('timestamp'):
+            ts = datetime.fromisoformat(data['timestamp'].replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age > 5:
+                data['connected'] = False
+
+        return data
+    except Exception:
+        return None
+
+
 def get_latest_gps():
     """Get latest GPS data from most recent CSV file with detailed metrics."""
     try:
@@ -390,6 +434,8 @@ def monitor_loop(config):
         system_state['disk'] = get_disk_usage(data_mount)
         system_state['gps'] = get_latest_gps() or {}
         system_state['wind'] = get_wind_status() or {}
+        system_state['imu'] = get_imu_status() or {}
+        system_state['pressure'] = get_pressure_status() or {}
         system_state['uptime_sec'] = int(time.monotonic())
         system_state['last_update'] = datetime.now(timezone.utc).isoformat()
 
@@ -597,6 +643,133 @@ DASHBOARD_HTML = """
                 font-size: 13px;
                 cursor: pointer;
             ">Scan Bluetooth</button>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- IMU Section -->
+    {% if state.imu and state.imu.connected %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>🧭 IMU — BNO085</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px;">
+            <div>
+                <div style="font-size: 11px; color: #78909c;">HEADING</div>
+                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.imu.heading_deg or 0) }}°</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">HEEL</div>
+                <div style="font-size: 24px; font-weight: 700; {% if state.imu.heel_deg and state.imu.heel_deg|abs > 25 %}color: #ff9800;{% else %}color: #4fc3f7;{% endif %}">
+                    {{ "%.1f"|format(state.imu.heel_deg or 0) }}°
+                    <span style="font-size: 12px; font-weight: 400; color: #78909c;">{{ 'STBD' if state.imu.heel_deg and state.imu.heel_deg > 0 else 'PORT' if state.imu.heel_deg and state.imu.heel_deg < 0 else '' }}</span>
+                </div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">PITCH</div>
+                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.imu.pitch_deg or 0) }}°
+                    <span style="font-size: 12px; font-weight: 400; color: #78909c;">{{ 'BOW UP' if state.imu.pitch_deg and state.imu.pitch_deg > 0 else 'BOW DN' if state.imu.pitch_deg and state.imu.pitch_deg < 0 else '' }}</span>
+                </div>
+            </div>
+        </div>
+        <!-- Linear Acceleration -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #233;">
+            <div>
+                <div style="font-size: 11px; color: #78909c;">ACCEL X (FWD)</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_x_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">ACCEL Y (STBD)</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_y_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">ACCEL Z (DOWN)</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_z_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">TOTAL ACCEL</div>
+                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_magnitude_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+            </div>
+        </div>
+        <!-- Quaternion (advanced) -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #233;">
+            <div>
+                <div style="font-size: 10px; color: #546e7a;">QUAT I</div>
+                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_i or 0) }}</div>
+            </div>
+            <div>
+                <div style="font-size: 10px; color: #546e7a;">QUAT J</div>
+                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_j or 0) }}</div>
+            </div>
+            <div>
+                <div style="font-size: 10px; color: #546e7a;">QUAT K</div>
+                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_k or 0) }}</div>
+            </div>
+            <div>
+                <div style="font-size: 10px; color: #546e7a;">QUAT REAL</div>
+                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_real or 0) }}</div>
+            </div>
+        </div>
+        {% if state.imu.accuracy_rad is not none %}
+        <div style="margin-top: 8px; font-size: 11px; color: #546e7a;">
+            Accuracy: {{ "%.4f"|format(state.imu.accuracy_rad) }} rad
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>🧭 IMU</h2>
+        <div style="color: #78909c; font-style: italic;">
+            {% if state.services.imu %}
+            Initializing BNO085...
+            {% else %}
+            IMU service not running
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Pressure Section -->
+    {% if state.pressure and state.pressure.connected %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>🌡️ Pressure — DPS310</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+            <div>
+                <div style="font-size: 11px; color: #78909c;">BAROMETRIC PRESSURE</div>
+                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.pressure.pressure_hpa or 0) }} <span style="font-size: 14px; font-weight: 400;">hPa</span></div>
+                <div style="font-size: 12px; color: #78909c;">{{ state.pressure.pressure_inhg }} inHg</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">SEA LEVEL PRESSURE</div>
+                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.pressure.sea_level_hpa or 0) }} <span style="font-size: 14px; font-weight: 400;">hPa</span></div>
+                <div style="font-size: 12px; color: #78909c;">{{ state.pressure.sea_level_inhg }} inHg</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">TEMPERATURE</div>
+                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.pressure.temperature_c or 0) }}°<span style="font-size: 14px; font-weight: 400;">C</span></div>
+                <div style="font-size: 12px; color: #78909c;">{{ "%.1f"|format(state.pressure.temperature_f or 0) }}°F</div>
+            </div>
+            <div>
+                <div style="font-size: 11px; color: #78909c;">10-MIN TREND</div>
+                {% if state.pressure.trend_hpa is not none %}
+                <div style="font-size: 24px; font-weight: 700; {% if state.pressure.trend_hpa > 0 %}color: #4caf50;{% elif state.pressure.trend_hpa < 0 %}color: #ff9800;{% else %}color: #4fc3f7;{% endif %}">
+                    {{ '+' if state.pressure.trend_hpa > 0 else '' }}{{ "%.2f"|format(state.pressure.trend_hpa) }} <span style="font-size: 14px; font-weight: 400;">hPa</span>
+                </div>
+                <div style="font-size: 12px; color: #78909c;">{{ state.pressure.trend_desc or 'Calculating...' }}</div>
+                {% else %}
+                <div style="font-size: 14px; color: #78909c; font-style: italic;">Collecting data...</div>
+                <div style="font-size: 11px; color: #546e7a;">Need 10 min of readings</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="card" style="margin-top: 12px;">
+        <h2>🌡️ Pressure</h2>
+        <div style="color: #78909c; font-style: italic;">
+            {% if state.services.pressure %}
+            Initializing DPS310...
+            {% else %}
+            Pressure service not running
+            {% endif %}
         </div>
     </div>
     {% endif %}
