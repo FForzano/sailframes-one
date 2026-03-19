@@ -713,6 +713,25 @@ DASHBOARD_HTML = """
             Accuracy: {{ "%.4f"|format(state.imu.accuracy_rad) }} rad
         </div>
         {% endif %}
+        <!-- Calibration -->
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #233; display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 12px; color: #78909c;">
+                {% if state.imu.heel_offset or state.imu.pitch_offset %}
+                Calibrated: heel {{ "%.1f"|format(state.imu.heel_offset or 0) }}°, pitch {{ "%.1f"|format(state.imu.pitch_offset or 0) }}° offset
+                {% else %}
+                Not calibrated (raw values)
+                {% endif %}
+            </div>
+            <button onclick="calibrateIMU()" id="btn-imu-cal" style="
+                background: #1976d2;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 13px;
+                cursor: pointer;
+            ">Zero Heel/Pitch</button>
+        </div>
     </div>
     {% else %}
     <div class="card" style="margin-top: 12px;">
@@ -998,6 +1017,33 @@ DASHBOARD_HTML = """
             }
         })
         .catch(e => alert('Error: ' + e));
+    }
+
+    function calibrateIMU() {
+        if (!confirm('Zero heel and pitch at current position?\\n\\nMake sure the boat is level at the dock.')) {
+            return;
+        }
+        const btn = document.getElementById('btn-imu-cal');
+        btn.disabled = true;
+        btn.textContent = 'Calibrating...';
+
+        fetch('/api/imu/calibrate', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('IMU calibrated!\\nHeel offset: ' + data.heel_offset.toFixed(1) + '°\\nPitch offset: ' + data.pitch_offset.toFixed(1) + '°');
+                    location.reload();
+                } else {
+                    alert('Calibration failed: ' + (data.error || 'Unknown error'));
+                    btn.disabled = false;
+                    btn.textContent = 'Zero Heel/Pitch';
+                }
+            })
+            .catch(e => {
+                alert('Error: ' + e);
+                btn.disabled = false;
+                btn.textContent = 'Zero Heel/Pitch';
+            });
     }
     </script>
 </body>
@@ -2523,6 +2569,76 @@ def api_bluetooth_set_wind():
 def api_wind_status():
     """Get current wind sensor status."""
     return jsonify(get_wind_status() or {'connected': False})
+
+
+@app.route('/api/imu/calibrate', methods=['POST'])
+def api_imu_calibrate():
+    """
+    Zero heel and pitch offsets based on current IMU readings.
+    Call this when boat is level at the dock.
+    """
+    try:
+        imu_status = get_imu_status()
+        if not imu_status or not imu_status.get('connected'):
+            return jsonify({'success': False, 'error': 'IMU not connected'}), 400
+
+        # Get raw values (before any existing calibration)
+        raw_heel = imu_status.get('raw_heel_deg')
+        raw_pitch = imu_status.get('raw_pitch_deg')
+
+        if raw_heel is None or raw_pitch is None:
+            return jsonify({'success': False, 'error': 'No IMU readings available'}), 400
+
+        # Save new calibration offsets
+        calibration = {
+            'heel_offset': raw_heel,
+            'pitch_offset': raw_pitch,
+            'calibrated_at': datetime.now(timezone.utc).isoformat(),
+        }
+
+        calibration_file = Path('/etc/sailframes/imu-calibration.json')
+        calibration_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(calibration_file, 'w') as f:
+            json.dump(calibration, f, indent=2)
+
+        logger.info(f"IMU calibrated: heel_offset={raw_heel:.2f}°, pitch_offset={raw_pitch:.2f}°")
+
+        return jsonify({
+            'success': True,
+            'heel_offset': raw_heel,
+            'pitch_offset': raw_pitch,
+        })
+
+    except Exception as e:
+        logger.error(f"IMU calibration failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/imu/calibration', methods=['GET'])
+def api_imu_calibration():
+    """Get current IMU calibration offsets."""
+    try:
+        calibration_file = Path('/etc/sailframes/imu-calibration.json')
+        if calibration_file.exists():
+            with open(calibration_file, 'r') as f:
+                return jsonify(json.load(f))
+        return jsonify({'heel_offset': 0, 'pitch_offset': 0, 'calibrated_at': None})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/imu/calibration/reset', methods=['POST'])
+def api_imu_calibration_reset():
+    """Reset IMU calibration to zero offsets."""
+    try:
+        calibration_file = Path('/etc/sailframes/imu-calibration.json')
+        if calibration_file.exists():
+            calibration_file.unlink()
+        logger.info("IMU calibration reset to zero")
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 def run(config):

@@ -23,6 +23,12 @@ import yaml
 
 # Shared status file for dashboard to read current IMU data
 IMU_STATUS_FILE = Path('/tmp/sailframes-imu-status.json')
+# Calibration offsets file (written by dashboard, read by this service)
+IMU_CALIBRATION_FILE = Path('/etc/sailframes/imu-calibration.json')
+
+# Global calibration offsets (loaded at startup and when file changes)
+calibration_offsets = {'heel_offset': 0.0, 'pitch_offset': 0.0}
+calibration_mtime = 0
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,11 +121,49 @@ def quaternion_to_euler(i, j, k, real):
     return heading, pitch, heel
 
 
+def load_calibration_offsets():
+    """Load calibration offsets from file. Called periodically to pick up changes."""
+    global calibration_offsets, calibration_mtime
+    try:
+        if not IMU_CALIBRATION_FILE.exists():
+            return calibration_offsets
+
+        # Check if file has been modified
+        mtime = IMU_CALIBRATION_FILE.stat().st_mtime
+        if mtime == calibration_mtime:
+            return calibration_offsets
+
+        with open(IMU_CALIBRATION_FILE, 'r') as f:
+            data = json.load(f)
+
+        calibration_offsets['heel_offset'] = float(data.get('heel_offset', 0.0))
+        calibration_offsets['pitch_offset'] = float(data.get('pitch_offset', 0.0))
+        calibration_mtime = mtime
+        logger.info(f"Loaded calibration: heel_offset={calibration_offsets['heel_offset']:.2f}°, "
+                   f"pitch_offset={calibration_offsets['pitch_offset']:.2f}°")
+    except Exception as e:
+        logger.warning(f"Failed to load calibration: {e}")
+
+    return calibration_offsets
+
+
+def apply_calibration(heel, pitch):
+    """Apply calibration offsets to heel and pitch values."""
+    cal = load_calibration_offsets()
+    calibrated_heel = heel - cal['heel_offset']
+    calibrated_pitch = pitch - cal['pitch_offset']
+    return calibrated_heel, calibrated_pitch
+
+
 def update_imu_status(heading, pitch, heel, quat, accel, accuracy, connected=True):
     """Write current IMU data to status file for dashboard."""
     try:
         i, j, k, real = quat if quat else (None, None, None, None)
         ax, ay, az = accel if accel else (None, None, None)
+
+        # Apply calibration offsets
+        cal_heel, cal_pitch = apply_calibration(heel, pitch) if heel is not None and pitch is not None else (None, None)
+        cal = load_calibration_offsets()
 
         # Calculate total linear acceleration magnitude
         accel_magnitude = None
@@ -129,10 +173,16 @@ def update_imu_status(heading, pitch, heel, quat, accel, accuracy, connected=Tru
         status = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'connected': connected,
-            # Euler angles (most useful for sailors)
+            # Calibrated Euler angles (most useful for sailors)
             'heading_deg': round(heading, 2) if heading is not None else None,
-            'pitch_deg': round(pitch, 2) if pitch is not None else None,
-            'heel_deg': round(heel, 2) if heel is not None else None,
+            'pitch_deg': round(cal_pitch, 2) if cal_pitch is not None else None,
+            'heel_deg': round(cal_heel, 2) if cal_heel is not None else None,
+            # Raw (uncalibrated) values
+            'raw_pitch_deg': round(pitch, 2) if pitch is not None else None,
+            'raw_heel_deg': round(heel, 2) if heel is not None else None,
+            # Current calibration offsets
+            'heel_offset': cal['heel_offset'],
+            'pitch_offset': cal['pitch_offset'],
             # Quaternion components (for advanced users)
             'quat_i': round(i, 6) if i is not None else None,
             'quat_j': round(j, 6) if j is not None else None,
