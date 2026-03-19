@@ -652,14 +652,10 @@ DASHBOARD_HTML = """
     <div class="card" style="margin-top: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h2 style="margin: 0;">🧭 IMU — BNO085</h2>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 12px; color: #78909c;">Live</span>
-                <label style="position: relative; display: inline-block; width: 40px; height: 22px;">
-                    <input type="checkbox" id="imu-live-toggle" onchange="toggleIMULive()" style="opacity: 0; width: 0; height: 0;">
-                    <span id="imu-live-slider-bg" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #455a64; transition: .3s; border-radius: 22px;"></span>
-                    <span id="imu-live-slider" style="position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%;"></span>
-                </label>
-            </div>
+            <button id="btn-imu-live" onclick="toggleIMULive()" style="
+                background: #455a64; color: white; border: none; padding: 6px 14px;
+                border-radius: 6px; font-size: 12px; cursor: pointer;
+            ">▶ Live</button>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px;">
             <div>
@@ -1151,21 +1147,19 @@ DASHBOARD_HTML = """
 
     // IMU Live Mode
     let imuLiveInterval = null;
+    let imuLiveActive = false;
 
     function toggleIMULive() {
-        const toggle = document.getElementById('imu-live-toggle');
-        const slider = document.getElementById('imu-live-slider');
-        const sliderBg = document.getElementById('imu-live-slider-bg');
+        const btn = document.getElementById('btn-imu-live');
+        imuLiveActive = !imuLiveActive;
 
-        if (toggle.checked) {
-            // Enable live mode
-            slider.style.transform = 'translateX(18px)';
-            sliderBg.style.backgroundColor = '#4caf50';
+        if (imuLiveActive) {
+            btn.style.background = '#4caf50';
+            btn.textContent = '⏹ Stop';
             startIMULive();
         } else {
-            // Disable live mode
-            slider.style.transform = 'translateX(0)';
-            sliderBg.style.backgroundColor = '#455a64';
+            btn.style.background = '#455a64';
+            btn.textContent = '▶ Live';
             stopIMULive();
         }
     }
