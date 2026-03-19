@@ -6,7 +6,7 @@ set -e
 
 WIFI_DEVICE="wlan0"
 AP_SSID="s1"
-AP_PASSWORD="hello"
+AP_PASSWORD="hellowifi"
 AP_CONNECTION="sailframes-ap"
 CLIENT_SSID="Home-IOT"
 CLIENT_CONNECTION="netplan-wlan0-Home-IOT"

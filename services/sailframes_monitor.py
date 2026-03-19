@@ -1120,7 +1120,7 @@ DASHBOARD_HTML = """
         .then(data => {
             if (data.success) {
                 if (newMode === 'ap') {
-                    alert('Switched to Access Point mode!\\n\\nSSID: s1\\nPassword: hello\\nIP: 192.168.4.1\\n\\nConnect to the s1 WiFi network to access dashboard.');
+                    alert('Switched to Access Point mode!\\n\\nSSID: s1\\nPassword: hellowifi\\nIP: 192.168.4.1\\n\\nConnect to the s1 WiFi network to access dashboard.');
                 } else {
                     alert('Switched to Client mode!\\n\\nConnecting to Home-IOT...\\nPage will reload when connected.');
                 }
@@ -2770,7 +2770,7 @@ def get_wifi_status():
             'connection': connection,
             'ip_address': ip_address,
             'ap_ssid': 's1',
-            'ap_password': 'hello',
+            'ap_password': 'hellowifi',
             'client_ssid': 'Home-IOT',
         }
     except Exception as e:
