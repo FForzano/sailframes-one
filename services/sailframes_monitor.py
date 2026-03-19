@@ -650,23 +650,33 @@ DASHBOARD_HTML = """
     <!-- IMU Section -->
     {% if state.imu and state.imu.connected %}
     <div class="card" style="margin-top: 12px;">
-        <h2>🧭 IMU — BNO085</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 style="margin: 0;">🧭 IMU — BNO085</h2>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 12px; color: #78909c;">Live</span>
+                <label style="position: relative; display: inline-block; width: 40px; height: 22px;">
+                    <input type="checkbox" id="imu-live-toggle" onchange="toggleIMULive()" style="opacity: 0; width: 0; height: 0;">
+                    <span id="imu-live-slider-bg" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #455a64; transition: .3s; border-radius: 22px;"></span>
+                    <span id="imu-live-slider" style="position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%;"></span>
+                </label>
+            </div>
+        </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px;">
             <div>
                 <div style="font-size: 11px; color: #78909c;">HEADING</div>
-                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.imu.heading_deg or 0) }}°</div>
+                <div id="imu-heading" style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.imu.heading_deg or 0) }}°</div>
             </div>
             <div>
                 <div style="font-size: 11px; color: #78909c;">HEEL</div>
-                <div style="font-size: 24px; font-weight: 700; {% if state.imu.heel_deg and state.imu.heel_deg|abs > 25 %}color: #ff9800;{% else %}color: #4fc3f7;{% endif %}">
+                <div id="imu-heel" style="font-size: 24px; font-weight: 700; color: #4fc3f7;">
                     {{ "%.1f"|format(state.imu.heel_deg or 0) }}°
-                    <span style="font-size: 12px; font-weight: 400; color: #78909c;">{{ 'STBD' if state.imu.heel_deg and state.imu.heel_deg > 0 else 'PORT' if state.imu.heel_deg and state.imu.heel_deg < 0 else '' }}</span>
+                    <span id="imu-heel-dir" style="font-size: 12px; font-weight: 400; color: #78909c;">{{ 'STBD' if state.imu.heel_deg and state.imu.heel_deg > 0 else 'PORT' if state.imu.heel_deg and state.imu.heel_deg < 0 else '' }}</span>
                 </div>
             </div>
             <div>
                 <div style="font-size: 11px; color: #78909c;">PITCH</div>
-                <div style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.imu.pitch_deg or 0) }}°
-                    <span style="font-size: 12px; font-weight: 400; color: #78909c;">{{ 'BOW UP' if state.imu.pitch_deg and state.imu.pitch_deg > 0 else 'BOW DN' if state.imu.pitch_deg and state.imu.pitch_deg < 0 else '' }}</span>
+                <div id="imu-pitch" style="font-size: 24px; font-weight: 700; color: #4fc3f7;">{{ "%.1f"|format(state.imu.pitch_deg or 0) }}°
+                    <span id="imu-pitch-dir" style="font-size: 12px; font-weight: 400; color: #78909c;">{{ 'BOW UP' if state.imu.pitch_deg and state.imu.pitch_deg > 0 else 'BOW DN' if state.imu.pitch_deg and state.imu.pitch_deg < 0 else '' }}</span>
                 </div>
             </div>
         </div>
@@ -674,38 +684,38 @@ DASHBOARD_HTML = """
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #233;">
             <div>
                 <div style="font-size: 11px; color: #78909c;">ACCEL X (FWD)</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_x_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+                <div id="imu-accel-x" style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_x_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
             </div>
             <div>
                 <div style="font-size: 11px; color: #78909c;">ACCEL Y (STBD)</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_y_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+                <div id="imu-accel-y" style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_y_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
             </div>
             <div>
                 <div style="font-size: 11px; color: #78909c;">ACCEL Z (DOWN)</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_z_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+                <div id="imu-accel-z" style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_z_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
             </div>
             <div>
                 <div style="font-size: 11px; color: #78909c;">TOTAL ACCEL</div>
-                <div style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_magnitude_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
+                <div id="imu-accel-total" style="font-size: 14px; font-weight: 600;">{{ "%.2f"|format(state.imu.accel_magnitude_mps2 or 0) }} <span style="color: #78909c;">m/s²</span></div>
             </div>
         </div>
         <!-- Quaternion (advanced) -->
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #233;">
             <div>
                 <div style="font-size: 10px; color: #546e7a;">QUAT I</div>
-                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_i or 0) }}</div>
+                <div id="imu-quat-i" style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_i or 0) }}</div>
             </div>
             <div>
                 <div style="font-size: 10px; color: #546e7a;">QUAT J</div>
-                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_j or 0) }}</div>
+                <div id="imu-quat-j" style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_j or 0) }}</div>
             </div>
             <div>
                 <div style="font-size: 10px; color: #546e7a;">QUAT K</div>
-                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_k or 0) }}</div>
+                <div id="imu-quat-k" style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_k or 0) }}</div>
             </div>
             <div>
                 <div style="font-size: 10px; color: #546e7a;">QUAT REAL</div>
-                <div style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_real or 0) }}</div>
+                <div id="imu-quat-real" style="font-size: 12px; font-family: monospace;">{{ "%.4f"|format(state.imu.quat_real or 0) }}</div>
             </div>
         </div>
         {% if state.imu.accuracy_rad is not none %}
@@ -1138,6 +1148,76 @@ DASHBOARD_HTML = """
 
     // Load WiFi status on page load
     document.addEventListener('DOMContentLoaded', loadWiFiStatus);
+
+    // IMU Live Mode
+    let imuLiveInterval = null;
+
+    function toggleIMULive() {
+        const toggle = document.getElementById('imu-live-toggle');
+        const slider = document.getElementById('imu-live-slider');
+        const sliderBg = document.getElementById('imu-live-slider-bg');
+
+        if (toggle.checked) {
+            // Enable live mode
+            slider.style.transform = 'translateX(18px)';
+            sliderBg.style.backgroundColor = '#4caf50';
+            startIMULive();
+        } else {
+            // Disable live mode
+            slider.style.transform = 'translateX(0)';
+            sliderBg.style.backgroundColor = '#455a64';
+            stopIMULive();
+        }
+    }
+
+    function startIMULive() {
+        if (imuLiveInterval) return;
+        imuLiveInterval = setInterval(updateIMULive, 200);  // 5Hz updates
+        updateIMULive();  // Immediate first update
+    }
+
+    function stopIMULive() {
+        if (imuLiveInterval) {
+            clearInterval(imuLiveInterval);
+            imuLiveInterval = null;
+        }
+    }
+
+    function updateIMULive() {
+        fetch('/api/imu/status')
+            .then(r => r.json())
+            .then(data => {
+                if (!data.connected) return;
+
+                // Update heading
+                document.getElementById('imu-heading').innerHTML = (data.heading_deg || 0).toFixed(1) + '°';
+
+                // Update heel with direction and color
+                const heel = data.heel_deg || 0;
+                const heelDir = heel > 0 ? 'STBD' : (heel < 0 ? 'PORT' : '');
+                const heelColor = Math.abs(heel) > 25 ? '#ff9800' : '#4fc3f7';
+                document.getElementById('imu-heel').innerHTML = heel.toFixed(1) + '° <span style="font-size: 12px; font-weight: 400; color: #78909c;">' + heelDir + '</span>';
+                document.getElementById('imu-heel').style.color = heelColor;
+
+                // Update pitch with direction
+                const pitch = data.pitch_deg || 0;
+                const pitchDir = pitch > 0 ? 'BOW UP' : (pitch < 0 ? 'BOW DN' : '');
+                document.getElementById('imu-pitch').innerHTML = pitch.toFixed(1) + '° <span style="font-size: 12px; font-weight: 400; color: #78909c;">' + pitchDir + '</span>';
+
+                // Update accelerations
+                document.getElementById('imu-accel-x').innerHTML = (data.accel_x_mps2 || 0).toFixed(2) + ' <span style="color: #78909c;">m/s²</span>';
+                document.getElementById('imu-accel-y').innerHTML = (data.accel_y_mps2 || 0).toFixed(2) + ' <span style="color: #78909c;">m/s²</span>';
+                document.getElementById('imu-accel-z').innerHTML = (data.accel_z_mps2 || 0).toFixed(2) + ' <span style="color: #78909c;">m/s²</span>';
+                document.getElementById('imu-accel-total').innerHTML = (data.accel_magnitude_mps2 || 0).toFixed(2) + ' <span style="color: #78909c;">m/s²</span>';
+
+                // Update quaternions
+                document.getElementById('imu-quat-i').textContent = (data.quat_i || 0).toFixed(4);
+                document.getElementById('imu-quat-j').textContent = (data.quat_j || 0).toFixed(4);
+                document.getElementById('imu-quat-k').textContent = (data.quat_k || 0).toFixed(4);
+                document.getElementById('imu-quat-real').textContent = (data.quat_real || 0).toFixed(4);
+            })
+            .catch(e => console.log('IMU update error:', e));
+    }
     </script>
 </body>
 </html>
@@ -2662,6 +2742,12 @@ def api_bluetooth_set_wind():
 def api_wind_status():
     """Get current wind sensor status."""
     return jsonify(get_wind_status() or {'connected': False})
+
+
+@app.route('/api/imu/status')
+def api_imu_status():
+    """Get current IMU sensor status for live updates."""
+    return jsonify(get_imu_status() or {'connected': False})
 
 
 @app.route('/api/imu/calibrate', methods=['POST'])
