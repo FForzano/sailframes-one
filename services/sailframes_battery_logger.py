@@ -32,6 +32,11 @@ SHUNT_OHMS = 0.1
 VOUT_FULL = 4.2
 VOUT_EMPTY = 3.4
 
+# Voltage warning thresholds
+VOLTAGE_WARNING = 3.6      # Warning threshold
+VOLTAGE_CRITICAL = 3.5     # Critical threshold - shutdown imminent
+VOLTAGE_SAG_THRESHOLD = 0.1  # Warn if voltage drops this much between readings
+
 running = True
 current_session = None
 
@@ -312,12 +317,33 @@ def run():
     charge_count = 0
     rows_logged = 0
     current_log_file = None
+    last_voltage = None
+    last_warning_time = 0
 
     while running:
         battery = get_battery_info()
         if battery is None:
             time.sleep(LOG_INTERVAL)
             continue
+
+        voltage = battery['voltage']
+        current_time = time.time()
+
+        # Voltage warnings (throttled to once per minute)
+        if current_time - last_warning_time > 60:
+            if voltage < VOLTAGE_CRITICAL:
+                logger.warning(f"CRITICAL: Battery voltage {voltage:.3f}V - shutdown imminent!")
+                last_warning_time = current_time
+            elif voltage < VOLTAGE_WARNING:
+                logger.warning(f"LOW VOLTAGE: Battery at {voltage:.3f}V ({battery['percent']:.0f}%)")
+                last_warning_time = current_time
+
+        # Detect voltage sag (sudden drop)
+        if last_voltage is not None:
+            voltage_drop = last_voltage - voltage
+            if voltage_drop >= VOLTAGE_SAG_THRESHOLD:
+                logger.warning(f"VOLTAGE SAG: Dropped {voltage_drop:.3f}V ({last_voltage:.3f}V -> {voltage:.3f}V) - possible power issue")
+        last_voltage = voltage
 
         system = get_system_stats()
         processes = get_top_processes()
