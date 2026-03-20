@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SailFrames - Race Analytics</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <!-- HLS.js -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12/dist/hls.min.js"></script>
+
+    <!-- Day.js -->
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/duration.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
+
+    <link rel="stylesheet" href="/assets/css/main.css">
+</head>
+<body>
+    <header class="header">
+        <h1 class="logo">SailFrames</h1>
+        <div class="session-selector">
+            <select id="session-select">
+                <option value="">Select a session...</option>
+            </select>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Left panel: Map -->
+        <section class="panel map-panel">
+            <div class="panel-header">
+                <h2>Track</h2>
+                <div class="stats" id="map-stats">
+                    <span class="stat"><label>Speed:</label> <span id="stat-speed">--</span> kn</span>
+                    <span class="stat"><label>Course:</label> <span id="stat-course">--</span>&deg;</span>
+                </div>
+            </div>
+            <div id="map" class="map-container"></div>
+        </section>
+
+        <!-- Right panel: Charts and Video -->
+        <section class="panel data-panel">
+            <!-- Charts -->
+            <div class="charts-container">
+                <div class="chart-row">
+                    <div class="chart-box">
+                        <h3>Heel &amp; Pitch</h3>
+                        <canvas id="chart-attitude"></canvas>
+                    </div>
+                    <div class="chart-box">
+                        <h3>Wind</h3>
+                        <canvas id="chart-wind"></canvas>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-box">
+                        <h3>Speed</h3>
+                        <canvas id="chart-speed"></canvas>
+                    </div>
+                    <div class="chart-box">
+                        <h3>Pressure</h3>
+                        <canvas id="chart-pressure"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Video -->
+            <div class="video-container" id="video-container" style="display: none;">
+                <div class="video-box">
+                    <h3>Cockpit</h3>
+                    <video id="video-cockpit" muted></video>
+                </div>
+                <div class="video-box">
+                    <h3>Sails</h3>
+                    <video id="video-sails" muted></video>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Timeline -->
+    <footer class="timeline-container">
+        <div class="playback-controls">
+            <button id="btn-play" class="btn-control">
+                <span class="icon-play">&#9654;</span>
+                <span class="icon-pause" style="display:none;">&#10074;&#10074;</span>
+            </button>
+            <select id="playback-speed">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+                <option value="8">8x</option>
+            </select>
+        </div>
+        <div class="timeline-wrapper">
+            <span id="time-current" class="time-label">00:00:00</span>
+            <input type="range" id="timeline" class="timeline" min="0" max="100" value="0">
+            <span id="time-duration" class="time-label">00:00:00</span>
+        </div>
+    </footer>
+
+    <!-- Loading overlay -->
+    <div id="loading" class="loading-overlay" style="display: none;">
+        <div class="spinner"></div>
+        <p>Loading session data...</p>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/config.js"></script>
+    <script src="/assets/js/utils/time-sync.js"></script>
+    <script src="/assets/js/components/map-view.js"></script>
+    <script src="/assets/js/components/chart-panel.js"></script>
+    <script src="/assets/js/components/video-player.js"></script>
+    <script src="/assets/js/components/timeline.js"></script>
+    <script src="/assets/js/app.js"></script>
+</body>
+</html>

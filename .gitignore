@@ -1,1 +1,34 @@
+# Data files (too large for git)
+data/
+
+# Python
+__pycache__/
 services/__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+/var/
+
+# Temporary files
+*.tmp
+/tmp/
+
+# AWS credentials (never commit)
+.aws/
+credentials.json
