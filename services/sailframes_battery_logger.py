@@ -269,6 +269,25 @@ class BatterySession:
         return summary
 
 
+def get_daily_log_file():
+    """Get path to today's continuous battery log file."""
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    return DATA_DIR / f'battery_{today}.csv'
+
+
+def ensure_daily_log_header(log_file):
+    """Create daily log file with header if it doesn't exist."""
+    if not log_file.exists():
+        with open(log_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp', 'voltage', 'current_ma', 'percent', 'power_mw',
+                'charging', 'cpu_percent', 'memory_percent', 'cpu_temp'
+            ])
+        return True
+    return False
+
+
 def run():
     global current_session, running
 
@@ -291,6 +310,8 @@ def run():
     DEBOUNCE_COUNT = 3  # Require 3 consecutive readings (~1.5 min) to confirm state change
     discharge_count = 0
     charge_count = 0
+    rows_logged = 0
+    current_log_file = None
 
     while running:
         battery = get_battery_info()
@@ -301,7 +322,37 @@ def run():
         system = get_system_stats()
         processes = get_top_processes()
 
-        # Debounced charging state detection
+        # Always log to daily continuous file
+        daily_log = get_daily_log_file()
+        if daily_log != current_log_file:
+            if ensure_daily_log_header(daily_log):
+                logger.info(f"Created new daily log: {daily_log}")
+            current_log_file = daily_log
+            rows_logged = 0
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with open(daily_log, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp,
+                battery['voltage'],
+                battery['current_ma'],
+                battery['percent'],
+                battery['power_mw'],
+                'charging' if battery['charging'] else 'discharging',
+                system['cpu_percent'],
+                system['memory_percent'],
+                system['cpu_temp'],
+            ])
+        rows_logged += 1
+
+        # Log status every 60 samples (~30 min)
+        if rows_logged % 60 == 0:
+            state = 'charging' if battery['charging'] else 'discharging'
+            logger.info(f"Battery: {battery['percent']}% {battery['voltage']}V "
+                       f"{battery['current_ma']}mA ({state})")
+
+        # Debounced charging state detection for session tracking
         if battery['charging']:
             charge_count += 1
             discharge_count = 0
@@ -334,11 +385,9 @@ def run():
             # Initial state - use current reading
             last_charging = battery['charging']
 
-        # Log if we're in a discharge session
+        # Also log to session file if we're in a discharge session
         if current_session and not battery['charging']:
             current_session.log_sample(battery, system, processes)
-            logger.debug(f"Logged: {battery['percent']}% {battery['voltage']}V "
-                        f"{battery['current_ma']}mA")
 
         time.sleep(LOG_INTERVAL)
 
