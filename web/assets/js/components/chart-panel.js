@@ -14,6 +14,7 @@ class ChartPanel {
         this._init();
         this._setupTimeSync();
         this._setupFullscreen();
+        this._setupChartInteraction();
     }
 
     _createVerticalLinePlugin() {
@@ -446,9 +447,10 @@ class ChartPanel {
             windMeta: { title: 'Wind Sensor Status', unit: '', datasets: ['Temp (°C)', 'Battery (%)'] }
         };
 
-        // Add click handlers to all chart boxes
+        // Add double-click handlers to all chart boxes for fullscreen
+        // (single click/drag is used for timeline scrubbing)
         document.querySelectorAll('.chart-box').forEach(box => {
-            box.addEventListener('click', (e) => {
+            box.addEventListener('dblclick', (e) => {
                 const canvas = box.querySelector('canvas');
                 if (canvas) {
                     const chartId = canvas.id.replace('chart-', '').replace(/-/g, '');
@@ -478,6 +480,104 @@ class ChartPanel {
             if (e.key === 'Escape' && this.fullscreenOverlay) {
                 this._closeFullscreen();
             }
+        });
+    }
+
+    _setupChartInteraction() {
+        // Add click/drag interaction to all charts
+        Object.entries(this.charts).forEach(([key, chart]) => {
+            const canvas = chart.canvas;
+            let isDragging = false;
+            let hasMoved = false;
+
+            const getTimeFromEvent = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+
+                // Get chart area
+                const chartArea = chart.chartArea;
+                if (!chartArea) return null;
+
+                // Check if within chart area
+                if (x < chartArea.left || x > chartArea.right) return null;
+
+                // Calculate position (0-1) within chart area
+                const position = (x - chartArea.left) / (chartArea.right - chartArea.left);
+
+                // Get corresponding data index
+                const dataLength = this.data.labels?.length || 0;
+                if (dataLength === 0) return null;
+
+                const index = Math.round(position * (dataLength - 1));
+                const clampedIndex = Math.max(0, Math.min(dataLength - 1, index));
+
+                // Get timestamp from label
+                const timestamp = this.data.labels[clampedIndex];
+                if (!timestamp) return null;
+
+                return new Date(timestamp);
+            };
+
+            const handleSeek = (e) => {
+                const time = getTimeFromEvent(e);
+                if (time) {
+                    window.timeController.seek(time);
+                }
+            };
+
+            canvas.addEventListener('mousedown', (e) => {
+                // Only handle left click
+                if (e.button !== 0) return;
+
+                isDragging = true;
+                hasMoved = false;
+                handleSeek(e);
+                e.preventDefault();
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                hasMoved = true;
+                handleSeek(e);
+            });
+
+            canvas.addEventListener('mouseup', (e) => {
+                isDragging = false;
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                isDragging = false;
+            });
+
+            // Touch support for mobile
+            canvas.addEventListener('touchstart', (e) => {
+                isDragging = true;
+                hasMoved = false;
+                const touch = e.touches[0];
+                const time = getTimeFromEvent(touch);
+                if (time) {
+                    window.timeController.seek(time);
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                if (!isDragging) return;
+                hasMoved = true;
+                const touch = e.touches[0];
+                const time = getTimeFromEvent(touch);
+                if (time) {
+                    window.timeController.seek(time);
+                }
+                e.preventDefault();
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', () => {
+                isDragging = false;
+            });
+
+            // Change cursor to indicate interactivity
+            canvas.style.cursor = 'crosshair';
         });
     }
 
@@ -593,11 +693,72 @@ class ChartPanel {
         this.fullscreenChartKey = chartKey;
         this._renderFullscreenStats(chartKey);
 
+        // Add click/drag interaction to fullscreen chart
+        this._setupFullscreenChartInteraction(canvas);
+
         // Sync cursor position
         const currentTime = window.timeController.getCurrentTime();
         if (currentTime) {
             this._updateFullscreenCursor(currentTime);
         }
+    }
+
+    _setupFullscreenChartInteraction(canvas) {
+        let isDragging = false;
+
+        const getTimeFromEvent = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+
+            const chart = this.fullscreenChart;
+            if (!chart) return null;
+
+            const chartArea = chart.chartArea;
+            if (!chartArea) return null;
+
+            if (x < chartArea.left || x > chartArea.right) return null;
+
+            const position = (x - chartArea.left) / (chartArea.right - chartArea.left);
+            const dataLength = this.data.labels?.length || 0;
+            if (dataLength === 0) return null;
+
+            const index = Math.round(position * (dataLength - 1));
+            const clampedIndex = Math.max(0, Math.min(dataLength - 1, index));
+
+            const timestamp = this.data.labels[clampedIndex];
+            if (!timestamp) return null;
+
+            return new Date(timestamp);
+        };
+
+        const handleSeek = (e) => {
+            const time = getTimeFromEvent(e);
+            if (time) {
+                window.timeController.seek(time);
+            }
+        };
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            isDragging = true;
+            handleSeek(e);
+            e.preventDefault();
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            handleSeek(e);
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+
+        canvas.style.cursor = 'crosshair';
     }
 
     _closeFullscreen() {
