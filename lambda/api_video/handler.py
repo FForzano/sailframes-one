@@ -55,6 +55,9 @@ def get_video_streams(device_id: str, date: str) -> dict:
     """Get HLS stream info for all cameras."""
     streams = {}
 
+    # Try to get correct times from session manifest
+    manifest_times = get_manifest_video_times(device_id, date)
+
     for camera in ['cockpit', 'sails']:
         prefix = f"hls/{device_id}/{date}/{camera}/"
 
@@ -65,35 +68,79 @@ def get_video_streams(device_id: str, date: str) -> dict:
         except s3.exceptions.ClientError:
             continue
 
-        # List segments
-        segments = []
-        paginator = s3.get_paginator('list_objects_v2')
-        for page in paginator.paginate(Bucket=DATA_BUCKET, Prefix=prefix):
-            for obj in page.get('Contents', []):
-                key = obj['Key']
-                if key.endswith('.ts'):
-                    # Extract timestamp from filename
-                    filename = key.split('/')[-1]
-                    ts_match = re.search(r'(\d{8}_\d{6})', filename)
-                    if ts_match:
-                        ts_str = ts_match.group(1)
-                        try:
-                            start_time = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
-                            segments.append({
-                                'start': start_time.isoformat() + 'Z',
-                                'duration': 300,  # 5 minute segments
-                                'key': key
-                            })
-                        except ValueError:
-                            pass
+        # Get video duration from playlist
+        duration = get_playlist_duration(playlist_key)
 
-        # Sort segments by time
-        segments.sort(key=lambda s: s['start'])
+        # Use manifest times if available (more accurate than filename timestamps)
+        manifest_key = f"video_{camera}"
+        if manifest_key in manifest_times:
+            start_time = manifest_times[manifest_key]['start_time']
+            end_time = manifest_times[manifest_key].get('end_time')
+        else:
+            # Fallback: extract from first segment filename
+            start_time, end_time = get_times_from_segments(prefix)
 
         streams[camera] = {
             'playlist_url': f"https://{CLOUDFRONT_DOMAIN}/hls/{device_id}/{date}/{camera}/playlist.m3u8",
-            'start_time': segments[0]['start'] if segments else None,
-            'segments': [{'start': s['start'], 'duration': s['duration']} for s in segments]
+            'start_time': start_time,
+            'end_time': end_time,
+            'duration_seconds': duration
         }
 
     return streams
+
+
+def get_manifest_video_times(device_id: str, date: str) -> dict:
+    """Get video times from session manifest."""
+    manifest_key = f"processed/{device_id}/{date}/manifest.json"
+    try:
+        response = s3.get_object(Bucket=DATA_BUCKET, Key=manifest_key)
+        manifest = json.loads(response['Body'].read())
+        sensors = manifest.get('sensors', {})
+        return {k: v for k, v in sensors.items() if k.startswith('video_')}
+    except Exception as e:
+        logger.warning(f"Could not read manifest: {e}")
+        return {}
+
+
+def get_playlist_duration(playlist_key: str) -> float:
+    """Calculate total duration from HLS playlist."""
+    try:
+        response = s3.get_object(Bucket=DATA_BUCKET, Key=playlist_key)
+        content = response['Body'].read().decode('utf-8')
+        duration = 0.0
+        for line in content.split('\n'):
+            if line.startswith('#EXTINF:'):
+                dur_str = line.replace('#EXTINF:', '').rstrip(',')
+                try:
+                    duration += float(dur_str)
+                except ValueError:
+                    pass
+        return round(duration, 1)
+    except Exception as e:
+        logger.warning(f"Could not parse playlist duration: {e}")
+        return 0.0
+
+
+def get_times_from_segments(prefix: str) -> tuple:
+    """Fallback: extract times from segment filenames."""
+    segments = []
+    paginator = s3.get_paginator('list_objects_v2')
+    for page in paginator.paginate(Bucket=DATA_BUCKET, Prefix=prefix):
+        for obj in page.get('Contents', []):
+            key = obj['Key']
+            if key.endswith('.ts'):
+                filename = key.split('/')[-1]
+                ts_match = re.search(r'(\d{8}_\d{6})', filename)
+                if ts_match:
+                    ts_str = ts_match.group(1)
+                    try:
+                        ts = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
+                        segments.append(ts)
+                    except ValueError:
+                        pass
+
+    if segments:
+        segments.sort()
+        return segments[0].isoformat() + 'Z', segments[-1].isoformat() + 'Z'
+    return None, None
