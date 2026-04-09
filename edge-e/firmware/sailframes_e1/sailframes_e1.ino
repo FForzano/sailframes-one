@@ -1012,7 +1012,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     uploadTaskFunc,     // Function
     "uploadTask",       // Name
-    8192,               // Stack size
+    12288,              // Stack size (needs room for HTTP + BLE deinit/reinit)
     NULL,               // Parameters
     1,                  // Priority
     &uploadTaskHandle,  // Handle
@@ -2081,7 +2081,13 @@ void updateDisplayD1() {
   char statusStr[32] = "";
   strncat(statusStr, recStr, sizeof(statusStr) - strlen(statusStr) - 1);
   if (uploading) {
-    strncat(statusStr, " UP", sizeof(statusStr) - strlen(statusStr) - 1);
+    char upBuf[16];
+    if (uploadTotal > 0) {
+      snprintf(upBuf, sizeof(upBuf), " UP%d/%d", uploadCount, uploadTotal);
+    } else {
+      snprintf(upBuf, sizeof(upBuf), " UP");
+    }
+    strncat(statusStr, upBuf, sizeof(statusStr) - strlen(statusStr) - 1);
   } else if (wifiConnected) {
     strncat(statusStr, " ", sizeof(statusStr) - strlen(statusStr) - 1);
     strncat(statusStr, getWifiIndicator(), sizeof(statusStr) - strlen(statusStr) - 1);
@@ -2179,10 +2185,17 @@ void updateDisplayD2() {
   // Recording state indicator
   const char* recStr = getRecStateStr();
 
-  char statusStr[16] = "";
+  char statusStr[32] = "";
   strcat(statusStr, recStr);
-  if (uploading) strcat(statusStr, " UP");
-  else if (wifiConnected) { strcat(statusStr, " "); strcat(statusStr, getWifiIndicator()); }
+  if (uploading) {
+    char upBuf[16];
+    if (uploadTotal > 0) {
+      snprintf(upBuf, sizeof(upBuf), " UP%d/%d", uploadCount, uploadTotal);
+    } else {
+      snprintf(upBuf, sizeof(upBuf), " UP");
+    }
+    strcat(statusStr, upBuf);
+  } else if (wifiConnected) { strcat(statusStr, " "); strcat(statusStr, getWifiIndicator()); }
 #if ENABLE_WIND
   if (wind.connected) strcat(statusStr, " C");
 #endif
@@ -2851,112 +2864,8 @@ bool connectWiFi() {
   return false;
 }
 
-// Main upload check - runs when stationary and WiFi configured
-void checkWiFiUpload() {
-  // Skip if no WiFi or upload URL configured
-  if (config.wifi_count == 0 || !strlen(config.upload_url)) return;
-
-  // Only upload when stationary (speed < 0.5 kt for 30 seconds)
-  static unsigned long stationaryStart = 0;
-  if (gps.speed_kts < 0.5) {
-    if (stationaryStart == 0) stationaryStart = millis();
-    if (millis() - stationaryStart < 30000) return;  // Wait 30s
-  } else {
-    stationaryStart = 0;
-    return;
-  }
-
-#if ENABLE_WIND
-  // BLE interferes with WiFi TLS - must fully deinit BLE before upload
-  if (bleInitialized) {
-    Serial.println("[UPLOAD] Preparing for upload (BLE/WiFi radio conflict)...");
-
-    // Disconnect BLE
-    if (pWindClient && pWindClient->isConnected()) {
-      Serial.println("[UPLOAD] Disconnecting wind sensor...");
-      pWindClient->disconnect();
-      delay(100);
-    }
-
-    // Deinit BLE
-    Serial.println("[UPLOAD] Deinitializing BLE...");
-    wind.connected = false;
-    // Don't null pointers before deinit - let NimBLE clean up
-    NimBLEDevice::deinit(false);  // false = don't clear all, just deinit
-    // Now safe to null pointers
-    pWindClient = nullptr;
-    pWindSpeedChar = nullptr;
-    pWindDirChar = nullptr;
-    pBatteryChar = nullptr;
-    pDataChar = nullptr;
-    bleInitialized = false;
-    delay(500);
-    Serial.printf("[UPLOAD] BLE deinit done, heap: %u bytes\n", ESP.getFreeHeap());
-  }
-#endif
-
-  // Connect to WiFi (BLE is now fully off)
-  if (connectWiFi()) {
-    // Give system time to stabilize after WiFi connect
-    Serial.println("[UPLOAD] Waiting for connection to stabilize...");
-    for (int i = 0; i < 30; i++) {
-      delay(100);
-      yield();
-      ArduinoOTA.handle();
-    }
-
-    uploading = true;
-    uploadCount = 0;
-    uploadSuccess = 0;
-    uploadFailed = 0;
-    uploadCurrentFile[0] = '\0';
-
-    // Test connectivity before uploading
-    if (!testS3Connection()) {
-      Serial.println("[UPLOAD] Connection test FAILED - aborting upload");
-      uploading = false;
-#if ENABLE_WIND
-      if (config.wind_enabled && strlen(config.wind_mac) > 0) {
-        Serial.println("[UPLOAD] Reinitializing wind sensor...");
-        initWindSensor();
-      }
-#endif
-      return;
-    }
-
-    // Count files to upload
-    Serial.println("[UPLOAD] Counting files...");
-    yield();
-    uploadTotal = countFilesToUpload("/sf");
-    Serial.printf("[UPLOAD] Found %d files to upload\n", uploadTotal);
-
-    if (uploadTotal > 0) {
-      updateDisplay();
-
-      // Upload all files in /sf directory
-      Serial.printf("[UPLOAD] Starting upload... (Free heap: %u bytes)\n", ESP.getFreeHeap());
-      uploadDirectory("/sf");
-      Serial.println("[UPLOAD] Done");
-
-    } else {
-      Serial.println("[UPLOAD] No new files to upload");
-    }
-
-    uploading = false;
-    Serial.println("[UPLOAD] Complete, WiFi stays connected for OTA/telnet");
-
-#if ENABLE_WIND
-    // Reinitialize BLE and reconnect to wind sensor
-    if (config.wind_enabled && strlen(config.wind_mac) > 0) {
-      Serial.println("[UPLOAD] Reinitializing wind sensor...");
-      initWindSensor();
-    }
-#endif
-  }
-
-  // Reset stationary timer to avoid rapid retries
-  stationaryStart = 0;
-}
+// checkWiFiUpload() REMOVED — was racing with uploadTaskFunc() on Core 0.
+// All upload logic now lives in uploadTaskFunc() (single owner, uses sdMutex).
 
 // ============================================================
 // SERIAL/TELNET COMMANDS
@@ -3097,102 +3006,37 @@ void processCommand(String cmd, bool fromTelnet) {
       return;
     }
     tprintln("Starting manual upload...");
+    // BLE deinit NOT needed — uploads use plain HTTP, no TLS memory pressure.
+    // BLE and WiFi coexist fine for basic HTTP PUTs.
 
-#if ENABLE_WIND
-    // BLE interferes with WiFi TLS - must fully deinit BLE
-    // Disconnect WiFi first, then deinit BLE, then reconnect WiFi
-    if (bleInitialized) {
-      tprintln("Preparing for upload (BLE/WiFi radio conflict)...");
-
-      // Step 1: Disconnect BLE
-      if (pWindClient && pWindClient->isConnected()) {
-        tprintln("Disconnecting wind sensor...");
-        pWindClient->disconnect();
-        delay(100);
-      }
-
-      // Step 2: Disconnect WiFi if connected
-      if (wifiConnected || WiFi.status() == WL_CONNECTED) {
-        tprintln("Disconnecting WiFi...");
-        WiFi.disconnect(true);
-        wifiConnected = false;
-        delay(200);
-      }
-
-      // Step 3: Deinit BLE (safe now that WiFi is disconnected)
-      tprintln("Deinitializing BLE...");
-      wind.connected = false;
-      // Don't null pointers before deinit - let NimBLE clean up
-      NimBLEDevice::deinit(false);  // false = don't clear all, just deinit
-      // Now safe to null pointers
-      pWindClient = nullptr;
-      pWindSpeedChar = nullptr;
-      pWindDirChar = nullptr;
-      pBatteryChar = nullptr;
-      pDataChar = nullptr;
-      bleInitialized = false;
-      delay(500);
-      tprintf("BLE deinit done, heap: %u bytes\n", ESP.getFreeHeap());
-    }
-#endif
-
-    // Now connect WiFi (BLE is fully off)
     tprintln("Connecting to WiFi...");
     if (connectWiFi()) {
       tprintf("Connected to: %s, IP: %s\n", connectedSSID, WiFi.localIP().toString().c_str());
       tprintf("Free heap: %u bytes\n", ESP.getFreeHeap());
-      tprintf("Stack high water: %u bytes\n", uxTaskGetStackHighWaterMark(NULL));
 
-      // Test connectivity - first check DNS
-      tprintln("Testing DNS resolution...");
-      IPAddress ip;
-      if (!WiFi.hostByName("p9s9eia0t6.execute-api.us-east-1.amazonaws.com", ip)) {
-        tprintln("DNS resolution FAILED");
-#if ENABLE_WIND
-        if (config.wind_enabled && strlen(config.wind_mac) > 0) {
-          tprintln("Reinitializing wind sensor...");
-          initWindSensor();
-        }
-#endif
-        return;
-      }
-      tprintf("DNS OK: %s\n", ip.toString().c_str());
-
-      // Test TLS directly to AWS (skip intermediate tests now that BLE is off)
-      tprintln("Testing TLS to AWS API Gateway...");
+      // Test S3 connectivity
+      tprintln("Testing S3 connection...");
       if (!testS3Connection()) {
-        tprintln("AWS TLS FAILED");
-#if ENABLE_WIND
-        // Reinit BLE and reconnect to wind sensor
-        if (config.wind_enabled && strlen(config.wind_mac) > 0) {
-          tprintln("Reinitializing wind sensor...");
-          initWindSensor();
-        }
-#endif
+        tprintln("S3 connection FAILED");
         return;
       }
-      tprintln("AWS TLS OK");
+      tprintln("S3 OK");
+
+      // Set uploading flag so Core 0 task doesn't interfere, and OLED shows progress
+      uploading = true;
+      uploadCount = 0;
+      uploadSuccess = 0;
+      uploadFailed = 0;
+      uploadCurrentFile[0] = '\0';
+      uploadTotal = countFilesToUpload("/sf");
+      tprintf("Found %d files to upload\n", uploadTotal);
 
       tprintln("Calling uploadDirectory...");
       yield();
       delay(100);
       uploadDirectory("/sf");
+      uploading = false;
       tprintln("Upload complete");
-#if ENABLE_WIND
-      // Reinitialize BLE and reconnect to wind sensor
-      if (config.wind_enabled && strlen(config.wind_mac) > 0) {
-        tprintln("Reinitializing wind sensor...");
-        initWindSensor();
-      }
-#endif
-    } else {
-#if ENABLE_WIND
-      // WiFi failed, reinit BLE
-      if (config.wind_enabled && strlen(config.wind_mac) > 0) {
-        tprintln("WiFi failed, reinitializing wind sensor...");
-        initWindSensor();
-      }
-#endif
     }
 
   } else if (cmd == "wifi") {
@@ -3844,6 +3688,7 @@ const char* getRecStateStr() {
 // ============================================================
 void uploadTaskFunc(void* param) {
   Serial.println("[UPLOAD] Task started on Core 0");
+  unsigned long stationaryStart = 0;  // track how long boat has been still
 
   while (true) {
     unsigned long now = millis();
@@ -3857,25 +3702,37 @@ void uploadTaskFunc(void* param) {
       uploadRetryCount = 0;  // Reset retry counter for new session
       Serial.println("[UPLOAD] Triggered: recording stopped");
     }
-    else if (wifiConnected && !logging && !uploading) {
-      // WiFi connected and not recording - periodic upload attempt
-      if (now - lastUploadCheck >= UPLOAD_CHECK_INTERVAL_MS) {
-        lastUploadCheck = now;
+    else if (!logging && !uploading) {
+      // Skip if no WiFi configured
+      if (config.wifi_count == 0 || !strlen(config.upload_url)) {
+        // No WiFi configured, skip
+      }
+      // Only upload when stationary (speed < 0.5 kt for 30 seconds)
+      else if (gps.speed_kts >= 0.5) {
+        stationaryStart = 0;  // reset — boat is moving
+      }
+      else {
+        if (stationaryStart == 0) stationaryStart = now;
+        if (now - stationaryStart >= 30000) {
+          // Stationary long enough — check periodic interval
+          if (now - lastUploadCheck >= UPLOAD_CHECK_INTERVAL_MS) {
+            lastUploadCheck = now;
 
-        // Check retry backoff
-        if (uploadRetryCount > 0 && now - lastUploadAttempt < UPLOAD_RETRY_DELAY_MS) {
-          // Still in retry backoff period - skip
-        } else if (uploadRetryCount >= MAX_UPLOAD_RETRIES) {
-          // Max retries reached - wait longer before next attempt
-          if (now - lastUploadAttempt >= UPLOAD_RETRY_DELAY_MS * 5) {
-            uploadRetryCount = 0;  // Reset after extended wait
-            shouldUpload = true;
-            Serial.println("[UPLOAD] Triggered: retry reset");
+            // Check retry backoff
+            if (uploadRetryCount > 0 && now - lastUploadAttempt < UPLOAD_RETRY_DELAY_MS) {
+              // Still in retry backoff period - skip
+            } else if (uploadRetryCount >= MAX_UPLOAD_RETRIES) {
+              // Max retries reached - wait longer before next attempt
+              if (now - lastUploadAttempt >= UPLOAD_RETRY_DELAY_MS * 5) {
+                uploadRetryCount = 0;  // Reset after extended wait
+                shouldUpload = true;
+                Serial.println("[UPLOAD] Triggered: retry reset");
+              }
+            } else {
+              shouldUpload = true;
+              Serial.println("[UPLOAD] Triggered: periodic check (stationary)");
+            }
           }
-        } else {
-          // Normal periodic attempt - uploadDirectory will skip already-uploaded files
-          shouldUpload = true;
-          Serial.println("[UPLOAD] Triggered: periodic check");
         }
       }
     }
@@ -3884,20 +3741,22 @@ void uploadTaskFunc(void* param) {
     if (shouldUpload) {
       lastUploadAttempt = now;
 
+      // BLE deinit NOT needed — uploads use plain HTTP (no TLS memory pressure).
+      // ESP32 can time-slice WiFi and BLE on the shared radio for basic HTTP PUTs.
+
       // Try to connect to WiFi if not connected
       if (!wifiConnected) {
         connectWiFi();
       }
 
       if (wifiConnected) {
-        // Set uploading=true BEFORE TLS test to pause sensors in main loop
+        // Set uploading=true to show UPLOADING screen
         uploading = true;
         uploadCount = 0;
         uploadSuccess = 0;
         uploadFailed = 0;
         uploadCurrentFile[0] = '\0';
 
-        // Give main loop time to see the flag and stop sensor reads
         vTaskDelay(pdMS_TO_TICKS(100));
 
         Serial.printf("[UPLOAD] Starting (heap: %u, maxBlock: %u)\n",
@@ -3911,8 +3770,6 @@ void uploadTaskFunc(void* param) {
             Serial.println("[UPLOAD] Connectivity test failed");
           }
         } else {
-          // After 2 failures, skip test and try upload directly
-          // HTTPClient might handle TLS differently than WiFiClientSecure
           Serial.printf("[UPLOAD] Skipping conn test (retry %d), trying upload directly\n", uploadRetryCount);
         }
 
@@ -3924,7 +3781,6 @@ void uploadTaskFunc(void* param) {
             // Count files for progress display
             uploadTotal = countFilesToUpload("/sf");
             Serial.printf("[UPLOAD] Found %d files to upload\n", uploadTotal);
-            updateDisplay();
 
             uploadDirectory("/sf");
             xSemaphoreGive(sdMutex);
@@ -3935,9 +3791,12 @@ void uploadTaskFunc(void* param) {
           Serial.println("[UPLOAD] Cycle complete");
         }
       } else {
-        Serial.println("[UPLOAD] WiFi failed");
+        Serial.println("[UPLOAD] WiFi connect failed");
         uploadRetryCount++;
       }
+
+      // Reset stationary timer to avoid rapid retries
+      stationaryStart = 0;
     }
 
     vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
@@ -3967,21 +3826,21 @@ void loop() {
   // Update GPS speed-triggered recording state machine
   updateRecordingState();
 
-  // Skip sensor reads during upload to reduce memory fragmentation
-  if (!uploading) {
-    if (now - lastIMU >= IMU_INTERVAL_MS) {
-      readIMU();
-      if (logging) logIMU();
-      lastIMU = now;
-    }
+  // Sensor reads are I2C on Core 1, upload runs on Core 0 — no conflict.
+  // SD logging (logIMU/logPressure) is guarded by `logging` which is always
+  // false during upload (task checks !logging before starting).
+  if (now - lastIMU >= IMU_INTERVAL_MS) {
+    readIMU();
+    if (logging) logIMU();
+    lastIMU = now;
+  }
 
-    // Pressure sensor (same interval as IMU for gust detection)
-    static unsigned long lastPres = 0;
-    if (presOK && now - lastPres >= IMU_INTERVAL_MS) {
-      readPressure();
-      if (logging) logPressure();
-      lastPres = now;
-    }
+  // Pressure sensor (same interval as IMU for gust detection)
+  static unsigned long lastPres = 0;
+  if (presOK && now - lastPres >= IMU_INTERVAL_MS) {
+    readPressure();
+    if (logging) logPressure();
+    lastPres = now;
   }
 
   // Reset pressure min/max every 10 seconds for fresh gust window
@@ -4011,43 +3870,8 @@ void loop() {
 #endif
 
   if (now - lastDisp >= DISPLAY_UPDATE_MS) {
-    if (uploading) {
-      // Show upload status with progress bar
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_helvB12_tr);
-      u8g2.drawStr(5, 14, "UPLOADING");
-
-      // Progress bar (full width)
-      int pct = (uploadTotal > 0) ? (uploadCount * 100 / uploadTotal) : 0;
-      u8g2.drawFrame(5, 18, 118, 12);  // Outer frame
-      if (pct > 0) {
-        u8g2.drawBox(7, 20, (114 * pct) / 100, 8);  // Fill
-      }
-
-      // Progress text: "3/10 (2 ok, 1 fail)"
-      u8g2.setFont(u8g2_font_6x10_tr);
-      char buf[40];
-      if (uploadFailed > 0) {
-        snprintf(buf, sizeof(buf), "%d/%d (%d ok %d fail)",
-                 uploadCount, uploadTotal, uploadSuccess, uploadFailed);
-      } else {
-        snprintf(buf, sizeof(buf), "%d/%d done", uploadCount, uploadTotal);
-      }
-      u8g2.drawStr(5, 42, buf);
-
-      // Current file (truncated)
-      char shortFile[22];
-      strncpy(shortFile, uploadCurrentFile, 21);
-      shortFile[21] = '\0';
-      u8g2.drawStr(5, 54, shortFile);
-
-      // WiFi SSID
-      snprintf(buf, sizeof(buf), "WiFi: %s", connectedSSID);
-      u8g2.drawStr(5, 64, buf);
-      u8g2.sendBuffer();
-    } else {
-      updateDisplay();
-    }
+    // Always show live sensor data — upload progress shown in status line (UP 3/10)
+    updateDisplay();
     if (logging && LED_PIN >= 0) digitalWrite(LED_PIN, !digitalRead(LED_PIN));
     lastDisp = now;
   }
@@ -4063,12 +3887,8 @@ void loop() {
     lastFlush = now;
   }
 
-  // Auto WiFi upload check (every 60 seconds when not already connected)
-  static unsigned long lastWifiCheck = 0;
-  if (!wifiConnected && now - lastWifiCheck >= 60000) {
-    checkWiFiUpload();
-    lastWifiCheck = now;
-  }
+  // WiFi upload is handled entirely by uploadTaskFunc on Core 0
+  // (removed checkWiFiUpload from main loop — was causing race condition crashes)
 
   // Battery monitoring (every 10 seconds)
   static unsigned long lastBattCheck = 0;
