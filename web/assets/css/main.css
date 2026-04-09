@@ -757,7 +757,7 @@ body {
     align-items: center;
 }
 
-/* Video coverage indicator */
+/* Video coverage indicator - shown on top of track, behind thumb */
 .video-coverage {
     position: absolute;
     top: 50%;
@@ -766,14 +766,14 @@ body {
     height: 6px;
     transform: translateY(-50%);
     pointer-events: none;
-    z-index: 0;
+    z-index: 2;
 }
 
 .video-coverage .video-segment {
     position: absolute;
     height: 100%;
     background: var(--success);
-    opacity: 0.5;
+    opacity: 0.8;
     border-radius: 3px;
 }
 
@@ -782,11 +782,24 @@ body {
     -webkit-appearance: none;
     appearance: none;
     height: 6px;
-    background: var(--bg-panel);
+    background: transparent;
     border-radius: 3px;
     cursor: pointer;
     position: relative;
     z-index: 1;
+}
+
+/* Slider track - semi-transparent to show video coverage underneath */
+.timeline::-webkit-slider-runnable-track {
+    height: 6px;
+    background: rgba(34, 45, 61, 0.7);
+    border-radius: 3px;
+}
+
+.timeline::-moz-range-track {
+    height: 6px;
+    background: rgba(34, 45, 61, 0.7);
+    border-radius: 3px;
 }
 
 .timeline::-webkit-slider-thumb {

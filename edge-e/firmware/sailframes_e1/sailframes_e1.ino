@@ -48,6 +48,7 @@
 #include <Adafruit_BNO08x.h>
 #include <Adafruit_DPS310.h>
 #include <esp_heap_caps.h>
+#include <esp_task_wdt.h>
 // NimBLE configuration - disable unused features to reduce size
 #define CONFIG_BT_NIMBLE_ROLE_CENTRAL 1
 #define CONFIG_BT_NIMBLE_ROLE_PERIPHERAL 0
@@ -1007,6 +1008,16 @@ void setup() {
   // Recording will auto-start when GPS speed > threshold
   recState = REC_IDLE;
   Serial.println("[REC] Auto-recording enabled - waiting for GPS speed trigger");
+
+  // Increase watchdog timeout for upload task on Core 0.
+  // HTTP operations (DNS, TCP connect, file PUT) block for 5-30+ seconds.
+  // Default 5s timeout is too short. Set to 120s to cover large file uploads.
+  esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = 120000,
+    .idle_core_mask = 0,       // Don't monitor IDLE tasks on any core
+    .trigger_panic = true
+  };
+  esp_task_wdt_reconfigure(&wdt_config);
 
   // Create upload task on Core 0 (sensor reading stays on Core 1)
   xTaskCreatePinnedToCore(

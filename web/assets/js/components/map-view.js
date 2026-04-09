@@ -18,6 +18,12 @@ class MapView {
         this.ppkVisible = false;
         this.gpsVisible = true;
 
+        // 10Hz GPS data
+        this.gps10HzData = [];
+        this.gps10HzDataIndex = {};
+        this.gps10HzTrackLayer = null;
+        this.gps10HzVisible = false;
+
         // Buoy data
         this.buoys = [];
         this.buoyData = {};
@@ -64,12 +70,30 @@ class MapView {
         });
         // Not added to map until toggled on
 
+        // 10Hz GPS track polyline (cyan, initially hidden)
+        this.gps10HzTrackLayer = L.polyline([], {
+            color: '#22d3ee',
+            weight: 2,
+            opacity: 0.8,
+            interactive: true
+        });
+        // Not added to map until toggled on
+
         // Click on track to jump timeline
         this.trackLayer.on('click', (e) => this._handleTrackClick(e));
         this.trackLayer.on('mouseover', () => {
             this.map.getContainer().style.cursor = 'crosshair';
         });
         this.trackLayer.on('mouseout', () => {
+            this.map.getContainer().style.cursor = '';
+        });
+
+        // Click on 10Hz track to jump timeline (using 10Hz data for more precise seeking)
+        this.gps10HzTrackLayer.on('click', (e) => this._handleTrack10HzClick(e));
+        this.gps10HzTrackLayer.on('mouseover', () => {
+            this.map.getContainer().style.cursor = 'crosshair';
+        });
+        this.gps10HzTrackLayer.on('mouseout', () => {
             this.map.getContainer().style.cursor = '';
         });
 
@@ -319,6 +343,29 @@ class MapView {
     }
 
     /**
+     * Load 10Hz GPS track data
+     */
+    setGPS10HzData(gps10HzData) {
+        this.gps10HzData = gps10HzData || [];
+
+        // Build time index
+        this.gps10HzDataIndex = {};
+        this.gps10HzData.forEach((point, i) => {
+            const key = point.t.substring(0, 23); // Include milliseconds
+            this.gps10HzDataIndex[key] = i;
+        });
+
+        // Draw 10Hz track
+        const latlngs = this.gps10HzData.map(p => [p.lat, p.lon]);
+        this.gps10HzTrackLayer.setLatLngs(latlngs);
+
+        console.log(`[MapView] setGPS10HzData: ${this.gps10HzData.length} points`);
+
+        // Update toggle buttons with data info
+        this._updateTrackToggles();
+    }
+
+    /**
      * Toggle GPS track visibility
      */
     toggleGPS(visible) {
@@ -343,17 +390,43 @@ class MapView {
     }
 
     /**
+     * Toggle 10Hz GPS track visibility
+     */
+    toggleGPS10Hz(visible) {
+        this.gps10HzVisible = visible;
+        if (visible) {
+            if (!this.map.hasLayer(this.gps10HzTrackLayer)) this.gps10HzTrackLayer.addTo(this.map);
+        } else {
+            if (this.map.hasLayer(this.gps10HzTrackLayer)) this.map.removeLayer(this.gps10HzTrackLayer);
+        }
+    }
+
+    /**
      * Update track toggle buttons with accuracy info
      */
     _updateTrackToggles() {
         const gpsToggle = document.getElementById('toggle-gps-track');
+        const gps10hzToggle = document.getElementById('toggle-gps10hz-track');
         const ppkToggle = document.getElementById('toggle-ppk-track');
 
         if (gpsToggle) {
             const count = this.data.length;
-            gpsToggle.title = `GNSS Rover: ${count} pts, ~2-5m accuracy`;
+            gpsToggle.title = `GNSS 1Hz: ${count} pts, ~2-5m accuracy`;
         }
 
+        // 10Hz GPS toggle
+        if (gps10hzToggle && this.gps10HzData.length > 0) {
+            const total = this.gps10HzData.length;
+            gps10hzToggle.title = `GNSS 10Hz: ${total} pts, ~2-5m accuracy`;
+            gps10hzToggle.disabled = false;
+            gps10hzToggle.classList.remove('disabled');
+        } else if (gps10hzToggle) {
+            gps10hzToggle.title = 'GNSS 10Hz: no data';
+            gps10hzToggle.disabled = true;
+            gps10hzToggle.classList.add('disabled');
+        }
+
+        // PPK toggle
         if (ppkToggle && this.ppkData.length > 0) {
             const floatPts = this.ppkData.filter(p => p.quality === 2).length;
             const fixPts = this.ppkData.filter(p => p.quality === 1).length;
@@ -362,7 +435,7 @@ class MapView {
             const avgSde = this.ppkData.reduce((s, p) => s + (p.sde || 0), 0) / total;
             const hAcc = Math.sqrt(avgSdn * avgSdn + avgSde * avgSde);
 
-            let label = `PPK: ${total} pts`;
+            let label = `GNSS PPK 1Hz: ${total} pts`;
             if (fixPts > 0) label += `, ${fixPts} fix`;
             if (floatPts > 0) label += `, ${floatPts} float`;
             if (hAcc < 1) label += `, ~${(hAcc * 100).toFixed(1)}cm`;
@@ -376,7 +449,7 @@ class MapView {
             ppkToggle.classList.add('active');
             this.togglePPK(true);
         } else if (ppkToggle) {
-            ppkToggle.title = 'PPK: no data';
+            ppkToggle.title = 'GNSS PPK 1Hz: no data';
             ppkToggle.disabled = true;
             ppkToggle.classList.add('disabled');
         }
@@ -419,6 +492,29 @@ class MapView {
         let closest = null;
 
         for (const point of this.data) {
+            const dist = clickLatLng.distanceTo(L.latLng(point.lat, point.lon));
+            if (dist < minDist) {
+                minDist = dist;
+                closest = point;
+            }
+        }
+
+        if (closest && closest.t) {
+            window.timeController.seek(new Date(closest.t));
+        }
+    }
+
+    /**
+     * Handle click on 10Hz track polyline - seek timeline with higher precision
+     */
+    _handleTrack10HzClick(e) {
+        if (this.gps10HzData.length === 0) return;
+
+        const clickLatLng = e.latlng;
+        let minDist = Infinity;
+        let closest = null;
+
+        for (const point of this.gps10HzData) {
             const dist = clickLatLng.distanceTo(L.latLng(point.lat, point.lon));
             if (dist < minDist) {
                 minDist = dist;

@@ -72,11 +72,19 @@ async function init() {
 
     // Setup track layer toggles
     const gpsToggle = document.getElementById('toggle-gps-track');
+    const gps10hzToggle = document.getElementById('toggle-gps10hz-track');
     const ppkToggle = document.getElementById('toggle-ppk-track');
     if (gpsToggle) {
         gpsToggle.addEventListener('click', () => {
             gpsToggle.classList.toggle('active');
             mapView.toggleGPS(gpsToggle.classList.contains('active'));
+        });
+    }
+    if (gps10hzToggle) {
+        gps10hzToggle.addEventListener('click', () => {
+            if (gps10hzToggle.disabled) return;
+            gps10hzToggle.classList.toggle('active');
+            mapView.toggleGPS10Hz(gps10hzToggle.classList.contains('active'));
         });
     }
     if (ppkToggle) {
@@ -153,9 +161,9 @@ async function loadSession(deviceId, date) {
     currentSessionDate = date;
 
     try {
-        // Load session data
+        // Load session data (including 10Hz GPS for high-resolution track)
         const response = await fetch(
-            `${API_BASE}/api/data/${deviceId}/${date}?sensors=gps,imu,wind,pressure,ppk`
+            `${API_BASE}/api/data/${deviceId}/${date}?sensors=gps,gps_10hz,imu,wind,pressure,ppk`
         );
 
         if (!response.ok) throw new Error('Failed to fetch session data');
@@ -200,8 +208,20 @@ async function loadSession(deviceId, date) {
                 sats: p.ppk.sats
             }));
 
+        // Extract 10Hz GPS data for high-resolution track
+        const gps10HzData = sessionData.data
+            .filter(p => p.gps_10hz)
+            .map(p => ({
+                t: p.t,
+                lat: p.gps_10hz.lat,
+                lon: p.gps_10hz.lon,
+                speed_kn: p.gps_10hz.speed_kn,
+                course: p.gps_10hz.course
+            }));
+
         // Update components
         mapView.setData(gpsData);
+        mapView.setGPS10HzData(gps10HzData);
         mapView.setPPKData(ppkData);
         mapView.setWindData(windData);
         chartPanel.setData(sessionData);

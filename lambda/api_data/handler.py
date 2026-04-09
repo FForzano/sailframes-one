@@ -83,8 +83,11 @@ def load_session_data(device_id: str, date: str, sensors: list,
 
     # Load each sensor file
     sensor_data = {}
-    # Map sensor names to filenames (most are {sensor}.json, ppk is ppk_gps.json)
-    sensor_file_map = {'ppk': 'ppk_gps'}
+    # Map sensor names to filenames (most are {sensor}.json, some have custom names)
+    sensor_file_map = {
+        'ppk': 'ppk_gps',
+        'gps_10hz': 'gps_10hz'  # Full 10Hz GPS track
+    }
     for sensor in sensors:
         sensor = sensor.strip()
         filename = sensor_file_map.get(sensor, sensor)
