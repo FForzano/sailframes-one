@@ -185,16 +185,16 @@ extract_duration() {
         # Already in seconds format (e.g., "1062.12 s")
         echo "$duration" | sed 's/ s$//'
     elif [[ "$duration" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
-        # H:MM:SS format
+        # H:MM:SS format - use 10# to force base-10 (avoid octal interpretation of 08, 09)
         local h="${BASH_REMATCH[1]}"
         local m="${BASH_REMATCH[2]}"
         local s="${BASH_REMATCH[3]}"
-        echo $((h * 3600 + m * 60 + s))
+        echo $((10#$h * 3600 + 10#$m * 60 + 10#$s))
     elif [[ "$duration" =~ ^([0-9]+):([0-9]+)$ ]]; then
-        # MM:SS format
+        # MM:SS format - use 10# to force base-10 (avoid octal interpretation of 08, 09)
         local m="${BASH_REMATCH[1]}"
         local s="${BASH_REMATCH[2]}"
-        echo $((m * 60 + s))
+        echo $((10#$m * 60 + 10#$s))
     else
         echo ""
     fi
@@ -209,26 +209,45 @@ for INPUT_FILE in "${FILES_TO_UPLOAD[@]}"; do
     echo "Uploading: $BASENAME"
 
     # Extract metadata for video files (LRV and MP4)
-    METADATA_ARGS=""
+    # Build metadata as JSON to avoid shell quoting issues with special characters
+    METADATA_JSON=""
     if [[ "$EXT_LOWER" == "lrv" || "$EXT_LOWER" == "mp4" ]]; then
         GPS_TIME=$(extract_gps_time "$INPUT_FILE")
         DURATION=$(extract_duration "$INPUT_FILE")
 
+        # Build JSON metadata object
+        METADATA_PARTS=()
         if [[ -n "$GPS_TIME" ]]; then
             echo "  GPS time: $GPS_TIME"
-            METADATA_ARGS="--metadata gps-start-time=$GPS_TIME"
+            METADATA_PARTS+=("\"gps-start-time\":\"$GPS_TIME\"")
         fi
 
         if [[ -n "$DURATION" ]]; then
             echo "  Duration: ${DURATION}s"
-            METADATA_ARGS="$METADATA_ARGS --metadata duration-seconds=$DURATION"
+            METADATA_PARTS+=("\"duration-seconds\":\"$DURATION\"")
+        fi
+
+        if [[ ${#METADATA_PARTS[@]} -gt 0 ]]; then
+            # Join array with commas
+            METADATA_JSON="{$(IFS=,; echo "${METADATA_PARTS[*]}")}"
         fi
     fi
 
-    if aws s3 cp "$INPUT_FILE" "$S3_PATH" \
-        --profile "$AWS_PROFILE" \
-        --storage-class STANDARD_IA \
-        $METADATA_ARGS; then
+    # Build aws command with optional metadata
+    if [[ -n "$METADATA_JSON" ]]; then
+        aws s3 cp "$INPUT_FILE" "$S3_PATH" \
+            --profile "$AWS_PROFILE" \
+            --storage-class STANDARD_IA \
+            --metadata "$METADATA_JSON"
+        UPLOAD_STATUS=$?
+    else
+        aws s3 cp "$INPUT_FILE" "$S3_PATH" \
+            --profile "$AWS_PROFILE" \
+            --storage-class STANDARD_IA
+        UPLOAD_STATUS=$?
+    fi
+
+    if [[ $UPLOAD_STATUS -eq 0 ]]; then
         echo "  ✓ Uploaded: $S3_PATH"
         ((UPLOADED++))
     else
