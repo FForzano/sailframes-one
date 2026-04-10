@@ -391,9 +391,10 @@ def process_file(bucket: str, key: str):
     csv_content = response['Body'].read().decode('utf-8')
 
     # Parse and downsample (pass date and start_time for E1 timestamp generation)
+    data_10hz = None  # Only populated for GPS
     if sensor_type == 'gps':
-        # process_gps returns (data, actual_gps_date) tuple
-        data, actual_date = process_gps(csv_content, date, start_time)
+        # process_gps returns (data_1hz, data_10hz, actual_gps_date) tuple
+        data, data_10hz, actual_date = process_gps(csv_content, date, start_time)
         if actual_date != date:
             logger.info(f"Using GPS date {actual_date} instead of path date {date}")
     elif sensor_type == 'imu':
@@ -466,6 +467,40 @@ def process_file(bucket: str, key: str):
     )
     logger.info(f"Wrote {len(merged)} records to {output_key}")
 
+    # For GPS, also save full 10Hz data
+    if sensor_type == 'gps' and data_10hz:
+        output_key_10hz = f"processed/{device_id}/{output_folder}/gps_10hz.json"
+
+        # Try to load existing 10Hz data
+        existing_10hz = []
+        try:
+            response = s3.get_object(Bucket=bucket, Key=output_key_10hz)
+            existing_10hz = json.loads(response['Body'].read().decode('utf-8'))
+            logger.info(f"Loaded {len(existing_10hz)} existing 10Hz records")
+        except s3.exceptions.NoSuchKey:
+            pass
+        except Exception as e:
+            logger.warning(f"Could not load existing 10Hz data: {e}")
+
+        # Merge: combine existing + new, dedupe by timestamp, sort
+        all_10hz = existing_10hz + data_10hz
+        seen_10hz = set()
+        merged_10hz = []
+        for item in all_10hz:
+            t = item.get('t', '')
+            if t and t not in seen_10hz:
+                seen_10hz.add(t)
+                merged_10hz.append(item)
+        merged_10hz.sort(key=lambda x: x.get('t', ''))
+
+        s3.put_object(
+            Bucket=bucket,
+            Key=output_key_10hz,
+            Body=json.dumps(merged_10hz, default=str),
+            ContentType='application/json'
+        )
+        logger.info(f"Wrote {len(merged_10hz)} 10Hz records to {output_key_10hz}")
+
     # Update manifest with merged data (not just new data) to preserve correct bounds
     # If merging into another session, track the source session_id
     source_session_id = session_id if merge_folder and session_id else None
@@ -498,6 +533,7 @@ def extract_gps_date_from_csv(csv_content: str) -> str:
 
 def process_gps(csv_content: str, date: str = None, start_time: str = None) -> tuple:
     """Downsample GPS from 10Hz to 1Hz, keeping max speed per second.
+    Also generates full 10Hz data for high-resolution track display.
 
     Supports two CSV formats:
     - S1: utc_time,latitude,longitude,speed_knots,course_deg,fix_quality,satellites
@@ -509,7 +545,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
         start_time: Start time (HHMMSS) from filename for old E1 format
 
     Returns:
-        Tuple of (data_list, actual_gps_date) where actual_gps_date may differ
+        Tuple of (data_1hz, data_10hz, actual_gps_date) where actual_gps_date may differ
         from the input date if GPS data contains a different date.
     """
     from datetime import timedelta
@@ -517,7 +553,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
     reader = csv.DictReader(StringIO(csv_content))
     rows = list(reader)
     if not rows:
-        return [], date
+        return [], [], date
 
     # Detect format based on column names
     first_row = rows[0]
@@ -536,8 +572,10 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
     # Time correction only for S1 (Pi5 clock was ~41 minutes ahead)
     TIME_CORRECTION_SECONDS = 0 if is_e1_format else -2460
 
-    # Group by second
-    by_second = defaultdict(list)
+    # Collect all valid records for 10Hz output and group by second for 1Hz
+    all_valid_records = []  # Full 10Hz data
+    by_second = defaultdict(list)  # Grouped for 1Hz downsampling
+
     for row in rows:
         if is_e1_format:
             # E1 format: utc is HHMMSS.mmm (e.g., "123756.100")
@@ -550,10 +588,31 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 hours = int(utc_float // 10000)
                 minutes = int((utc_float % 10000) // 100)
                 seconds = int(utc_float % 100)
-                # Use actual GPS date (extracted from gps_date column)
+                millis = int((utc_float % 1) * 1000)
+                # Full timestamp with milliseconds for 10Hz
+                full_ts = f"{actual_date}T{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}Z"
+                # Second-only timestamp for grouping
                 second = f"{actual_date}T{hours:02d}:{minutes:02d}:{seconds:02d}"
             except ValueError:
                 continue
+
+            # Filter out invalid GPS records
+            fix = int(row.get('fix', 0) or 0)
+            lat = abs(float(row.get('lat', 0) or 0))
+            lon = abs(float(row.get('lon', 0) or 0))
+            hdop = float(row.get('hdop', 99) or 99)
+            if fix >= 1 and lat > 1.0 and lon > 1.0 and hdop < 10:
+                record = {
+                    't': full_ts,
+                    'lat': float(row.get('lat', 0) or 0),
+                    'lon': float(row.get('lon', 0) or 0),
+                    'speed_kn': round(float(row.get('sog', 0) or 0), 2),
+                    'course': round(float(row.get('cog', 0) or 0), 1),
+                    'fix': fix,
+                    'sats': int(row.get('sat', 0) or 0)
+                }
+                all_valid_records.append(record)
+                by_second[second].append(row)
         else:
             # S1 format: utc_time is ISO timestamp
             ts = row.get('utc_time', '')
@@ -563,19 +622,35 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 dt = datetime.strptime(ts[:19], '%Y-%m-%dT%H:%M:%S')
                 dt_corrected = dt + timedelta(seconds=TIME_CORRECTION_SECONDS)
                 second = dt_corrected.strftime('%Y-%m-%dT%H:%M:%S')
+                # Include milliseconds if present
+                if len(ts) > 19 and '.' in ts:
+                    millis = ts[20:23] if len(ts) > 22 else ts[20:]
+                    full_ts = dt_corrected.strftime('%Y-%m-%dT%H:%M:%S') + '.' + millis + 'Z'
+                else:
+                    full_ts = second + 'Z'
             except ValueError:
                 second = ts[:19]
+                full_ts = second + 'Z'
 
-        by_second[second].append(row)
+            record = {
+                't': full_ts,
+                'lat': float(row.get('latitude', 0) or 0),
+                'lon': float(row.get('longitude', 0) or 0),
+                'speed_kn': round(float(row.get('speed_knots', 0) or 0), 2),
+                'course': round(float(row.get('course_deg', 0) or 0), 1),
+                'fix': int(row.get('fix_quality', 0) or 0),
+                'sats': int(row.get('satellites', 0) or 0)
+            }
+            all_valid_records.append(record)
+            by_second[second].append(row)
 
-    # Take sample with max speed per second, filtering out invalid records
-    result = []
+    # Sort 10Hz data by timestamp
+    all_valid_records.sort(key=lambda x: x['t'])
+
+    # Take sample with max speed per second for 1Hz output
+    result_1hz = []
     for second, samples in sorted(by_second.items()):
         if is_e1_format:
-            # Filter out invalid GPS records:
-            # - fix=0 (no fix) produces invalid timestamps/positions
-            # - lat/lon near 0,0 are bogus (even with fix=1/2) — fleet is in Boston Harbor
-            # - hdop > 10 indicates very poor geometry
             valid_samples = []
             for s in samples:
                 fix = int(s.get('fix', 0) or 0)
@@ -587,7 +662,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             if not valid_samples:
                 continue
             best = max(valid_samples, key=lambda r: float(r.get('sog', 0) or 0))
-            result.append({
+            result_1hz.append({
                 't': second + 'Z',
                 'lat': float(best.get('lat', 0) or 0),
                 'lon': float(best.get('lon', 0) or 0),
@@ -598,7 +673,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             })
         else:
             best = max(samples, key=lambda r: float(r.get('speed_knots', 0) or 0))
-            result.append({
+            result_1hz.append({
                 't': second + 'Z',
                 'lat': float(best.get('latitude', 0) or 0),
                 'lon': float(best.get('longitude', 0) or 0),
@@ -608,7 +683,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 'sats': int(best.get('satellites', 0) or 0)
             })
 
-    return result, actual_date
+    return result_1hz, all_valid_records, actual_date
 
 
 def process_imu(csv_content: str, date: str = None, start_time: str = None) -> list:
@@ -1107,12 +1182,21 @@ def update_manifest_rtcm3(bucket: str, device_id: str, folder: str, rtcm3_key: s
     except Exception:
         rtcm3_size = 0
 
-    # Update RTCM3 info in sensors
-    manifest['sensors']['rtcm3'] = {
-        's3_key': rtcm3_key,
-        'size_bytes': rtcm3_size,
-        'uploaded_at': datetime.now(timezone.utc).isoformat()
-    }
+    # Update RTCM3 info in sensors - KEEP THE LARGEST FILE
+    # Multiple RTCM3 files may be uploaded for a session (E1 creates chunks)
+    # The largest file typically contains the most observation data
+    existing_rtcm3 = manifest.get('sensors', {}).get('rtcm3', {})
+    existing_size = existing_rtcm3.get('size_bytes', 0)
+
+    if rtcm3_size > existing_size:
+        manifest['sensors']['rtcm3'] = {
+            's3_key': rtcm3_key,
+            'size_bytes': rtcm3_size,
+            'uploaded_at': datetime.now(timezone.utc).isoformat()
+        }
+        logger.info(f"Updated RTCM3 to larger file: {rtcm3_key} ({rtcm3_size} bytes > {existing_size} bytes)")
+    else:
+        logger.info(f"Keeping existing larger RTCM3: {existing_rtcm3.get('s3_key')} ({existing_size} bytes >= {rtcm3_size} bytes)")
 
     # Trigger PPK pipeline if not already processed
     if manifest.get('ppk_status') not in ['completed', 'processing']:
