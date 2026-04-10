@@ -1,13 +1,13 @@
 /*
- * SailFrames E1 — Fleet Tracker Firmware v2.3
+ * SailFrames E1 — Fleet Tracker Firmware v2.4
  *
  * Hardware:
  *   - ESP32 DevKit V1 (ELEGOO)
  *   - Waveshare LG290P GNSS (UART2: RX=GPIO16, TX=GPIO17, 460800 baud)
  *   - BNO085 IMU (I2C: 0x4A) — heel, pitch, heading
  *   - DPS310 Pressure/Temp (I2C: 0x77) — barometric pressure for gust detection
- *   - SSD1309 OLED 2.42" 128x64 (I2C: 0x3C)
- *   - MicroSD card module (SPI: MOSI=23, MISO=19, CLK=18, CS=5)
+ *   - Hosyond 3.5" IPS ST7796U TFT 480x320 (SPI: CS=5, DC=2, RST=4, BL=25)
+ *   - MicroSD standalone module (SPI shared: MOSI=23, MISO=19, CLK=18, CS=27)
  *   - Calypso Mini wind sensor (BLE) — apparent wind speed/direction
  *   - DWEII USB-C 5V Boost Converter + LiPo cell
  *   - 100K/100K voltage divider on GPIO34 for battery monitoring
@@ -44,7 +44,8 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoOTA.h>
 #include <HTTPClient.h>
-#include <U8g2lib.h>
+#include "User_Setup.h"  // TFT_eSPI config (must be before TFT_eSPI.h)
+#include <TFT_eSPI.h>
 #include <Adafruit_BNO08x.h>
 #include <Adafruit_DPS310.h>
 #include <esp_heap_caps.h>
@@ -65,10 +66,21 @@
 // ============================================================
 #define GPS_RX_PIN    16
 #define GPS_TX_PIN    17
-#define SD_CS_PIN     5
 #define SDA_PIN       21
 #define SCL_PIN       22
-#define LED_PIN       2   // Built-in LED blinks during logging
+
+// TFT Display (Hosyond 3.5" IPS ST7796U) - SPI
+#define TFT_CS_PIN    5   // LCD chip select
+#define TFT_DC_PIN    2   // Data/Command (also used as LED_PIN on old board)
+#define TFT_RST_PIN   4   // LCD reset
+#define TFT_BL_PIN    25  // Backlight PWM
+
+// SD Card - standalone module (TFT board's SD slot has no CS connection)
+// Shares SPI bus with TFT (MOSI=23, MISO=19, CLK=18)
+#define SD_CS_PIN     27  // Standalone SD module CS (GPIO27, was unused CTP_RST)
+
+// Legacy alias for code that still uses LED_PIN
+#define LED_PIN       TFT_BL_PIN  // Backlight doubles as activity indicator
 
 // Battery monitoring (DWEII USB-C Boost Converter)
 // 100K/100K voltage divider from LiPo B+ to GPIO34
@@ -83,13 +95,12 @@
 // ============================================================
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
-#define SCREEN_WIDTH  128
-#define SCREEN_HEIGHT 64
-#define OLED_ADDR     0x3C
-#define BNO085_ADDR   0x4B  // GY-BNO08X breakout (ADO pin high)
-#define DPS310_ADDR   0x77  // Pressure/temperature sensor
+#define SCREEN_WIDTH  480     // TFT landscape width
+#define SCREEN_HEIGHT 320     // TFT landscape height
+#define BNO085_ADDR   0x4B    // GY-BNO08X breakout (ADO pin high)
+#define DPS310_ADDR   0x77    // Pressure/temperature sensor
 #define GPS_FIX_TIMEOUT_MS  300000
-#define DISPLAY_UPDATE_MS   1000  // Slower updates reduce I2C contention
+#define DISPLAY_UPDATE_MS   500   // TFT can handle faster updates (no I2C contention)
 #define FLUSH_INTERVAL_MS   10000
 #define IMU_INTERVAL_MS     50
 
@@ -266,8 +277,19 @@ struct Config {
 // ============================================================
 // GLOBALS
 // ============================================================
-// U8g2 for SSD1309 128x64 I2C - native support, no scrolling issues
-U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
+// TFT Display - Hosyond 3.5" IPS ST7796U (480x320, SPI)
+// Using TFT_eSPI library with User_Setup.h configuration
+TFT_eSPI tft = TFT_eSPI();
+
+// Color scheme for sailing dashboard
+#define COLOR_BG        TFT_BLACK
+#define COLOR_TEXT      TFT_WHITE
+#define COLOR_VALUE     TFT_CYAN
+#define COLOR_LABEL     TFT_DARKGREY
+#define COLOR_GOOD      TFT_GREEN
+#define COLOR_WARN      TFT_YELLOW
+#define COLOR_ERROR     TFT_RED
+#define COLOR_DIVIDER   0x4208  // Dark gray
 Adafruit_BNO08x bno08x(-1);  // No reset pin
 Adafruit_DPS310 dps;         // DPS310 pressure/temperature sensor
 sh2_SensorValue_t sensorValue;
@@ -618,26 +640,27 @@ bool connectToCalypso() {
   windOK = true;
   Serial.println("[WIND] Connected and streaming");
 
-  // Display wind sensor status on OLED at startup
+  // Display wind sensor status on TFT at startup
   if (oledOK) {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(0, 12, "Wind Sensor OK");
+    tft.fillScreen(COLOR_BG);
+    tft.setTextColor(COLOR_GOOD, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("WIND SENSOR OK", SCREEN_WIDTH/2, 100, 4);
 
     char buf[32];
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
     if (strlen(wind.deviceName) > 0) {
       snprintf(buf, sizeof(buf), "%s", wind.deviceName);
-      u8g2.drawStr(0, 26, buf);
+      tft.drawString(buf, SCREEN_WIDTH/2, 150, 2);
     }
 
     if (wind.battery >= 0) {
       snprintf(buf, sizeof(buf), "Battery: %d%%", wind.battery);
-      u8g2.drawStr(0, 40, buf);
+      tft.drawString(buf, SCREEN_WIDTH/2, 180, 2);
     } else {
-      u8g2.drawStr(0, 40, "Battery: --");
+      tft.drawString("Battery: --", SCREEN_WIDTH/2, 180, 2);
     }
 
-    u8g2.sendBuffer();
     delay(2000);  // Show for 2 seconds
   }
 
@@ -749,7 +772,7 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(500);
   Serial.println("\n=================================");
-  Serial.println("  SailFrames E1 v2.3 — PPK Logger");
+  Serial.println("  SailFrames E1 v2.4 — PPK Logger");
   Serial.println("  Hardware Power Switch Edition");
   Serial.println("=================================");
 
@@ -782,48 +805,40 @@ void setup() {
 
   // I2C Scanner - quick check for expected devices only
   Serial.println("[I2C] Checking devices...");
-  Wire.beginTransmission(OLED_ADDR);
-  bool oledFound = (Wire.endTransmission() == 0);
   Wire.beginTransmission(BNO085_ADDR);
   bool bnoFound = (Wire.endTransmission() == 0);
   Wire.beginTransmission(DPS310_ADDR);
   bool dpsFound = (Wire.endTransmission() == 0);
-  Serial.printf("[I2C] OLED 0x3C: %s\n", oledFound ? "YES" : "NO");
   Serial.printf("[I2C] BNO085 0x4B: %s\n", bnoFound ? "YES" : "NO");
   Serial.printf("[I2C] DPS310 0x77: %s\n", dpsFound ? "YES" : "NO");
 
-  // OLED - SSD1309 2.42" 128x64 using U8g2
-  u8g2.begin();
-  oledOK = true;  // U8g2 doesn't return status, assume OK if no crash
-  Serial.println("[OLED] U8g2 SSD1309 initialized");
+  // === TEST: Initialize SD BEFORE TFT ===
+  // SD Card - standalone module shares SPI bus with TFT
+  Serial.println("[SD] Initializing (standalone module)...");
+  Serial.printf("[SD] Pins: CLK=18, MISO=19, MOSI=23, CS=%d\n", SD_CS_PIN);
 
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_helvB14_tr);  // 14px bold font
-  u8g2.drawStr(10, 20, "SAIL");
-  u8g2.drawStr(10, 42, "FRAMES");
-  u8g2.setFont(u8g2_font_6x10_tr);     // Small font
-  u8g2.drawStr(10, 58, "E1 v2.0 PPK");
-  u8g2.sendBuffer();
-  delay(1500);
-
-  // SD Card - try multiple speeds
-  Serial.println("[SD] Initializing SPI...");
-  Serial.println("[SD] Pins: CLK=18, MISO=19, MOSI=23, CS=5");
-  SPI.begin(18, 19, 23, SD_CS_PIN);
+  // Deselect TFT before SD init (they share SPI bus)
+  pinMode(TFT_CS_PIN, OUTPUT);
+  digitalWrite(TFT_CS_PIN, HIGH);
   pinMode(SD_CS_PIN, OUTPUT);
   digitalWrite(SD_CS_PIN, HIGH);
   delay(100);
 
+  // Create dedicated SPI instance for SD card (VSPI)
+  static SPIClass sdSPI(VSPI);
+  sdSPI.begin(18, 19, 23, SD_CS_PIN);  // CLK, MISO, MOSI, SS
+  delay(50);
+
   // Try different SPI speeds
   Serial.println("[SD] Trying 4MHz...");
-  sdOK = SD.begin(SD_CS_PIN, SPI, 4000000);
+  sdOK = SD.begin(SD_CS_PIN, sdSPI, 4000000);
   if (!sdOK) {
     Serial.println("[SD] 4MHz failed, trying 1MHz...");
-    sdOK = SD.begin(SD_CS_PIN, SPI, 1000000);
+    sdOK = SD.begin(SD_CS_PIN, sdSPI, 1000000);
   }
   if (!sdOK) {
     Serial.println("[SD] 1MHz failed, trying 400kHz...");
-    sdOK = SD.begin(SD_CS_PIN, SPI, 400000);
+    sdOK = SD.begin(SD_CS_PIN, sdSPI, 400000);
   }
 
   if (sdOK) {
@@ -844,17 +859,30 @@ void setup() {
   } else {
     Serial.println("[SD] === SD CARD FAILED ===");
     Serial.println("[SD] Troubleshooting:");
-    Serial.println("[SD]   1. Check wiring:");
-    Serial.println("[SD]      VCC -> 5V (NOT 3.3V for most modules!)");
-    Serial.println("[SD]      GND -> GND");
-    Serial.println("[SD]      CS  -> GPIO5");
-    Serial.println("[SD]      MOSI-> GPIO23");
-    Serial.println("[SD]      MISO-> GPIO19 (may be labeled DO)");
-    Serial.println("[SD]      CLK -> GPIO18 (may be labeled SCK)");
-    Serial.println("[SD]   2. Card must be FAT32 (not exFAT)");
-    Serial.println("[SD]   3. Try a different SD card");
-    Serial.println("[SD]   4. Some modules need card inserted before power");
+    Serial.println("[SD]   1. Check SD module wiring (CS=GPIO27)");
+    Serial.println("[SD]   2. Insert card before power-on");
+    Serial.println("[SD]   3. Card must be FAT32 (not exFAT)");
+    Serial.println("[SD]   4. Try different SD card");
   }
+
+  // TFT Display - Hosyond 3.5" IPS ST7796U (SPI)
+  // Initialized AFTER SD to test for conflicts
+  Serial.println("[TFT] Initializing ST7796U...");
+  pinMode(TFT_BL_PIN, OUTPUT);
+  analogWrite(TFT_BL_PIN, 255);  // Full brightness
+  tft.init();
+  tft.setRotation(1);  // Landscape orientation
+  tft.fillScreen(COLOR_BG);
+  oledOK = true;
+  Serial.println("[TFT] ST7796U initialized (480x320 IPS)");
+
+  // Splash screen
+  tft.setTextColor(COLOR_TEXT, COLOR_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("SAILFRAMES", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30, 4);
+  tft.setTextColor(COLOR_LABEL, COLOR_BG);
+  tft.drawString("E1 Fleet Tracker v2.4", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 10, 2);
+  delay(1500);
 
   // IMU — BNO085
   Serial.println("[IMU] Initializing BNO085...");
@@ -988,10 +1016,10 @@ void setup() {
   if (config.wifi_count > 0) {
     Serial.println("[WIFI] Connecting at boot...");
     if (oledOK) {
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_6x10_tr);
-      u8g2.drawStr(0, 20, "Connecting WiFi...");
-      u8g2.sendBuffer();
+      tft.fillScreen(COLOR_BG);
+      tft.setTextColor(COLOR_WARN, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("Connecting WiFi...", SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 4);
     }
     connectWiFi();
   }
@@ -1425,13 +1453,11 @@ void handleLowBattery() {
 
   // Display warning - user must flip hardware power switch
   if (oledOK) {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_helvB14_tr);
-    u8g2.drawStr(10, 20, "LOW BATTERY");
-    u8g2.setFont(u8g2_font_helvR10_tr);
-    u8g2.drawStr(5, 45, "Flip power switch");
-    u8g2.drawStr(25, 60, "to OFF");
-    u8g2.sendBuffer();
+    tft.fillScreen(COLOR_ERROR);
+    tft.setTextColor(TFT_WHITE, COLOR_ERROR);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString("LOW BATTERY", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 40, 4);
+    tft.drawString("Flip power switch to OFF", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 20, 2);
   }
 
   // Halt here - user must use hardware switch
@@ -1440,21 +1466,22 @@ void handleLowBattery() {
   }
 }
 
-// Draw battery percentage in top-right corner
+// Draw battery percentage at specified position (legacy function, battery now in main display)
 void drawBatteryPercent(int x, int y) {
   if (!battery.valid) return;
 
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", battery.percent);
 
-  // Use small font for battery %
-  u8g2.setFont(u8g2_font_helvR08_tr);
-
   // Blink if critical
   if (battery.critical && (millis() / 500) % 2 == 0) {
     // Don't draw (blink off)
   } else {
-    u8g2.drawStr(x, y + 8, buf);
+    uint16_t batColor = (battery.percent > 30) ? COLOR_GOOD :
+                        (battery.percent > 15) ? COLOR_WARN : COLOR_ERROR;
+    tft.setTextColor(batColor, COLOR_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString(buf, x, y, 2);
   }
 }
 
@@ -1709,13 +1736,11 @@ void setupOTA() {
 
     // Show on display
     if (oledOK) {
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_helvB14_tr);
-      u8g2.drawStr(10, 25, "OTA");
-      u8g2.drawStr(10, 45, "UPDATE");
-      u8g2.setFont(u8g2_font_6x10_tr);
-      u8g2.drawStr(10, 60, "DO NOT POWER OFF");
-      u8g2.sendBuffer();
+      tft.fillScreen(COLOR_WARN);
+      tft.setTextColor(TFT_BLACK, COLOR_WARN);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("OTA UPDATE", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30, 4);
+      tft.drawString("DO NOT POWER OFF", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 20, 2);
     }
 
     // Close log files before OTA
@@ -1731,10 +1756,10 @@ void setupOTA() {
     otaInProgress = false;
     Serial.println("\n[OTA] Complete! Rebooting...");
     if (oledOK) {
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_helvB14_tr);
-      u8g2.drawStr(10, 35, "REBOOTING");
-      u8g2.sendBuffer();
+      tft.fillScreen(COLOR_GOOD);
+      tft.setTextColor(TFT_BLACK, COLOR_GOOD);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("REBOOTING...", SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 4);
     }
   });
 
@@ -1744,19 +1769,21 @@ void setupOTA() {
 
     // Update progress bar on display
     if (oledOK) {
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_helvB14_tr);
-      u8g2.drawStr(10, 20, "UPDATING");
-      u8g2.setFont(u8g2_font_6x10_tr);
+      tft.fillScreen(COLOR_WARN);
+      tft.setTextColor(TFT_BLACK, COLOR_WARN);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("UPDATING FIRMWARE", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 60, 4);
 
-      // Progress bar
-      u8g2.drawFrame(10, 30, 108, 16);
-      u8g2.drawBox(12, 32, (104 * pct) / 100, 12);
+      // Progress bar background (400px wide, 30px tall)
+      int barX = 40, barY = SCREEN_HEIGHT/2 - 15;
+      int barW = 400, barH = 30;
+      tft.drawRect(barX, barY, barW, barH, TFT_BLACK);
+      tft.fillRect(barX + 2, barY + 2, (barW - 4) * pct / 100, barH - 4, COLOR_GOOD);
 
+      // Percentage text
       char buf[16];
       snprintf(buf, sizeof(buf), "%d%%", pct);
-      u8g2.drawStr(50, 58, buf);
-      u8g2.sendBuffer();
+      tft.drawString(buf, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 50, 4);
     }
   });
 
@@ -1770,10 +1797,10 @@ void setupOTA() {
     else if (error == OTA_END_ERROR) Serial.println("End Failed");
 
     if (oledOK) {
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_6x10_tr);
-      u8g2.drawStr(10, 30, "OTA ERROR!");
-      u8g2.sendBuffer();
+      tft.fillScreen(COLOR_ERROR);
+      tft.setTextColor(TFT_WHITE, COLOR_ERROR);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("OTA ERROR!", SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 4);
     }
   });
 
@@ -2018,112 +2045,148 @@ void logIMU() {
 // DISPLAY
 // ============================================================
 
-// Display mode: 1 = D1 (original), 2 = D2 (sailing data)
+// Display mode: 1 = D1 (simple), 2 = D2 (full sailing data)
 int displayMode = 2;
 
-// D1: Original display (SOG/COG, HEEL/MAG, status bar)
+// Previous values for efficient redraw (only update what changed)
+static float prevSOG = -1, prevCOG = -1, prevHeel = -1, prevPitch = -1;
+static int prevBattery = -1, prevSats = -1;
+static bool prevRecording = false;
+static unsigned long lastFullRedraw = 0;
+
+// D1: Simple display (SOG/COG, HEEL/BAT, status bar)
 void updateDisplayD1() {
   if (!oledOK) return;
 
   char buf[32];
-  u8g2.clearBuffer();
+  bool forceRedraw = (millis() - lastFullRedraw > 10000);  // Full redraw every 10s
 
-  // Check for problems first
+  // Check for warnings
   bool hasWarning = false;
+  const char* warnMsg = nullptr;
+  uint16_t warnColor = COLOR_ERROR;
+
   if (!sdOK) {
-    u8g2.setFont(u8g2_font_helvB12_tr);
-    u8g2.drawStr(21, 16, "NO SD CARD!");
+    warnMsg = "NO SD CARD";
     hasWarning = true;
   } else if (lastValidGPS == 0 && millis() > 120000) {
-    u8g2.setFont(u8g2_font_helvB12_tr);
-    u8g2.drawStr(21, 16, "NO GPS FIX!");
+    warnMsg = "WAITING FOR GPS";
+    warnColor = COLOR_WARN;
     hasWarning = true;
   } else if (lastValidGPS > 0 && millis() - lastValidGPS > 60000) {
-    u8g2.setFont(u8g2_font_helvB12_tr);
-    u8g2.drawStr(21, 16, "GPS LOST!");
+    warnMsg = "GPS SIGNAL LOST";
     hasWarning = true;
   } else if (!imuOK) {
-    u8g2.setFont(u8g2_font_helvB12_tr);
-    u8g2.drawStr(21, 16, "NO IMU!");
+    warnMsg = "IMU ERROR";
     hasWarning = true;
   }
 
-  // Vertical labels (rotated 90° CCW) - tiny font
-  u8g2.setFont(u8g2_font_5x7_tr);
-  u8g2.setFontDirection(3);  // 270° = 90° counter-clockwise
-  if (!hasWarning) {
-    u8g2.drawStr(6, 26, "SOG");
-    u8g2.drawStr(70, 26, "COG");
-  }
-  u8g2.drawStr(6, 52, "HEEL");
-  u8g2.drawStr(70, 52, "BAT");
-  u8g2.setFontDirection(0);  // Reset to normal
+  // Full screen redraw on warning change or periodic refresh
+  if (forceRedraw) {
+    tft.fillScreen(COLOR_BG);
+    lastFullRedraw = millis();
 
-  // Row 1: SOG and COG (larger font) - skip if warning shown
-  u8g2.setFont(u8g2_font_helvB18_tr);
-  if (!hasWarning) {
+    // Draw static labels
+    tft.setTextColor(COLOR_LABEL, COLOR_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("SOG", 20, 30, 2);
+    tft.drawString("kts", 20, 120, 2);
+    tft.drawString("COG", 260, 30, 2);
+    tft.drawString("deg", 260, 120, 2);
+    tft.drawString("HEEL", 20, 170, 2);
+    tft.drawString("BAT", 260, 170, 2);
+
+    // Divider lines
+    tft.drawFastHLine(0, 150, 480, COLOR_DIVIDER);
+    tft.drawFastVLine(240, 0, 280, COLOR_DIVIDER);
+    tft.drawFastHLine(0, 280, 480, COLOR_DIVIDER);
+
+    // Force value updates
+    prevSOG = prevCOG = prevHeel = -999;
+    prevBattery = -1;
+  }
+
+  // Warning banner
+  if (hasWarning && warnMsg) {
+    tft.fillRect(0, 0, 480, 28, warnColor);
+    tft.setTextColor(COLOR_BG, warnColor);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(warnMsg, 240, 14, 4);
+  }
+
+  // SOG (large)
+  if (abs(gps.speed_kts - prevSOG) > 0.05 || forceRedraw) {
+    prevSOG = gps.speed_kts;
+    tft.setTextColor(COLOR_VALUE, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
     snprintf(buf, sizeof(buf), "%.1f", gps.speed_kts);
-    u8g2.drawStr(9, 24, buf);
-    snprintf(buf, sizeof(buf), "%03d", (int)gps.course);
-    u8g2.drawStr(73, 24, buf);
+    tft.fillRect(40, 50, 160, 60, COLOR_BG);
+    tft.drawString(buf, 120, 85, 7);  // Font 7 = 7-segment 48px
   }
 
-  // Row 2: Heel and Battery % (larger font)
-  u8g2.setFont(u8g2_font_helvB18_tr);
-  snprintf(buf, sizeof(buf), "%+.0f", imu.heel);
-  u8g2.drawStr(9, 50, buf);
-  snprintf(buf, sizeof(buf), "%d%%", battery.percent);
-  u8g2.drawStr(73, 50, buf);
+  // COG (large)
+  if (abs(gps.course - prevCOG) > 0.5 || forceRedraw) {
+    prevCOG = gps.course;
+    tft.setTextColor(COLOR_VALUE, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%03d", (int)gps.course);
+    tft.fillRect(280, 50, 160, 60, COLOR_BG);
+    tft.drawString(buf, 360, 85, 7);
+  }
 
-  // Row 3: Status bar
-  u8g2.setFont(u8g2_font_5x7_tr);
+  // Heel
+  if (abs(imu.heel - prevHeel) > 0.5 || forceRedraw) {
+    prevHeel = imu.heel;
+    tft.setTextColor(COLOR_VALUE, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%+.0f", imu.heel);
+    tft.fillRect(40, 195, 160, 50, COLOR_BG);
+    tft.drawString(buf, 120, 220, 6);  // Font 6 = 48px numeric
+  }
+
+  // Battery
+  if (battery.percent != prevBattery || forceRedraw) {
+    prevBattery = battery.percent;
+    uint16_t batColor = (battery.percent > 30) ? COLOR_GOOD :
+                        (battery.percent > 15) ? COLOR_WARN : COLOR_ERROR;
+    tft.setTextColor(batColor, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%d%%", battery.percent);
+    tft.fillRect(280, 195, 160, 50, COLOR_BG);
+    tft.drawString(buf, 360, 220, 6);
+  }
+
+  // Status bar (always update)
+  tft.fillRect(0, 282, 480, 38, COLOR_BG);
   int dispSats = (gps.satellites >= 0 && gps.satellites <= 50) ? gps.satellites : 0;
   int dispView = (satsInView >= 0 && satsInView <= 60) ? satsInView : 0;
-  // Show actual values (satsInView may be < dispSats if GLGSV/GAGSV not enabled)
-  float dispHdop = (gps.hdop >= 0 && gps.hdop < 50) ? gps.hdop : 99.9;
-  const char* fixStr = "---";
-  if (gps.fix_quality == 1) fixStr = "GPS";
-  else if (gps.fix_quality == 2) fixStr = "SBAS";
-
-  // Recording state
+  const char* fixStr = (gps.fix_quality == 2) ? "SBAS" : (gps.fix_quality == 1) ? "GPS" : "---";
   const char* recStr = getRecStateStr();
 
-  // Build status string safely (increased buffer size)
-  char statusStr[32] = "";
-  strncat(statusStr, recStr, sizeof(statusStr) - strlen(statusStr) - 1);
-  if (uploading) {
-    char upBuf[16];
-    if (uploadTotal > 0) {
-      snprintf(upBuf, sizeof(upBuf), " UP%d/%d", uploadCount, uploadTotal);
-    } else {
-      snprintf(upBuf, sizeof(upBuf), " UP");
-    }
-    strncat(statusStr, upBuf, sizeof(statusStr) - strlen(statusStr) - 1);
-  } else if (wifiConnected) {
-    strncat(statusStr, " ", sizeof(statusStr) - strlen(statusStr) - 1);
-    strncat(statusStr, getWifiIndicator(), sizeof(statusStr) - strlen(statusStr) - 1);
-  }
-#if ENABLE_WIND
-  if (wind.connected) {
-    strncat(statusStr, " C", sizeof(statusStr) - strlen(statusStr) - 1);
-  }
-#endif
+  // Left side: Recording state
+  uint16_t recColor = logging ? COLOR_GOOD : COLOR_LABEL;
+  tft.setTextColor(recColor, COLOR_BG);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(recStr, 10, 295, 4);
 
-  // Status line with recording state (use larger buffer)
-  char statusBuf[48];
-  snprintf(statusBuf, sizeof(statusBuf), "%s %s %d/%d",
-    config.boat_id, statusStr, dispSats, dispView);
-  u8g2.drawStr(1, 64, statusBuf);
+  // Center: Boat ID
+  tft.setTextColor(COLOR_TEXT, COLOR_BG);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString(config.boat_id, 240, 295, 4);
 
-  u8g2.sendBuffer();
+  // Right side: Satellites
+  snprintf(buf, sizeof(buf), "%s %d/%d", fixStr, dispSats, dispView);
+  tft.setTextColor(COLOR_LABEL, COLOR_BG);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(buf, 470, 295, 4);
 }
 
-// D2: Sailing data display (AWS/AWA, TWS/TWA, SOG/COG, HEEL/BAT, SAT/HDOP)
+// D2: Full sailing data display (Wind + Nav + IMU + Status)
 void updateDisplayD2() {
   if (!oledOK) return;
 
   char buf[32];
-  u8g2.clearBuffer();
+  bool forceRedraw = (millis() - lastFullRedraw > 10000);  // Full redraw every 10s
 
   // Calculate true wind from apparent wind + boat speed
   float aws = 0, awa = 0, tws = 0, twa = 0;
@@ -2139,90 +2202,199 @@ void updateDisplayD2() {
     if (awaRad > PI) awaRad -= 2 * PI;
     // True wind calculation
     float sog = gps.speed_kts;
-    // TWS = sqrt(AWS² + SOG² - 2*AWS*SOG*cos(AWA))
     tws = sqrt(aws*aws + sog*sog - 2*aws*sog*cos(awaRad));
-    // TWA = atan2(AWS*sin(AWA), AWS*cos(AWA) - SOG)
     float twaRad = atan2(aws * sin(awaRad), aws * cos(awaRad) - sog);
     twa = twaRad * 180.0 / PI;
     if (twa < 0) twa += 360;
   }
 #endif
 
-  // Row 1: Wind data (AWS, AWA, TWS, TWA) - larger font
-  u8g2.setFont(u8g2_font_5x7_tr);
-  u8g2.drawStr(0, 7, "AWS");
-  u8g2.drawStr(32, 7, "AWA");
-  u8g2.drawStr(64, 7, "TWS");
-  u8g2.drawStr(96, 7, "TWA");
+  // Full screen redraw periodically
+  if (forceRedraw) {
+    tft.fillScreen(COLOR_BG);
+    lastFullRedraw = millis();
 
-  u8g2.setFont(u8g2_font_helvB14_tr);
-  snprintf(buf, sizeof(buf), "%.0f", aws);
-  u8g2.drawStr(0, 24, buf);
-  snprintf(buf, sizeof(buf), "%03d", (int)awa);
-  u8g2.drawStr(32, 24, buf);
-  snprintf(buf, sizeof(buf), "%.0f", tws);
-  u8g2.drawStr(64, 24, buf);
-  snprintf(buf, sizeof(buf), "%03d", (int)twa);
-  u8g2.drawStr(96, 24, buf);
+    // Status bar at top (20px)
+    tft.fillRect(0, 0, 480, 22, 0x1082);  // Dark blue-gray
 
-  // Row 2: Nav data (SOG, COG, HEEL, BAT) - larger font
-  u8g2.setFont(u8g2_font_5x7_tr);
-  u8g2.drawStr(0, 33, "SOG");
-  u8g2.drawStr(32, 33, "COG");
-  u8g2.drawStr(64, 33, "HEL");
-  u8g2.drawStr(96, 33, "BAT");
+    // Draw grid layout
+    // Row 1: Wind (AWS, AWA, TWS, TWA) - 75px height
+    // Row 2: Navigation (SOG, COG) - 100px height
+    // Row 3: IMU (HEEL, PITCH, BAT) - 80px height
+    // Row 4: Status bar - 40px height
 
-  u8g2.setFont(u8g2_font_helvB14_tr);
-  snprintf(buf, sizeof(buf), "%.1f", gps.speed_kts);
-  u8g2.drawStr(0, 50, buf);
-  snprintf(buf, sizeof(buf), "%03d", (int)gps.course);
-  u8g2.drawStr(32, 50, buf);
-  snprintf(buf, sizeof(buf), "%+.0f", imu.heel);
-  u8g2.drawStr(64, 50, buf);
-  snprintf(buf, sizeof(buf), "%d%%", battery.percent);
-  u8g2.drawStr(96, 50, buf);
+    tft.drawFastHLine(0, 22, 480, COLOR_DIVIDER);
+    tft.drawFastHLine(0, 97, 480, COLOR_DIVIDER);
+    tft.drawFastHLine(0, 197, 480, COLOR_DIVIDER);
+    tft.drawFastHLine(0, 280, 480, COLOR_DIVIDER);
+    tft.drawFastVLine(120, 22, 75, COLOR_DIVIDER);
+    tft.drawFastVLine(240, 22, 75, COLOR_DIVIDER);
+    tft.drawFastVLine(360, 22, 75, COLOR_DIVIDER);
+    tft.drawFastVLine(240, 97, 100, COLOR_DIVIDER);
+    tft.drawFastVLine(160, 197, 83, COLOR_DIVIDER);
+    tft.drawFastVLine(320, 197, 83, COLOR_DIVIDER);
 
-  // Row 3: Status line with pitch
-  u8g2.setFont(u8g2_font_5x7_tr);
+    // Labels
+    tft.setTextColor(COLOR_LABEL, 0x1082);
+    tft.setTextDatum(TL_DATUM);
+
+    // Wind labels
+    tft.drawString("AWS", 10, 27, 2);
+    tft.drawString("AWA", 130, 27, 2);
+    tft.drawString("TWS", 250, 27, 2);
+    tft.drawString("TWA", 370, 27, 2);
+
+    // Nav labels
+    tft.setTextColor(COLOR_LABEL, COLOR_BG);
+    tft.drawString("SOG kts", 10, 102, 2);
+    tft.drawString("COG deg", 250, 102, 2);
+
+    // IMU labels
+    tft.drawString("HEEL", 20, 202, 2);
+    tft.drawString("PITCH", 180, 202, 2);
+    tft.drawString("BAT", 360, 202, 2);
+
+    prevSOG = prevCOG = prevHeel = prevPitch = -999;
+    prevBattery = -1;
+  }
+
+  // Status bar (top)
+  tft.fillRect(0, 0, 480, 22, 0x1082);
   int dispSats = (gps.satellites >= 0 && gps.satellites <= 50) ? gps.satellites : 0;
   int dispView = (satsInView >= 0 && satsInView <= 60) ? satsInView : 0;
-  // Show actual values (satsInView may be < dispSats if GLGSV/GAGSV not enabled)
   float dispHdop = (gps.hdop >= 0 && gps.hdop < 50) ? gps.hdop : 99.9;
-
-  const char* fixStr = "---";
-  if (gps.fix_quality == 1) fixStr = "GPS";
-  else if (gps.fix_quality == 2) fixStr = "SBA";
-
-  // Recording state indicator
+  const char* fixStr = (gps.fix_quality == 2) ? "SBAS" : (gps.fix_quality == 1) ? "GPS" : "---";
   const char* recStr = getRecStateStr();
 
-  char statusStr[32] = "";
-  strcat(statusStr, recStr);
-  if (uploading) {
-    char upBuf[16];
-    if (uploadTotal > 0) {
-      snprintf(upBuf, sizeof(upBuf), " UP%d/%d", uploadCount, uploadTotal);
-    } else {
-      snprintf(upBuf, sizeof(upBuf), " UP");
-    }
-    strcat(statusStr, upBuf);
-  } else if (wifiConnected) { strcat(statusStr, " "); strcat(statusStr, getWifiIndicator()); }
+  tft.setTextDatum(TL_DATUM);
+  uint16_t recColor = logging ? COLOR_GOOD : COLOR_LABEL;
+  tft.setTextColor(recColor, 0x1082);
+  tft.drawString(recStr, 10, 3, 2);
+
+  tft.setTextColor(COLOR_TEXT, 0x1082);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString(config.boat_id, 240, 3, 2);
+
+  snprintf(buf, sizeof(buf), "%s %d/%d HDOP:%.1f", fixStr, dispSats, dispView, dispHdop);
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(COLOR_LABEL, 0x1082);
+  tft.drawString(buf, 475, 3, 2);
+
 #if ENABLE_WIND
-  if (wind.connected) strcat(statusStr, " C");
+  if (wind.connected) {
+    tft.fillCircle(460, 10, 5, COLOR_GOOD);  // Wind connected indicator
+  }
 #endif
 
-  // Warning indicators
-  char warnStr[16] = "";
-  if (!sdOK) strcat(warnStr, "!SD ");
-  if (!imuOK) strcat(warnStr, "!IMU ");
-  if (lastValidGPS > 0 && millis() - lastValidGPS > 60000) strcat(warnStr, "!GPS");
+  // Wind values (Row 1)
+  tft.setTextColor(COLOR_VALUE, COLOR_BG);
+  tft.setTextDatum(MC_DATUM);
 
-  // Status line with recording state
-  snprintf(buf, sizeof(buf), "%s %d/%d %.1f %s",
-    fixStr, dispSats, dispView, dispHdop, statusStr);
-  u8g2.drawStr(0, 62, buf);
+  snprintf(buf, sizeof(buf), "%.0f", aws);
+  tft.fillRect(10, 45, 100, 45, COLOR_BG);
+  tft.drawString(buf, 60, 67, 6);
 
-  u8g2.sendBuffer();
+  snprintf(buf, sizeof(buf), "%03d", (int)awa);
+  tft.fillRect(130, 45, 100, 45, COLOR_BG);
+  tft.drawString(buf, 180, 67, 6);
+
+  snprintf(buf, sizeof(buf), "%.0f", tws);
+  tft.fillRect(250, 45, 100, 45, COLOR_BG);
+  tft.drawString(buf, 300, 67, 6);
+
+  snprintf(buf, sizeof(buf), "%03d", (int)twa);
+  tft.fillRect(370, 45, 100, 45, COLOR_BG);
+  tft.drawString(buf, 420, 67, 6);
+
+  // SOG (Row 2 left) - large 7-segment
+  if (abs(gps.speed_kts - prevSOG) > 0.05 || forceRedraw) {
+    prevSOG = gps.speed_kts;
+    tft.setTextColor(COLOR_VALUE, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%.1f", gps.speed_kts);
+    tft.fillRect(10, 125, 220, 65, COLOR_BG);
+    tft.drawString(buf, 120, 155, 7);
+  }
+
+  // COG (Row 2 right) - large 7-segment
+  if (abs(gps.course - prevCOG) > 0.5 || forceRedraw) {
+    prevCOG = gps.course;
+    tft.setTextColor(COLOR_VALUE, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%03d", (int)gps.course);
+    tft.fillRect(250, 125, 220, 65, COLOR_BG);
+    tft.drawString(buf, 360, 155, 7);
+  }
+
+  // Heel (Row 3 left)
+  if (abs(imu.heel - prevHeel) > 0.5 || forceRedraw) {
+    prevHeel = imu.heel;
+    uint16_t heelColor = (abs(imu.heel) > 25) ? COLOR_WARN : COLOR_VALUE;
+    tft.setTextColor(heelColor, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%+.0f", imu.heel);
+    tft.fillRect(10, 225, 140, 50, COLOR_BG);
+    tft.drawString(buf, 80, 250, 6);
+  }
+
+  // Pitch (Row 3 center)
+  if (abs(imu.pitch - prevPitch) > 0.5 || forceRedraw) {
+    prevPitch = imu.pitch;
+    tft.setTextColor(COLOR_VALUE, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%+.0f", imu.pitch);
+    tft.fillRect(170, 225, 140, 50, COLOR_BG);
+    tft.drawString(buf, 240, 250, 6);
+  }
+
+  // Battery (Row 3 right)
+  if (battery.percent != prevBattery || forceRedraw) {
+    prevBattery = battery.percent;
+    uint16_t batColor = (battery.percent > 30) ? COLOR_GOOD :
+                        (battery.percent > 15) ? COLOR_WARN : COLOR_ERROR;
+    tft.setTextColor(batColor, COLOR_BG);
+    tft.setTextDatum(MC_DATUM);
+    snprintf(buf, sizeof(buf), "%d%%", battery.percent);
+    tft.fillRect(330, 225, 140, 50, COLOR_BG);
+    tft.drawString(buf, 400, 250, 6);
+  }
+
+  // Bottom status bar
+  tft.fillRect(0, 282, 480, 38, COLOR_BG);
+
+  // Warnings on left
+  tft.setTextDatum(TL_DATUM);
+  int warnX = 10;
+  if (!sdOK) {
+    tft.setTextColor(COLOR_ERROR, COLOR_BG);
+    tft.drawString("!SD", warnX, 292, 4);
+    warnX += 50;
+  }
+  if (!imuOK) {
+    tft.setTextColor(COLOR_ERROR, COLOR_BG);
+    tft.drawString("!IMU", warnX, 292, 4);
+    warnX += 60;
+  }
+  if (lastValidGPS > 0 && millis() - lastValidGPS > 60000) {
+    tft.setTextColor(COLOR_ERROR, COLOR_BG);
+    tft.drawString("!GPS", warnX, 292, 4);
+  }
+
+  // Upload status on right
+  if (uploading) {
+    tft.setTextColor(COLOR_WARN, COLOR_BG);
+    tft.setTextDatum(TR_DATUM);
+    if (uploadTotal > 0) {
+      snprintf(buf, sizeof(buf), "UPLOAD %d/%d", uploadCount, uploadTotal);
+    } else {
+      snprintf(buf, sizeof(buf), "UPLOADING...");
+    }
+    tft.drawString(buf, 470, 292, 4);
+  } else if (wifiConnected) {
+    tft.setTextColor(COLOR_GOOD, COLOR_BG);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(getWifiIndicator(), 470, 292, 4);
+  }
 }
 
 // Main display router
@@ -2789,15 +2961,17 @@ bool connectWiFi() {
 
     // Show on display
     if (oledOK) {
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_6x10_tr);
-      u8g2.drawStr(0, 10, "CONNECTING...");
-      char buf[32];
+      tft.fillScreen(COLOR_BG);
+      tft.setTextColor(COLOR_WARN, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      tft.drawString("CONNECTING...", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 50, 4);
+
+      char buf[48];
+      tft.setTextColor(COLOR_TEXT, COLOR_BG);
       snprintf(buf, sizeof(buf), "WiFi: %s", config.wifi[i].ssid);
-      u8g2.drawStr(0, 25, buf);
+      tft.drawString(buf, SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 2);
       snprintf(buf, sizeof(buf), "(%d/%d)", i + 1, config.wifi_count);
-      u8g2.drawStr(0, 40, buf);
-      u8g2.sendBuffer();
+      tft.drawString(buf, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 30, 2);
     }
 
     Serial.printf("[WIFI] Credentials: SSID='%s' PASS='%s'\n",
@@ -2844,17 +3018,20 @@ bool connectWiFi() {
 
       // Show IP on display
       if (oledOK) {
-        u8g2.clearBuffer();
-        u8g2.setFont(u8g2_font_6x10_tr);
-        u8g2.drawStr(0, 10, "WiFi CONNECTED");
-        char buf[32];
+        tft.fillScreen(COLOR_BG);
+        tft.setTextColor(COLOR_GOOD, COLOR_BG);
+        tft.setTextDatum(MC_DATUM);
+        tft.drawString("WiFi CONNECTED", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 80, 4);
+
+        char buf[48];
+        tft.setTextColor(COLOR_TEXT, COLOR_BG);
         snprintf(buf, sizeof(buf), "SSID: %s", connectedSSID);
-        u8g2.drawStr(0, 22, buf);
+        tft.drawString(buf, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30, 2);
         snprintf(buf, sizeof(buf), "IP: %s", WiFi.localIP().toString().c_str());
-        u8g2.drawStr(0, 34, buf);
-        u8g2.drawStr(0, 46, "Telnet: port 23");
-        u8g2.drawStr(0, 58, "OTA: enabled");
-        u8g2.sendBuffer();
+        tft.drawString(buf, SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 2);
+
+        tft.setTextColor(COLOR_LABEL, COLOR_BG);
+        tft.drawString("Telnet: port 23  |  OTA: enabled", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 40, 2);
         delay(2000);
       }
 
