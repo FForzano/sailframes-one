@@ -1,9 +1,9 @@
 #!/bin/bash
-# prep-gopro-proxy.sh - Merge and rotate GoPro LRV proxy videos
+# prep-gopro-proxy.sh - Merge GoPro LRV proxy videos
 # Usage: ./prep-gopro-proxy.sh [input_dir] [output_file]
 #
-# Merges all LRV chapters into a single file and rotates 180°.
-# Uses ffmpeg concat demuxer (no re-encoding for merge, only rotation).
+# Merges all LRV chapters into a single file.
+# Uses ffmpeg concat demuxer. Rotation is handled by GoPro camera settings.
 
 set -e
 
@@ -16,7 +16,7 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     echo "  input_dir: Directory containing LRV files (default: GoPro SD card)"
     echo "  output_file: Output filename (default: auto-generated from GPS time)"
     echo ""
-    echo "Merges all LRV proxy videos and rotates 180° for upside-down mounting."
+    echo "Merges all LRV proxy videos into a single file."
     exit 0
 fi
 
@@ -82,16 +82,14 @@ for f in "${LRV_FILES[@]}"; do
     echo "file '$f'" >> "$CONCAT_LIST"
 done
 
-echo "Merging and rotating 180°..."
+echo "Merging LRV files..."
 echo ""
 
-# Merge with concat demuxer and rotate 180° using transpose
-# -vf "transpose=1,transpose=1" = rotate 180° (two 90° rotations)
-# Or use -vf "hflip,vflip" which is equivalent and faster
+# Merge with concat demuxer
+# GoPro rotation is now set in camera settings, no need for -vf "hflip,vflip"
 # Using -c:a copy to avoid re-encoding audio
 # Using fast-start for web playback (moov atom at start)
 ffmpeg -f concat -safe 0 -i "$CONCAT_LIST" \
-    -vf "hflip,vflip" \
     -c:v libx264 -preset fast -crf 23 \
     -c:a copy \
     -movflags +faststart \
