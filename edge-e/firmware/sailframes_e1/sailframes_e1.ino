@@ -3918,13 +3918,15 @@ void countPendingUploads() {
       if (!sessName.startsWith(".")) {
         bool hasUnuploaded = false;
         File f = session.openNextFile();
-        while (f && !hasUnuploaded) {
-          String fname = f.name();
-          if (!fname.endsWith(".uploaded") && !fname.startsWith(".")) {
-            // Check if .uploaded marker exists
-            String markerPath = String("/sf/") + sessName + "/" + fname + ".uploaded";
-            if (!SD.exists(markerPath.c_str())) {
-              hasUnuploaded = true;
+        while (f) {
+          if (!hasUnuploaded) {
+            String fname = f.name();
+            if (!fname.endsWith(".uploaded") && !fname.startsWith(".")) {
+              // Check if .uploaded marker exists
+              String markerPath = String("/sf/") + sessName + "/" + fname + ".uploaded";
+              if (!SD.exists(markerPath.c_str())) {
+                hasUnuploaded = true;
+              }
             }
           }
           f.close();
@@ -4046,13 +4048,24 @@ void uploadTaskFunc(void* param) {
             uploadTotal = countFilesToUpload("/sf");
             Serial.printf("[UPLOAD] Found %d files to upload\n", uploadTotal);
 
-            uploadDirectory("/sf");
+            if (uploadTotal > 0) {
+              uploadDirectory("/sf");
+            }
             xSemaphoreGive(sdMutex);
           }
 
           uploading = false;
           uploadRetryCount = 0;  // Reset on successful cycle
           Serial.println("[UPLOAD] Cycle complete");
+
+          // Disconnect WiFi after upload to return to normal mode
+          // (frees radio for BLE wind sensor, stops repeated empty cycles)
+          if (uploadTotal == 0) {
+            Serial.println("[UPLOAD] All files uploaded — disconnecting WiFi");
+            WiFi.disconnect(true);
+            wifiConnected = false;
+            connectedSSID[0] = '\0';
+          }
         }
       } else {
         Serial.println("[UPLOAD] WiFi connect failed");
