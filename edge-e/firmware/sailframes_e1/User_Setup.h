@@ -15,20 +15,23 @@
 
 // ESP32 SPI pin assignments
 #define TFT_MOSI  23
-#define TFT_MISO  19
+#define TFT_MISO  25   // Swapped with BL to match soldered wiring
 #define TFT_SCLK  18
 #define TFT_CS     5
 #define TFT_DC     2
 #define TFT_RST    4
 
 // Backlight pin
-#define TFT_BL    25
+#define TFT_BL    19   // Swapped with MISO to match soldered wiring
 #define TFT_BACKLIGHT_ON HIGH
 
 // SPI frequency — 40MHz is safe for ST7796, can try 80MHz if stable
 #define SPI_FREQUENCY       40000000
 #define SPI_READ_FREQUENCY  20000000
 #define SPI_TOUCH_FREQUENCY  2500000
+
+// Enable SPI transactions for proper bus arbitration with SD card
+#define SUPPORT_TRANSACTIONS
 
 // Fonts — load only what's needed to save flash
 #define LOAD_GLCD    // 8px font

@@ -472,7 +472,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "sailframes-e1.kicad_pro",
+    "filename": "kicad_sailframes-e1.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -509,7 +509,7 @@
       "idf": "",
       "netlist": "",
       "plot": "./",
-      "specctra_dsn": "",
+      "specctra_dsn": "kicad_sailframes-e1.dsn",
       "vrml": ""
     },
     "page_layout_descr_file": ""
@@ -627,18 +627,18 @@
     "subpart_id_separator": 0,
     "top_level_sheets": [
       {
-        "filename": "sailframes-e1.kicad_sch",
-        "name": "Root",
+        "filename": "kicad_sailframes-e1.kicad_sch",
+        "name": "kicad_sailframes-e1",
         "uuid": "6f4d9015-233b-4a5e-9e82-beae77f1406f"
       }
     ],
-    "used_designators": "J1-5,U1",
+    "used_designators": "J8-10,SW1",
     "variants": []
   },
   "sheets": [
     [
       "6f4d9015-233b-4a5e-9e82-beae77f1406f",
-      "Root"
+      "kicad_sailframes-e1"
     ]
   ],
   "text_variables": {},

@@ -111,80 +111,113 @@ sync via chrony, the Pi clock syncs within seconds of boot.
 | Component | Part | Interface | Notes |
 |---|---|---|---|
 | MCU | ELEGOO ESP32 DevKit V1 (CP2102) | USB-C | Dual-core 240MHz, Wi-Fi + BLE |
-| GPS | Waveshare LG290P GNSS module | UART2 (GPIO16 TX2, GPIO17 RX2) | Quad-band, PPK-capable, ~$109 with antenna |
+| GPS | Waveshare LG290P GNSS module | UART2 (GPIO16 RX2, GPIO17 TX2) | Quad-band, PPK-capable, ~$109 with antenna |
 | IMU | GY-BNO08X (BNO085) | I2C (GPIO21 SDA, GPIO22 SCL) @ 0x4A | Heel/pitch, use GAME_ROTATION_VECTOR mode |
-| Display | HiLetgo 2.42" SSD1309 OLED | I2C (shared bus) yellow | Status display |
-| Storage | microSD breakout + 16GB card | SPI (GPIO23 MOSI, 19 MISO, 18 CLK, 5 CS) | CSV + raw binary for PPK |
-| Power | Adafruit PowerBoost 1000C + 18650 cells | 5V output to ESP32 VIN | Hardware power switch on EN pin |
+| Display | Hosyond 3.5" IPS TFT (ST7796U) | SPI VSPI (480×320) | Sunlight-readable, white background |
+| Storage | microSD module | SPI HSPI (separate bus) | CSV + raw RTCM3 binary for PPK |
+| Power | DWEII USB-C 5V 2A Boost Charger | 5V output to ESP32 VIN | Integrated LiPo charging + protection |
+| Battery | 906090 3.7V 6000mAh LiPo | JST PH 2.0mm connector | ~10+ hours runtime |
 | Enclosure | YETLEBOX IP67 ABS 5.9"×3.9"×2.8" clear lid | — | Daily install/remove |
 
 ### E1 Power Management
 
-**Hardware power switch:** A slide switch on the PowerBoost 1000C EN (enable) pin
-controls power to the entire system. This replaces software deep sleep which had
-issues with immediate wake-up and GPS staying powered.
+**DWEII USB-C Boost Charger:** All-in-one module with LiPo charging, protection,
+and 5V boost output. Replaces PowerBoost 1000C.
 
-**Battery monitoring:** GPIO34 reads battery voltage via voltage divider (2x 200Ω,
-ratio 2.0). GPIO35 reads PowerBoost LBO (Low Battery Output) pin for critical
-battery warning.
+**Hardware power switch:** SPDT slide switch between boost module 5V output and
+ESP32 VIN controls power to the entire system.
+
+**Battery monitoring:** GPIO34 reads battery voltage via voltage divider (2× 100KΩ,
+ratio 2:1). Direct connection to battery B+ terminal through boost module.
 
 | Pin | Function | Notes |
 |-----|----------|-------|
-| GPIO34 | Battery voltage (ADC) | Via 2:1 voltage divider |
-| GPIO35 | Low battery warning | PowerBoost LBO pin, active low |
+| GPIO34 | Battery voltage (ADC) | Via 2:1 voltage divider (2× 100KΩ) |
 
-**Battery percentage displayed** on OLED instead of heading (MAG replaced with BAT).
+**Battery percentage displayed** on TFT display bottom bar.
 
 ### E1 Wiring Summary
 
+**IMPORTANT:** TFT and SD card use SEPARATE SPI buses to prevent display flicker
+during SD card operations.
+
 ```
-LG290P GPS:
+LG290P GPS (UART2):
   TXD3 → GPIO16 (ESP32 RX2)     ⚠️ UART2, NOT GPIO21/22 (I2C)
   RXD3 → GPIO17 (ESP32 TX2)
-  5V   → 5V from battery shield
+  5V   → 5V from boost module
   GND  → GND
 
-BNO085 IMU (shared I2C bus):
+BNO085 IMU (I2C bus):
   SDA  → GPIO21
   SCL  → GPIO22
   VCC  → 3V3 from ESP32
   GND  → GND
 
-SSD1309 OLED (shared I2C bus):
-  SDA  → GPIO21
-  SCL  → GPIO22
-  VCC  → 3V3 from ESP32
+TFT Display ST7796U (VSPI bus):
+  MOSI → GPIO23 (VSPI_MOSI)
+  MISO → GPIO25 (VSPI_MISO) ← swapped with BL
+  CLK  → GPIO18 (VSPI_CLK)
+  CS   → GPIO5  (TFT_CS)
+  DC   → GPIO2  (TFT_DC)
+  RST  → GPIO4  (TFT_RST)
+  BL   → GPIO19 (TFT_BL)   ← swapped with MISO
+  VCC  → 3V3
   GND  → GND
 
-SD Card (SPI):
-  3V3  → 3V3
-  CS   → GPIO5
-  MOSI → GPIO23
-  CLK  → GPIO18
-  MISO → GPIO19
+SD Card Module (HSPI bus - SEPARATE from TFT):
+  CLK  → GPIO14 (HSPI_CLK)
+  MISO → GPIO35 (HSPI_MISO, input-only pin)
+  MOSI → GPIO13 (HSPI_MOSI)
+  CS   → GPIO27 (SD_CS)
+  VCC  → 3V3
   GND  → GND
-  (Pin order on board silkscreen: 3V3, CS, MOSI, CLK, MISO, GND)
 
-Power + Battery Monitoring:
-  PowerBoost 1000C 5V → ESP32 VIN
-  PowerBoost BAT → voltage divider (2x 200Ω) → GPIO34 (ADC)
-  PowerBoost LBO → GPIO35 (low battery warning)
-  Slide switch on PowerBoost EN pin (hardware power control)
-  ESP32 3V3 → all sensors
+Power + Battery:
+  DWEII Boost OUT+ → SPDT switch → ESP32 VIN
+  DWEII Boost OUT- → GND
+  Battery B+ → DWEII B+, also → voltage divider (2× 100KΩ) → GPIO34
+  Battery B- → DWEII B-
+  Voltage divider: VBAT → R1(100K) → GPIO34 → R2(100K) → GND
+
+Future Expansion:
+  Wind Sensor UART1: GPIO32 (WIND_RX), GPIO33 (WIND_TX)
+  I2C Expansion: GPIO21 (SDA), GPIO22 (SCL) - shared bus
+  GPIO Expansion: GPIO26, GPIO15, VP (GPIO36), VN (GPIO39)
 ```
 
-### E1 KiCad Schematic Status
+### E1 KiCad PCB Design (v1.0)
 
-- **Complete:** ESP32 DevKitV1 symbol (custom library from GitHub), all connectors
-  with net labels, ERC clean
-- **Key fix applied:** GPS net labels (GPS_TX/GPS_RX) on UART2 (GPIO16/17),
-  NOT on GPIO21/22 (I2C bus). Edit net labels on schematic sheet, not symbol definition.
-- **J3 BNO085:** Updated to 10-pin connector with no-connect flags on unused pins
-  (ADO, CS, INT, RST, PS1, PS0)
-- **J1 SD Card:** Pin order corrected to match physical silkscreen
-- **Footprint libraries:** Assigned; module courtyard outlines added for layout
-- **Freerouting:** Installed via KiCad Plugin Manager (requires Java 21 Eclipse Temurin)
-- **Next:** PCB layout → Gerbers → JLCPCB (~$2-5 per 5 boards)
+**Status:** Complete — Gerbers ordered from JLCPCB (April 2026)
+
+**Board specs:** 60.5 × 91.5 mm, 2-layer, 1.6mm thickness, green solder mask
+
+**Schematic connectors:**
+| Ref | Component | Pins | Notes |
+|-----|-----------|------|-------|
+| U1 | ESP32 DevKit V1 | 30 | Main MCU module |
+| U2 | Hosyond 3.5" TFT | 14 | ST7796U display |
+| J1 | SD Card Module | 6 | HSPI bus |
+| J2 | LG290P GPS | 4 | UART2 + power |
+| J3 | BNO085 IMU | 10 | I2C, unused pins X |
+| J4 | DPS310 Pressure | 4 | I2C (future) |
+| J5 | Boost Module | 4 | GND, SW_5V, VBAT, GND |
+| J6 | I2C Connector A | 4 | Expansion |
+| J7 | I2C Connector B | 4 | Expansion |
+| J8 | Wind Sensor | 4 | UART1 (future) |
+| J9 | GPIO Expansion | 6 | D26, D15, VP, VN |
+| J10 | Battery | 2 | JST PH 2.0mm |
+| SW1 | Power Switch | 3 | SPDT slide switch |
+| R1,R2 | Voltage Divider | - | 100KΩ 0805 SMD |
+| R3,R4 | I2C Pull-ups | - | 4.7KΩ 0805 SMD |
+
+**Key design decisions:**
+- TFT on VSPI, SD on HSPI (separate buses eliminate display flicker)
+- GPIO35 for SD MISO (input-only pin, avoids GPIO12 strapping issue)
+- Ground pour on bottom layer
+- Freerouting autorouter + manual cleanup
+
+**Files:** `edge-e/hardware/kicad_sailframes-e1/`
 
 ### E1 Firmware (sailframes_e1.ino)
 
@@ -192,20 +225,34 @@ Power + Battery Monitoring:
 - RTCM3 binary parsing and logging for PPK post-processing
 - BNO085 reading at 20Hz with heel/pitch calculation
 - SD logging: CSV (human-readable) + raw RTCM3 binary (`.rtcm3` files)
-- OLED status display: satellites (in fix/in view), heel, battery %, recording status
+- TFT display: large speed/COG numbers, status bar at bottom
 - Battery monitoring via ADC (voltage divider on GPIO34)
 - Wi-Fi auto-upload to AWS S3 on yacht club network detection
 - GPS speed-triggered auto-recording (starts >2kt, stops after 5min <0.5kt)
 - Power button recording control (short press toggles recording)
 - Configuration loaded from SD card `config.txt`
-- **Libraries:** U8g2 (OLED), NimBLE-Arduino (wind sensor BLE), ESP32 by Espressif Systems
+- **Libraries:** TFT_eSPI (display), NimBLE-Arduino (wind sensor BLE), ESP32 by Espressif Systems
 - **Arduino IDE:** ESP32 board support installed (v3.3.7)
+- **Partition scheme:** huge_app (3MB app, no OTA) — required for code size
 
-**OLED Display Layout:**
-- Line 1: Satellites (in fix / in view), HDOP
-- Line 2: Speed (kt), Course (°)
-- Line 3: Heel (°), Pitch (°), Battery (%)
-- Line 4: Recording status, session info
+**TFT Display Layout (Vakaros-style, white background):**
+- Main area: Large speed (kt) and COG (°) in black
+- Status bar: SAT count, HDOP, WiFi SSID, upload progress
+- Bottom bar: Heel, Pitch, Battery %, Wind indicator
+
+**TFT Configuration (User_Setup.h):**
+```cpp
+#define ST7796_DRIVER
+#define TFT_WIDTH  320
+#define TFT_HEIGHT 480
+#define TFT_MOSI  23
+#define TFT_MISO  25   // Swapped with BL
+#define TFT_SCLK  18
+#define TFT_CS     5
+#define TFT_DC     2
+#define TFT_RST    4
+#define TFT_BL    19   // Swapped with MISO
+```
 
 **Serial/Telnet Commands:**
 | Command | Description |
@@ -971,6 +1018,19 @@ contract or data schema, update this file so other sessions pick it up.
     when logging and displaying wind data. Historical data in S3 was corrected using
     `scripts/correct_wind_awa.py`.
 
+20. **ESP32 GPIO12 is a strapping pin** — GPIO12 controls flash voltage at boot.
+    If pulled HIGH during boot, ESP32 fails to start. **Do not use GPIO12** for SD card
+    MISO or any external connection. Use GPIO35 (input-only) for MISO instead.
+
+21. **TFT + SD SPI bus contention** — Sharing single SPI bus between TFT display and
+    SD card causes severe display flickering during SD writes. **Solution:** Use separate
+    SPI buses — TFT on VSPI (GPIO18/19/23), SD on HSPI (GPIO14/35/13). This completely
+    eliminates flicker.
+
+22. **ESP32 partition scheme for large firmware** — E1 firmware with TFT_eSPI + NimBLE
+    exceeds default 1.3MB partition. Use `huge_app` partition scheme (3MB app, no OTA)
+    in Arduino IDE: Tools → Partition Scheme → Huge APP.
+
 ---
 
 ## Weather Data Integration
@@ -1056,7 +1116,17 @@ Competitive analysis is maintained separately.
   - Fixed S1 wind service (`sailframes_wind.py`) to apply 180° correction
   - Created `scripts/correct_wind_awa.py` to fix historical data in S3
   - Corrected 64 raw CSV files and 10 processed wind.json files in S3
+- April 10-12, 2026: E1 hardware redesign and PCB v1.0
+  - Replaced OLED with Hosyond 3.5" TFT (ST7796U) for sunlight readability
+  - Moved SD card to HSPI bus (GPIO14/35/13/27) to eliminate TFT flicker
+  - TFT on VSPI (GPIO23/25/18/5/2/4/19) — MISO and BL pins swapped to match soldered wiring
+  - Replaced PowerBoost 1000C with DWEII USB-C 5V 2A boost charger
+  - Added 6000mAh LiPo battery with JST PH 2.0mm connector
+  - Designed complete KiCad PCB with all connectors and expansion headers
+  - Added future expansion: Wind sensor UART1 (GPIO32/33), I2C connectors, GPIO header
+  - Battery voltage divider changed to 2× 100KΩ (from 200Ω)
+  - Ordered PCB from JLCPCB (60.5 × 91.5 mm, 2-layer, ~$9.50 + shipping)
 
 ---
 
-*Last updated: April 8, 2026 — Calypso wind sensor 180° AWA correction*
+*Last updated: April 12, 2026 — E1 PCB v1.0 ordered from JLCPCB*
