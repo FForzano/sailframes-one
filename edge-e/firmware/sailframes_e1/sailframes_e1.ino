@@ -2422,8 +2422,8 @@ void updateDisplayD2() {
 // D3: WIND + NAV - 7 values all at Font 8 (75px)
 // ============================================================
 static float prevD3AWS = -1, prevD3AWA = -1, prevD3TWS = -1, prevD3TWA = -1;
-static float prevD3TWD = -1, prevD3SOG = -1, prevD3COG = -1;
-static int prevD3RecState = -1, prevD3Sats = -1, prevD3Bat = -1;
+static float prevD3TWD = -1, prevD3SOG = -1, prevD3COG = -1, prevD3HDOP = -1;
+static int prevD3RecState = -1, prevD3Sats = -1, prevD3FixQ = -1;
 static bool d3LayoutDrawn = false;
 
 void updateDisplayD3() {
@@ -2502,15 +2502,18 @@ void updateDisplayD3() {
 
     prevD3AWS = prevD3AWA = prevD3TWS = prevD3TWA = -999;
     prevD3TWD = prevD3SOG = prevD3COG = -999;
-    prevD3RecState = prevD3Sats = prevD3Bat = -1;
+    prevD3RecState = prevD3Sats = prevD3FixQ = -1;
+    prevD3HDOP = -1;
   }
 
   // Top status bar
   int dispSats = (gps.satellites >= 0 && gps.satellites <= 50) ? gps.satellites : 0;
-  if (dispSats != prevD3Sats || recState != prevD3RecState || battery.percent != prevD3Bat) {
+  if (dispSats != prevD3Sats || recState != prevD3RecState ||
+      gps.fix_quality != prevD3FixQ || abs(gps.hdop - prevD3HDOP) > 0.1) {
     prevD3Sats = dispSats;
     prevD3RecState = recState;
-    prevD3Bat = battery.percent;
+    prevD3FixQ = gps.fix_quality;
+    prevD3HDOP = gps.hdop;
 
     tft.fillRect(0, 0, SCREEN_WIDTH, TOP_BAR, TFT_BLACK);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -2526,10 +2529,21 @@ void updateDisplayD3() {
     }
     tft.drawString(recStr, 5, 7, 2);
 
-    snprintf(buf, sizeof(buf), "SAT %d", dispSats);
-    tft.drawString(buf, 100, 7, 2);
+    // Fix type (0=none, 1=GPS, 2=DGPS/SBAS, 4=RTK fix, 5=RTK float)
+    const char* fixStr;
+    switch (gps.fix_quality) {
+      case 1: fixStr = "GPS"; break;
+      case 2: fixStr = "SBAS"; break;
+      case 4: fixStr = "RTK"; break;
+      case 5: fixStr = "FLOAT"; break;
+      default: fixStr = "---"; break;
+    }
+    tft.drawString(fixStr, 80, 7, 2);
 
-    snprintf(buf, sizeof(buf), "BAT %d%%", battery.percent);
+    snprintf(buf, sizeof(buf), "SAT %d", dispSats);
+    tft.drawString(buf, 140, 7, 2);
+
+    snprintf(buf, sizeof(buf), "HDOP %.1f", gps.hdop);
     tft.setTextDatum(TR_DATUM);
     tft.drawString(buf, SCREEN_WIDTH - 5, 7, 2);
     tft.setTextDatum(TL_DATUM);
@@ -3220,12 +3234,13 @@ bool connectWiFi() {
     WiFi.disconnect(true);
     delay(100);
     WiFi.mode(WIFI_STA);
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Max TX power for reliability
     WiFi.persistent(false);  // Don't save to flash
     WiFi.setAutoReconnect(false);
     WiFi.begin(config.wifi[i].ssid, config.wifi[i].pass);
 
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts++ < 30) {  // Increased to 30
+    while (WiFi.status() != WL_CONNECTED && attempts++ < 40) {  // 40 attempts = 20 sec
       delay(500);
       Serial.print(".");
       if (attempts % 10 == 0) {
@@ -4166,6 +4181,10 @@ void uploadTaskFunc(void* param) {
   unsigned long stationaryStart = 0;  // track how long boat has been still
   unsigned long lastPendingCount = 0;  // Last time we counted pending uploads
 
+  // Count pending uploads immediately on boot (don't wait 30 seconds)
+  countPendingUploads();
+  Serial.printf("[UPLOAD] Initial pending count: %d\n", pendingUploads);
+
   while (true) {
     unsigned long now = millis();
     bool shouldUpload = false;
@@ -4197,13 +4216,14 @@ void uploadTaskFunc(void* param) {
       else if (pendingUploads == 0) {
         // Nothing to upload — don't connect WiFi
       }
-      // Only upload when stationary (speed < 0.5 kt for 30 seconds)
+      // Only upload when stationary (speed < 0.5 kt)
       else if (gps.speed_kts >= 0.5) {
         stationaryStart = 0;  // reset — boat is moving
       }
       else {
         if (stationaryStart == 0) stationaryStart = now;
-        if (now - stationaryStart >= 30000) {
+        // No delay - connect immediately when stationary
+        if (true) {
           // Stationary long enough — check periodic interval
           if (now - lastUploadCheck >= UPLOAD_CHECK_INTERVAL_MS) {
             lastUploadCheck = now;
