@@ -794,6 +794,7 @@ Dashboard preview extracts frames from **completed** video segments
 | Battery History | `/battery` | Battery logging sessions |
 | Video Review | `/video` | Browse and play recorded videos |
 | Data Management | `/data` | View storage usage, delete old data by date |
+| Race Dashboard | `/race.html` | Multi-boat race replay, leaderboard, comparative charts |
 
 ### Recording Controls
 
@@ -1132,7 +1133,17 @@ Competitive analysis is maintained separately.
   - Added 4× M2.5 mounting holes at board corners
   - Consolidated custom footprints into `e1.pretty/` library
   - Generated final Gerbers and ordered from JLCPCB (FedEx DDP shipping)
+- April 18, 2026: Race Dashboard for J/80 Spring Series
+  - Built multi-boat race visualization for 6-boat fleet (E1-E6)
+  - Added Race/Regatta data models to `processing/models.py`
+  - Created `/web/api/race.py` with CRUD endpoints and multi-boat data loading
+  - Created `/web/race.html` dashboard with Leaflet map and Chart.js charts
+  - Features: colored boat tracks, live leaderboard, speed comparison chart
+  - Playback controls (0.5x-8x speed), timeline scrubbing
+  - Race editor modal with boat assignments and drag-and-drop finish order
+  - Auto-match sessions by time overlap with race window
+  - Fixed E1 WiFi upload on battery (reduced TX power from 19.5dBm to 15dBm)
 
 ---
 
-*Last updated: April 18, 2026 — E1 PCB v1.1 ordered from JLCPCB*
+*Last updated: April 18, 2026 — Race Dashboard for J/80 Spring Series*
