@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SailFrames - Race Dashboard</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <!-- Day.js -->
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/duration.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
+
+    <link rel="stylesheet" href="./assets/css/main.css?v=9">
+    <link rel="stylesheet" href="./assets/css/race.css?v=1">
+</head>
+<body class="race-dashboard">
+    <header class="header">
+        <a href="/" class="logo-link"><h1 class="logo">SailFrames</h1></a>
+        <div class="race-controls">
+            <select id="regatta-select">
+                <option value="">All Regattas</option>
+            </select>
+            <select id="race-select">
+                <option value="">Select a race...</option>
+            </select>
+            <button id="btn-new-race" class="btn-primary" title="Create new race">+ New Race</button>
+            <button id="btn-edit-race" class="btn-secondary" title="Edit race" disabled>Edit</button>
+        </div>
+        <a href="/" class="nav-link">Session View</a>
+    </header>
+
+    <main class="main race-main">
+        <!-- Left panel: Multi-boat Map -->
+        <section class="panel map-panel" id="map-panel">
+            <div class="panel-header">
+                <h2>Fleet Tracker</h2>
+                <div class="race-info" id="race-info">
+                    <span class="race-name" id="race-name">No race selected</span>
+                    <span class="race-time" id="race-time"></span>
+                </div>
+            </div>
+            <!-- Boat Legend -->
+            <div class="boat-legend" id="boat-legend"></div>
+            <!-- Start/Finish Line Indicator -->
+            <div class="line-indicator" id="line-indicator" style="display: none;">
+                <span class="line-label">Start Line</span>
+                <button class="btn-edit-line" id="btn-edit-start-line">Edit</button>
+            </div>
+            <div id="race-map" class="map-container"></div>
+        </section>
+
+        <!-- Right panel: Leaderboard + Charts -->
+        <section class="panel race-panel" id="race-panel">
+            <div class="panel-header">
+                <h2>Leaderboard</h2>
+                <div class="elapsed-time" id="elapsed-time">00:00:00</div>
+            </div>
+            <div class="leaderboard" id="leaderboard">
+                <div class="leaderboard-empty">Select a race to view standings</div>
+            </div>
+
+            <!-- Comparative Charts -->
+            <div class="chart-section">
+                <div class="chart-header">
+                    <h3>Speed Comparison</h3>
+                    <div class="chart-toggles" id="speed-chart-toggles"></div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="speed-chart"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Timeline -->
+    <footer class="timeline-container">
+        <div class="playback-controls">
+            <button id="btn-play" class="btn-play" title="Play/Pause (Space)">▶</button>
+            <select id="playback-speed">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+                <option value="8">8x</option>
+            </select>
+        </div>
+        <div class="timeline">
+            <span class="time-label" id="time-current">00:00:00</span>
+            <input type="range" id="timeline-slider" min="0" max="1000" value="0" step="1">
+            <span class="time-label" id="time-total">00:00:00</span>
+        </div>
+    </footer>
+
+    <!-- Race Editor Modal -->
+    <div class="modal" id="race-modal" style="display: none;">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">New Race</h2>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="race-name-input">Race Name</label>
+                    <input type="text" id="race-name-input" placeholder="Race 1">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="race-date-input">Date</label>
+                        <input type="date" id="race-date-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="regatta-input">Regatta</label>
+                        <select id="regatta-input">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="start-time-input">Start Time (Gun)</label>
+                        <input type="time" id="start-time-input" step="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="end-time-input">End Time</label>
+                        <input type="time" id="end-time-input" step="1">
+                    </div>
+                </div>
+
+                <!-- Boat Assignments -->
+                <div class="form-section">
+                    <h3>Boat Assignments</h3>
+                    <div class="boat-assignments" id="boat-assignments">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <button id="btn-match-sessions" class="btn-secondary">Auto-Match Sessions</button>
+                </div>
+
+                <!-- Finish Order -->
+                <div class="form-section">
+                    <h3>Finish Order</h3>
+                    <div class="finish-order" id="finish-order">
+                        <!-- Drag-and-drop list -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="btn-cancel">Cancel</button>
+                <button class="btn-primary" id="btn-save-race">Save Race</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module" src="./assets/js/race-app.js?v=1"></script>
+</body>
+</html>
