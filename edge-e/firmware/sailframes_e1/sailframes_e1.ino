@@ -391,7 +391,7 @@ TaskHandle_t uploadTaskHandle = NULL;
 unsigned long lastUploadCheck = 0;
 const unsigned long UPLOAD_CHECK_INTERVAL_MS = 30000;  // Check every 30 seconds
 int uploadRetryCount = 0;
-const int MAX_UPLOAD_RETRIES = 2;
+const int MAX_UPLOAD_RETRIES = 5;  // More attempts before 25-min backoff
 unsigned long lastUploadAttempt = 0;
 const unsigned long UPLOAD_RETRY_DELAY_MS = 300000;  // Wait 5 minutes between retries after failure
 
@@ -3234,7 +3234,7 @@ bool connectWiFi() {
     WiFi.disconnect(true);
     delay(100);
     WiFi.mode(WIFI_STA);
-    WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Max TX power for reliability
+    WiFi.setTxPower(WIFI_POWER_15dBm);  // Lower power to reduce current draw on battery
     WiFi.persistent(false);  // Don't save to flash
     WiFi.setAutoReconnect(false);
     WiFi.begin(config.wifi[i].ssid, config.wifi[i].pass);
