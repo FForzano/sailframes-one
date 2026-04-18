@@ -2,7 +2,7 @@
 # upload-gopro.sh - One-click GoPro proxy upload with auto session matching
 # Usage: ./upload-gopro.sh
 #
-# Merges LRV chapters, rotates 180°, finds matching E1 session, and uploads.
+# Merges LRV chapters, finds matching E1 session, and uploads.
 # No parameters needed - reads from GoPro SD card and auto-matches session.
 
 set -e
@@ -45,8 +45,8 @@ fi
 echo "Found ${#LRV_FILES[@]} LRV files on SD card"
 echo ""
 
-# Step 1: Merge and rotate
-echo "Step 1: Merging and rotating..."
+# Step 1: Merge LRV files
+echo "Step 1: Merging LRV files..."
 echo "----------------------------------------"
 
 # Check if a recent proxy file already exists (within last hour)
@@ -214,7 +214,7 @@ echo ""
 echo "Step 3: Uploading and linking to session..."
 echo "----------------------------------------"
 
-"$SCRIPT_DIR/upload-proxy-video.sh" "$PROXY_FILE" "E1/$BEST_SESSION"
+"$SCRIPT_DIR/upload-proxy-video.sh" "$PROXY_FILE" "E1/$BEST_SESSION" "$GPS_TIME"
 
 # Step 4: Cleanup
 echo ""

@@ -5732,7 +5732,7 @@
 				)
 			)
 		)
-		(property "Footprint" "esp32devkitv1:SW_Slide_SPDT_SS12D10-G5_P5mm"
+		(property "Footprint" "e1_Library:SW_Slide_SS12D10-G5_v3_SAILFRAMES"
 			(at 67.31 139.446 0)
 			(show_name no)
 			(do_not_autoplace no)

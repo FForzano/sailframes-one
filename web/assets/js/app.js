@@ -95,6 +95,12 @@ async function init() {
         });
     }
 
+    // Setup cleanup button
+    const btnCleanup = document.getElementById('btn-cleanup');
+    if (btnCleanup) {
+        btnCleanup.addEventListener('click', cleanupSessions);
+    }
+
     console.log('Initialization complete');
 }
 
@@ -182,7 +188,9 @@ async function loadSession(deviceId, date) {
                 lat: p.gps.lat,
                 lon: p.gps.lon,
                 speed_kn: p.gps.speed_kn,
-                course: p.gps.course
+                course: p.gps.course,
+                fix: p.gps.fix,
+                sats: p.gps.sats
             }));
 
         // Extract wind data for map overlay
@@ -241,6 +249,8 @@ async function loadSession(deviceId, date) {
                         sats: p.ppk.sats
                     }));
                 mapView.setPPKData(ppkData);
+                // Also send PPK quality to chart panel
+                chartPanel.setPPKData(ppkData);
             }
         } catch (e) {
             console.log('No PPK data available');
@@ -395,6 +405,94 @@ async function saveSessionMeta() {
                 btnSave.textContent = 'Save';
             }
         }
+    }
+}
+
+/**
+ * Cleanup sessions - delete short sessions or sessions without boat
+ */
+async function cleanupSessions() {
+    const btn = document.getElementById('btn-cleanup');
+    const MAX_DURATION_MIN = 15;
+
+    try {
+        btn.disabled = true;
+        btn.textContent = 'Checking...';
+
+        // Fetch all sessions
+        const response = await fetch(`${API_BASE}/api/sessions`);
+        if (!response.ok) throw new Error('Failed to fetch sessions');
+
+        const data = await response.json();
+        const sessions = data.sessions || [];
+
+        // Find sessions to delete: < 15 min OR no boat assigned
+        const toDelete = sessions.filter(s => {
+            const durationMin = (s.duration_sec || 0) / 60;
+            const shortSession = durationMin < MAX_DURATION_MIN;
+            const noBoat = !s.boat && durationMin >= MAX_DURATION_MIN;
+            return shortSession || noBoat;
+        }).map(s => ({
+            ...s,
+            durationMin: Math.round((s.duration_sec || 0) / 60),
+            reason: (s.duration_sec || 0) / 60 < MAX_DURATION_MIN
+                ? `${Math.round((s.duration_sec || 0) / 60)}min < ${MAX_DURATION_MIN}min`
+                : 'no boat'
+        }));
+
+        if (toDelete.length === 0) {
+            alert('No sessions to cleanup.\n\nAll sessions are either:\n• Longer than 15 minutes, AND\n• Have a boat assigned');
+            return;
+        }
+
+        // Build confirmation message
+        const sessionList = toDelete.slice(0, 20).map(s =>
+            `• ${s.device_id}/${s.date} (${s.reason})`
+        ).join('\n');
+
+        const moreText = toDelete.length > 20 ? `\n... and ${toDelete.length - 20} more` : '';
+
+        const confirmed = confirm(
+            `Found ${toDelete.length} sessions to delete:\n\n` +
+            `${sessionList}${moreText}\n\n` +
+            `Delete these sessions permanently?`
+        );
+
+        if (!confirmed) return;
+
+        // Delete each session
+        btn.textContent = `Deleting 0/${toDelete.length}...`;
+        let deleted = 0;
+        let errors = 0;
+
+        for (const session of toDelete) {
+            try {
+                const delResp = await fetch(
+                    `${API_BASE}/api/sessions/${session.device_id}/${session.date}`,
+                    { method: 'DELETE' }
+                );
+                if (delResp.ok) {
+                    deleted++;
+                } else {
+                    errors++;
+                }
+            } catch {
+                errors++;
+            }
+            btn.textContent = `Deleting ${deleted}/${toDelete.length}...`;
+        }
+
+        alert(`Cleanup complete!\n\nDeleted: ${deleted} sessions\nErrors: ${errors}`);
+
+        // Reload sessions list
+        await loadSessions(false);
+
+    } catch (err) {
+        console.error('Cleanup failed:', err);
+        alert('Cleanup failed: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🧹 Cleanup';
     }
 }
 

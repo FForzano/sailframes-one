@@ -609,7 +609,8 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                     'speed_kn': round(float(row.get('sog', 0) or 0), 2),
                     'course': round(float(row.get('cog', 0) or 0), 1),
                     'fix': fix,
-                    'sats': int(row.get('sat', 0) or 0)
+                    'sats': int(row.get('sat', 0) or 0),
+                    'hdop': round(hdop, 1)
                 }
                 all_valid_records.append(record)
                 by_second[second].append(row)
@@ -669,7 +670,8 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 'speed_kn': round(float(best.get('sog', 0) or 0), 2),
                 'course': round(float(best.get('cog', 0) or 0), 1),
                 'fix': int(best.get('fix', 0) or 0),
-                'sats': int(best.get('sat', 0) or 0)
+                'sats': int(best.get('sat', 0) or 0),
+                'hdop': round(float(best.get('hdop', 99) or 99), 1)
             })
         else:
             best = max(samples, key=lambda r: float(r.get('speed_knots', 0) or 0))
@@ -680,7 +682,8 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 'speed_kn': round(float(best.get('speed_knots', 0) or 0), 2),
                 'course': round(float(best.get('course_deg', 0) or 0), 1),
                 'fix': int(best.get('fix_quality', 0) or 0),
-                'sats': int(best.get('satellites', 0) or 0)
+                'sats': int(best.get('satellites', 0) or 0),
+                'hdop': round(float(best.get('hdop', 99) or 99), 1)
             })
 
     return result_1hz, all_valid_records, actual_date

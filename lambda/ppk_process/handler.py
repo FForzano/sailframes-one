@@ -671,6 +671,18 @@ def run_ppk_processing(rover_obs: Path, rover_nav: Path,
         raise RuntimeError("rnx2rtkp timed out")
 
 
+def gps_week_to_datetime(gps_week: int, tow_seconds: float) -> datetime:
+    """Convert GPS week and time-of-week to datetime.
+
+    GPS epoch is January 6, 1980 00:00:00 UTC.
+    """
+    from datetime import timedelta
+
+    GPS_EPOCH = datetime(1980, 1, 6, 0, 0, 0, tzinfo=timezone.utc)
+    delta = timedelta(weeks=gps_week, seconds=tow_seconds)
+    return GPS_EPOCH + delta
+
+
 def parse_ppk_solution(solution_file: Path) -> dict:
     """Parse RTKLIB solution file (.pos) to JSON format."""
     positions = []
@@ -691,10 +703,11 @@ def parse_ppk_solution(solution_file: Path) -> dict:
                 continue
 
             try:
-                # RTKLIB .pos format:
-                # Date Time Lat Lon Height Q ns sdn sde sdu
-                date = parts[0]
-                time = parts[1]
+                # RTKLIB .pos format (GPST time system):
+                # GPSWeek TOW(sec) Lat Lon Height Q ns sdn sde sdu ...
+                # Example: 2414 229292.000 42.361214726 -71.036964591 -25.4648 2 13 0.0075 ...
+                gps_week = int(parts[0])
+                tow_seconds = float(parts[1])
                 lat = float(parts[2])
                 lon = float(parts[3])
                 height = float(parts[4])
@@ -714,8 +727,9 @@ def parse_ppk_solution(solution_file: Path) -> dict:
                 else:
                     single_count += 1
 
-                # Build ISO timestamp
-                timestamp = f"{date}T{time}Z"
+                # Convert GPS week/TOW to ISO timestamp
+                dt = gps_week_to_datetime(gps_week, tow_seconds)
+                timestamp = dt.strftime('%Y-%m-%dT%H:%M:%S') + f'.{int((tow_seconds % 1) * 1000):03d}Z'
 
                 positions.append({
                     't': timestamp,

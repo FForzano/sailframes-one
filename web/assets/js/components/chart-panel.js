@@ -50,9 +50,9 @@ class ChartPanel {
             heel:     { label: 'Heel (°)',      color: '#1d9bf0', yAxis: 'yDeg' },
             pitch:    { label: 'Pitch (°)',     color: '#ffad1f', yAxis: 'yDeg' },
             aws:      { label: 'AWS (kn)',      color: '#00ba7c', yAxis: 'ySpeed' },
-            awa:      { label: 'AWA (°)',       color: '#f4212e', yAxis: 'yAngle' },
+            awa:      { label: 'AWA (°)',       color: '#f4212e', yAxis: 'yAwa' },
             tws:      { label: 'TWS (kn)',      color: '#22d3ee', yAxis: 'ySpeed' },
-            twa:      { label: 'TWA (°)',       color: '#f97316', yAxis: 'yAngle' },
+            twa:      { label: 'TWA (°)',       color: '#f97316', yAxis: 'yAwa' },
             twd:      { label: 'TWD (°)',       color: '#a855f7', yAxis: 'yAngle' },
             sog:      { label: 'SOG (kn)',      color: '#e879f9', yAxis: 'ySpeed' },
             heading:  { label: 'Heading (°)',   color: '#38bdf8', yAxis: 'yAngle' },
@@ -62,6 +62,11 @@ class ChartPanel {
             turnRate: { label: 'Turn Rate (°/s)',color: '#c084fc', yAxis: 'yTurnRate' },
             pressure: { label: 'Pressure (hPa)',color: '#a78bfa', yAxis: 'yPressure' },
             temp:     { label: 'Temp (°C)',     color: '#ef4444', yAxis: 'yTemp' },
+            // GPS quality metrics
+            sat:      { label: 'Satellites',    color: '#10b981', yAxis: 'ySat' },
+            hdop:     { label: 'HDOP',          color: '#f59e0b', yAxis: 'yHdop' },
+            gpsAccuracy:  { label: 'GPS Accuracy (m)',  color: '#8b5cf6', yAxis: 'yAccuracy' },
+            ppkAccuracy:  { label: 'PPK Accuracy (m)',  color: '#ec4899', yAxis: 'yAccuracy' },
             // NOAA weather station wind speed series
             buoyCastleWind:   { label: 'Castle Is (kn)', color: '#17bf63', yAxis: 'ySpeed' },
             buoyBostonWind:   { label: 'Boston 16NM (kn)', color: '#e0245e', yAxis: 'ySpeed' },
@@ -106,7 +111,20 @@ class ChartPanel {
                     intersect: false
                 },
                 plugins: {
-                    legend: { display: false },
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            color: '#8b98a5',
+                            font: { size: 11 },
+                            boxWidth: 12,
+                            padding: 8,
+                            filter: function(item, chart) {
+                                // Only show legend for visible (non-hidden) datasets
+                                return !item.hidden;
+                            }
+                        }
+                    },
                     tooltip: {
                         enabled: true,
                         mode: 'index',
@@ -118,6 +136,45 @@ class ChartPanel {
                                     return d.toLocaleTimeString();
                                 }
                                 return '';
+                            },
+                            label: (context) => {
+                                const label = context.dataset.label || '';
+                                const value = context.parsed.y;
+                                if (value === null || value === undefined) return null;
+
+                                const seriesKey = context.dataset.seriesKey;
+
+                                // For GPS Accuracy, show fix type label
+                                if (seriesKey === 'gpsAccuracy') {
+                                    const fixTypes = {
+                                        0.02: 'RTK Fix',
+                                        0.3: 'RTK Float',
+                                        1: 'DGPS',
+                                        3: 'GPS',
+                                        5: 'DR'
+                                    };
+                                    const fixType = fixTypes[value] || '';
+                                    return `${label}: ${fixType} (${value}m)`;
+                                }
+
+                                // For PPK Accuracy, show quality label
+                                if (seriesKey === 'ppkAccuracy') {
+                                    const ppkTypes = {
+                                        0.02: 'Fix',
+                                        0.3: 'Float',
+                                        0.7: 'DGPS',
+                                        1.5: 'SBAS',
+                                        3: 'Single'
+                                    };
+                                    const ppkType = ppkTypes[value] || '';
+                                    return `${label}: ${ppkType} (${value}m)`;
+                                }
+
+                                // Default formatting
+                                if (typeof value === 'number') {
+                                    return `${label}: ${value.toFixed(2)}`;
+                                }
+                                return `${label}: ${value}`;
                             }
                         }
                     }
@@ -175,6 +232,25 @@ class ChartPanel {
                         min: 0,
                         max: 360
                     },
+                    yAwa: {
+                        type: 'linear',
+                        display: 'auto',
+                        position: 'right',
+                        title: { display: true, text: 'AWA/TWA (°)', color: '#8b98a5' },
+                        ticks: {
+                            color: '#8b98a5',
+                            font: { size: 10 },
+                            callback: function(value) {
+                                // Show P/S suffix for port/starboard
+                                if (value === 0) return '0';
+                                if (value > 0) return value + 'S';
+                                return Math.abs(value) + 'P';
+                            }
+                        },
+                        grid: { display: false },
+                        min: -180,
+                        max: 180
+                    },
                     yAccel: {
                         type: 'linear',
                         display: 'auto',
@@ -210,6 +286,47 @@ class ChartPanel {
                         title: { display: true, text: '°C', color: '#8b98a5' },
                         ticks: { color: '#8b98a5', font: { size: 10 } },
                         grid: { display: false }
+                    },
+                    ySat: {
+                        type: 'linear',
+                        display: 'auto',
+                        position: 'left',
+                        title: { display: true, text: 'Satellites', color: '#8b98a5' },
+                        ticks: { color: '#8b98a5', font: { size: 10 } },
+                        grid: { display: false },
+                        min: 0,
+                        max: 45
+                    },
+                    yHdop: {
+                        type: 'linear',
+                        display: 'auto',
+                        position: 'right',
+                        title: { display: true, text: 'HDOP', color: '#8b98a5' },
+                        ticks: { color: '#8b98a5', font: { size: 10 } },
+                        grid: { display: false },
+                        min: 0,
+                        max: 5
+                    },
+                    yAccuracy: {
+                        type: 'logarithmic',
+                        display: 'auto',
+                        position: 'left',
+                        title: { display: true, text: 'Accuracy (m)', color: '#8b98a5' },
+                        ticks: {
+                            color: '#8b98a5',
+                            font: { size: 10 },
+                            callback: function(value) {
+                                if (value === 0.01) return '1cm';
+                                if (value === 0.1) return '10cm';
+                                if (value === 1) return '1m';
+                                if (value === 10) return '10m';
+                                return '';
+                            }
+                        },
+                        grid: { display: false },
+                        min: 0.01,
+                        max: 10,
+                        reverse: true  // Lower accuracy value = better, so invert axis
                     }
                 }
             },
@@ -326,7 +443,7 @@ class ChartPanel {
         this.chart.data.labels = visibleLabels;
 
         // Update each dataset with sliced data
-        const seriesKeys = ['heel', 'pitch', 'aws', 'awa', 'tws', 'twa', 'twd', 'sog', 'heading', 'course', 'accelX', 'accelY', 'turnRate', 'pressure', 'temp', 'buoyCastleWind', 'buoyBostonWind', 'buoyMassBay', 'buoyLogan', 'buoyCastleDir', 'buoyBostonDir', 'buoyMassBayDir', 'buoyLoganDir'];
+        const seriesKeys = ['heel', 'pitch', 'aws', 'awa', 'tws', 'twa', 'twd', 'sog', 'heading', 'course', 'accelX', 'accelY', 'turnRate', 'pressure', 'temp', 'sat', 'hdop', 'gpsAccuracy', 'ppkAccuracy', 'buoyCastleWind', 'buoyBostonWind', 'buoyMassBay', 'buoyLogan', 'buoyCastleDir', 'buoyBostonDir', 'buoyMassBayDir', 'buoyLoganDir'];
         this.chart.data.datasets.forEach((dataset, i) => {
             const key = seriesKeys[i];
             if (this.fullData[key]) {
@@ -463,6 +580,7 @@ class ChartPanel {
         const turnRate = [];  // gyro_z (yaw rate) for maneuver detection
         const pressure = [];
         const temp = [];
+        const sat = [], hdop = [], gpsAccuracy = [];
 
         this.dataIndex = {};
 
@@ -491,7 +609,12 @@ class ChartPanel {
             let awsVal = null, awaVal = null;
             if (point.wind) {
                 awsVal = point.wind.aws_kn;
-                awaVal = point.wind.awa;
+                // Convert AWA from 0-360 to -180/+180 (port/starboard convention)
+                // 0-180 = starboard (positive), 181-359 = port (negative)
+                let rawAwa = point.wind.awa;
+                if (rawAwa !== null && rawAwa !== undefined) {
+                    awaVal = rawAwa > 180 ? rawAwa - 360 : rawAwa;
+                }
                 aws.push(awsVal);
                 awa.push(awaVal);
             } else {
@@ -506,9 +629,18 @@ class ChartPanel {
                 cogVal = point.gps.course;
                 sog.push(sogVal);
                 course.push(cogVal);
+                sat.push(point.gps.sats);
+                hdop.push(point.gps.hdop);
+                // Convert NMEA fix type to estimated accuracy (meters)
+                // 0=None, 1=GPS(3m), 2=DGPS(1m), 3=PPS(3m), 4=RTK Fix(0.02m), 5=RTK Float(0.3m), 6=DR(5m)
+                const fixToAccuracy = [null, 3, 1, 3, 0.02, 0.3, 5];
+                gpsAccuracy.push(fixToAccuracy[point.gps.fix] || null);
             } else {
                 sog.push(null);
                 course.push(null);
+                sat.push(null);
+                hdop.push(null);
+                gpsAccuracy.push(null);
             }
 
             // Calculate true wind from apparent wind and boat speed
@@ -536,7 +668,10 @@ class ChartPanel {
 
         // Store full data for zooming
         this.fullLabels = labels;
-        this.fullData = { heel, pitch, aws, awa, tws, twa, twd, sog, heading, course, accelX, accelY, turnRate, pressure, temp };
+        this.fullData = { heel, pitch, aws, awa, tws, twa, twd, sog, heading, course, accelX, accelY, turnRate, pressure, temp, sat, hdop, gpsAccuracy };
+
+        // Initialize PPK accuracy array (will be filled by setPPKData)
+        this.fullData.ppkAccuracy = new Array(labels.length).fill(null);
 
         // Initialize buoy data arrays (will be filled by setBuoyData)
         this.fullData.buoyCastleWind = new Array(labels.length).fill(null);
@@ -615,6 +750,46 @@ class ChartPanel {
         console.log(`[ChartPanel] Buoy data interpolated: Castle=${castleCount}, Boston=${bostonCount} points`);
 
         // Re-apply zoom to update chart with buoy data
+        this._applyZoom();
+    }
+
+    /**
+     * Set PPK data and interpolate to match session timestamps
+     */
+    setPPKData(ppkData) {
+        console.log('[ChartPanel] setPPKData called with', ppkData?.length || 0, 'points');
+
+        if (!this.fullLabels || this.fullLabels.length === 0 || !ppkData || ppkData.length === 0) {
+            console.log('[ChartPanel] No fullLabels or PPK data, skipping');
+            return;
+        }
+
+        // Convert RTKLIB quality to estimated accuracy (meters)
+        // 1=Fix(0.02m), 2=Float(0.3m), 3=SBAS(1.5m), 4=DGPS(0.7m), 5=Single(3m), 6=PPP(0.3m)
+        const qualityToAccuracy = { 1: 0.02, 2: 0.3, 3: 1.5, 4: 0.7, 5: 3, 6: 0.3 };
+
+        // Build index of PPK accuracy by timestamp (second precision)
+        const ppkBySecond = {};
+        for (const p of ppkData) {
+            if (p.t && p.quality !== undefined) {
+                const second = p.t.substring(0, 19);  // YYYY-MM-DDTHH:MM:SS
+                ppkBySecond[second] = qualityToAccuracy[p.quality] || null;
+            }
+        }
+
+        // Match PPK accuracy to chart timestamps
+        let matchCount = 0;
+        this.fullLabels.forEach((label, i) => {
+            const second = label.substring(0, 19);
+            if (ppkBySecond[second] !== undefined) {
+                this.fullData.ppkAccuracy[i] = ppkBySecond[second];
+                matchCount++;
+            }
+        });
+
+        console.log(`[ChartPanel] PPK data matched: ${matchCount} points`);
+
+        // Re-apply zoom to update chart with PPK data
         this._applyZoom();
     }
 

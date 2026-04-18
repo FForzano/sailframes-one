@@ -480,9 +480,30 @@ class MapView {
         // Update stats display
         const speedEl = document.getElementById('stat-speed');
         const courseEl = document.getElementById('stat-course');
+        const gpsFixEl = document.getElementById('stat-gps-fix');
+        const ppkQualityEl = document.getElementById('stat-ppk-quality');
 
         if (speedEl) speedEl.textContent = point.speed_kn?.toFixed(1) || '--';
         if (courseEl) courseEl.textContent = point.course?.toFixed(0) || '--';
+
+        // GPS fix type labels
+        if (gpsFixEl) {
+            const fixLabels = ['None', 'GPS', 'DGPS', 'PPS', 'RTK', 'Float', 'DR'];
+            gpsFixEl.textContent = fixLabels[point.fix] || '--';
+        }
+
+        // PPK quality - look up by timestamp
+        if (ppkQualityEl) {
+            const timeKey = point.t?.substring(0, 19);
+            const ppkIdx = this.ppkDataIndex[timeKey];
+            if (ppkIdx !== undefined && this.ppkData[ppkIdx]) {
+                const quality = this.ppkData[ppkIdx].quality;
+                const ppkLabels = { 1: 'Fix', 2: 'Float', 3: 'SBAS', 4: 'DGPS', 5: 'Single', 6: 'PPP' };
+                ppkQualityEl.textContent = ppkLabels[quality] || '--';
+            } else {
+                ppkQualityEl.textContent = '--';
+            }
+        }
 
         // Update wind overlay
         this._updateWindOverlay(time, point);

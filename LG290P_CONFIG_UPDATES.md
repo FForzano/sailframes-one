@@ -1,6 +1,6 @@
 # SailFrames E1 — LG290P Configuration & Firmware Updates
 
-## Date: April 6, 2026 (Updated)
+## Date: April 9, 2026 (Updated)
 
 ---
 
@@ -264,6 +264,135 @@ Response format: `$PQTMCFGCNST,OK,<GPS>,<GLO>,<GAL>,<BDS>,<QZSS>,<NavIC>*`
 
 ---
 
+## 10Hz Output Configuration (NMEA + RTCM3)
+
+By default, the LG290P outputs NMEA and RTCM3 messages at **1Hz**. For high-resolution track logging and PPK processing (e.g., detailed maneuver analysis), configure 10Hz output.
+
+### Why 10Hz?
+- **1Hz (default):** 1 position per second, sufficient for general navigation
+- **10Hz:** 10 positions per second, captures fine boat movements during tacks/gybes
+- **Trade-off:** 10× more data = larger files, more processing, slightly higher power consumption
+
+### Complete 10Hz Configuration (NMEA + RTCM3)
+
+Connect to LG290P via USB, open QGNSS → QConsole, and send these commands **one at a time**:
+
+```
+$PQTMCFGNMEADP,W,10,0*1C
+$PQTMCFGMSGRATE,W,RTCM3-1077,1,0*40
+$PQTMCFGMSGRATE,W,RTCM3-1087,1,0*4F
+$PQTMCFGMSGRATE,W,RTCM3-1097,1,0*4E
+$PQTMCFGMSGRATE,W,RTCM3-1127,1,0*44
+$PQTMCFGMSGRATE,W,RTCM3-1019,10,0*79
+$PQTMCFGMSGRATE,W,RTCM3-1020,10,0*73
+$PQTMCFGMSGRATE,W,RTCM3-1042,10,0*77
+$PQTMCFGMSGRATE,W,RTCM3-1046,10,0*73
+$PQTMCFGMSGRATE,W,RTCM3-1006,100,0*4E
+$PQTMSAVEPAR*5A
+$PQTMSRR*4B
+```
+
+**Wait 6-8 seconds** for the module to reset.
+
+### Command Breakdown
+
+**NMEA Rate:**
+- `PQTMCFGNMEADP,W,10,0` — Set NMEA output rate to 10Hz
+- First parameter `10` = rate in Hz (valid: 1, 2, 5, 10, 20)
+- Second parameter `0` = offset (typically 0)
+
+**RTCM3 Message Rates:**
+The rate parameter means "output every N navigation epochs". With 10Hz navigation:
+
+| Message | Rate Param | Actual Output | Purpose |
+|---------|------------|---------------|---------|
+| 1077 (GPS MSM7) | 1 | 10 Hz | GPS raw observations |
+| 1087 (GLONASS MSM7) | 1 | 10 Hz | GLONASS raw observations |
+| 1097 (Galileo MSM7) | 1 | 10 Hz | Galileo raw observations |
+| 1127 (BeiDou MSM7) | 1 | 10 Hz | BeiDou raw observations |
+| 1019 (GPS Eph) | 10 | 1 Hz | GPS ephemeris |
+| 1020 (GLONASS Eph) | 10 | 1 Hz | GLONASS ephemeris |
+| 1042 (BeiDou Eph) | 10 | 1 Hz | BeiDou ephemeris |
+| 1046 (Galileo Eph) | 10 | 1 Hz | Galileo ephemeris |
+| 1006 (Reference) | 100 | 0.1 Hz | Station reference position |
+
+### Verify 10Hz Configuration
+
+Query current rates after reset:
+```
+$PQTMCFGNMEADP,R*3A
+$PQTMCFGMSGRATE,R,RTCM3-1077*44
+```
+
+**Expected responses:**
+- `$PQTMCFGNMEADP,OK,10,0*...` (NMEA at 10Hz)
+- `$PQTMCFGMSGRATE,OK,RTCM3-1077,1,0*...` (MSM7 every epoch = 10Hz)
+
+### Revert to 1Hz
+
+To restore default 1Hz output:
+```
+$PQTMCFGNMEADP,W,1,0*1D
+$PQTMCFGMSGRATE,W,RTCM3-1077,1,0*40
+$PQTMCFGMSGRATE,W,RTCM3-1087,1,0*4F
+$PQTMCFGMSGRATE,W,RTCM3-1097,1,0*4E
+$PQTMCFGMSGRATE,W,RTCM3-1127,1,0*44
+$PQTMSAVEPAR*5A
+$PQTMSRR*4B
+```
+
+Note: MSM7 rate=1 at 1Hz navigation = 1Hz RTCM3 output.
+
+### Data Volume at 10Hz
+
+| Data Type | 1Hz | 10Hz |
+|-----------|-----|------|
+| NMEA (GGA+RMC) | ~200 bytes/sec | ~2 KB/sec |
+| RTCM3 MSM7 (4 constellations) | ~400 bytes/sec | ~4 KB/sec |
+| **Total per hour** | ~2 MB | ~20 MB |
+| **3-hour sail session** | ~6 MB | ~60 MB |
+
+The E1's SD card (16GB) handles this easily.
+
+### E1 Firmware Considerations
+
+The E1 firmware automatically handles 10Hz data when the LG290P is configured for it:
+- NMEA parsing works at any rate (processes each GGA/RMC sentence)
+- CSV logging captures all samples with millisecond timestamps (e.g., `180539.100`)
+- RTCM3 binary logging captures all MSM7 frames
+
+**After configuring 10Hz:**
+1. The raw `_nav.csv` files will contain ~10× more rows
+2. Each row has a unique timestamp like `180539.100`, `180539.200`, etc.
+3. The raw `_raw.rtcm3` files will contain 10× more MSM7 frames
+4. The `process_upload` Lambda generates both:
+   - `gps.json` — 1Hz downsampled (for charts, compatible with existing sessions)
+   - `gps_10hz.json` — Full resolution (for high-detail track display)
+
+### Pre-computed NMEA Rate Checksums
+
+| Rate | Command | Checksum |
+|------|---------|----------|
+| 1 Hz | `$PQTMCFGNMEADP,W,1,0*1D` | 1D |
+| 2 Hz | `$PQTMCFGNMEADP,W,2,0*1E` | 1E |
+| 5 Hz | `$PQTMCFGNMEADP,W,5,0*19` | 19 |
+| 10 Hz | `$PQTMCFGNMEADP,W,10,0*1C` | 1C |
+| 20 Hz | `$PQTMCFGNMEADP,W,20,0*1C` | 1C |
+| Query | `$PQTMCFGNMEADP,R*3A` | 3A |
+
+### When to Use 10Hz vs 1Hz
+
+| Use Case | Recommended Rate |
+|----------|------------------|
+| General sailing, cruising | 1 Hz |
+| Race analysis with PPK | 10 Hz |
+| Detailed maneuver study (tacks, gybes) | 10 Hz |
+| Battery/storage constrained | 1 Hz |
+| Local base station PPK | 10 Hz |
+| CORS-based PPK (1Hz CORS data) | 1 Hz (no benefit from 10Hz rover) |
+
+---
+
 ## PPK Processing Pipeline
 
 Once MSM7 is configured:
@@ -321,4 +450,4 @@ Once MSM7 is configured:
 
 ---
 
-*Last updated: April 6, 2026*
+*Last updated: April 9, 2026*

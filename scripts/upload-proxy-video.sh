@@ -11,19 +11,23 @@ AWS_PROFILE="${AWS_PROFILE:-sailframes}"
 S3_BUCKET="sailframes-fleet-data-prod"
 
 if [[ $# -lt 2 || "$1" == "-h" || "$1" == "--help" ]]; then
-    echo "Usage: $0 <video_file> <session>"
+    echo "Usage: $0 <video_file> <session> [gps_time]"
     echo ""
     echo "Arguments:"
     echo "  video_file: Merged proxy video file (from prep-gopro-proxy.sh)"
     echo "  session: Session path (e.g., E1/2026-04-09-154138)"
+    echo "  gps_time: Optional GPS start time (e.g., '2026:04:09 15:40:23.930')"
+    echo "            (Required for merged videos since GPMF metadata is lost)"
     echo ""
     echo "Example:"
     echo "  $0 gopro_proxy_20260409_154023.mp4 E1/2026-04-09-154138"
+    echo "  $0 gopro_proxy_20260409_154023.mp4 E1/2026-04-09-154138 '2026:04:09 15:40:23.930'"
     exit 0
 fi
 
 VIDEO_FILE="$1"
 SESSION="$2"
+PASSED_GPS_TIME="${3:-}"
 
 if [[ ! -f "$VIDEO_FILE" ]]; then
     echo "Error: Video file not found: $VIDEO_FILE"
@@ -71,8 +75,14 @@ DURATION_MIN=$(echo "$DURATION / 60" | bc)
 RESOLUTION=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 "$VIDEO_FILE" 2>/dev/null)
 RESOLUTION_LABEL="${RESOLUTION}p"
 
-# Try to get GPS start time from video metadata
-GPS_TIME=$(exiftool -api largefilesupport=1 -ee -GPSDateTime -s3 "$VIDEO_FILE" 2>/dev/null | head -1)
+# Use passed GPS time, or try to extract from video, or prompt
+if [[ -n "$PASSED_GPS_TIME" ]]; then
+    GPS_TIME="$PASSED_GPS_TIME"
+    echo "  Using provided GPS time: $GPS_TIME"
+else
+    # Try to get GPS start time from video metadata
+    GPS_TIME=$(exiftool -api largefilesupport=1 -ee -GPSDateTime -s3 "$VIDEO_FILE" 2>/dev/null | head -1)
+fi
 
 if [[ -n "$GPS_TIME" ]]; then
     # Convert "2026:04:09 15:40:23.930" to ISO format

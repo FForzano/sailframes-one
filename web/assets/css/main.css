@@ -129,6 +129,30 @@ body {
     cursor: not-allowed;
 }
 
+/* Cleanup button */
+.btn-cleanup {
+    background: var(--bg-panel);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-left: 8px;
+}
+
+.btn-cleanup:hover {
+    background: #dc2626;
+    color: white;
+    border-color: #dc2626;
+}
+
+.btn-cleanup:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* Main layout */
 .main {
     flex: 1;
