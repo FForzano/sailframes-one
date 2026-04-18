@@ -186,9 +186,9 @@ Future Expansion:
   GPIO Expansion: GPIO26, GPIO15, VP (GPIO36), VN (GPIO39)
 ```
 
-### E1 KiCad PCB Design (v1.0)
+### E1 KiCad PCB Design (v1.1)
 
-**Status:** Complete — Gerbers ordered from JLCPCB (April 2026)
+**Status:** Complete — Gerbers ordered from JLCPCB (April 18, 2026)
 
 **Board specs:** 60.5 × 91.5 mm, 2-layer, 1.6mm thickness, green solder mask
 
@@ -214,7 +214,8 @@ Future Expansion:
 **Key design decisions:**
 - TFT on VSPI, SD on HSPI (separate buses eliminate display flicker)
 - GPIO35 for SD MISO (input-only pin, avoids GPIO12 strapping issue)
-- Ground pour on bottom layer
+- Ground pour on B.Cu (bottom layer) for EMI shielding and return paths
+- 4× M2.5 mounting holes at corners for standoff mounting
 - Freerouting autorouter + manual cleanup
 
 **Files:** `edge-e/hardware/kicad_sailframes-e1/`
@@ -1126,7 +1127,12 @@ Competitive analysis is maintained separately.
   - Added future expansion: Wind sensor UART1 (GPIO32/33), I2C connectors, GPIO header
   - Battery voltage divider changed to 2× 100KΩ (from 200Ω)
   - Ordered PCB from JLCPCB (60.5 × 91.5 mm, 2-layer, ~$9.50 + shipping)
+- April 18, 2026: E1 PCB v1.1 layout finalization
+  - Added ground pour on B.Cu (bottom copper) for improved EMI shielding
+  - Added 4× M2.5 mounting holes at board corners
+  - Consolidated custom footprints into `e1.pretty/` library
+  - Generated final Gerbers and ordered from JLCPCB (FedEx DDP shipping)
 
 ---
 
-*Last updated: April 12, 2026 — E1 PCB v1.0 ordered from JLCPCB*
+*Last updated: April 18, 2026 — E1 PCB v1.1 ordered from JLCPCB*
