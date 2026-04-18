@@ -169,3 +169,90 @@ class AnalysisResult:
     polar_points: list[PolarPoint] = field(default_factory=list)
     vmg_series: list[VmgResult] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
+
+
+# =============================================================================
+# Race Dashboard Models
+# =============================================================================
+
+@dataclass
+class Regatta:
+    """A regatta/series containing multiple races."""
+    regatta_id: str
+    name: str  # "J/80 Spring Series 2026"
+    venue: str  # "Courageous Sailing Center"
+    boat_class: str  # "J/80"
+    start_date: str  # "2026-04-27"
+    end_date: str  # "2026-05-25"
+    race_ids: list[str] = field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class StartFinishLine:
+    """Start or finish line defined by two endpoints."""
+    pin_lat: float  # Pin end coordinates
+    pin_lon: float
+    boat_lat: float  # Committee boat end
+    boat_lon: float
+
+
+@dataclass
+class RaceBoat:
+    """A boat entry in a race."""
+    device_id: str  # "E1", "E2", etc.
+    boat_name: str  # "Defiance"
+    sail_number: str  # "123"
+    session_path: Optional[str] = None  # Auto-matched session path
+
+
+@dataclass
+class StartAnalysis:
+    """Start line analysis for a single boat."""
+    time_to_line_sec: float  # Seconds from gun to crossing line
+    distance_at_gun_m: float  # Distance from line at start signal
+    speed_at_gun_kts: float  # Boat speed at gun
+    line_end: str  # "pin" or "boat" - which end was closer
+    ocs: bool  # Over early (crossed before gun)
+
+
+@dataclass
+class BoatRaceResult:
+    """Race results for a single boat."""
+    device_id: str
+    finish_position: int  # Manual entry (1-based)
+    elapsed_sec: float
+    delta_to_leader_sec: float
+    avg_speed_kts: float
+    max_speed_kts: float
+    tack_count: int
+    gybe_count: int
+    distance_nm: float
+    start_analysis: Optional[StartAnalysis] = None
+
+
+@dataclass
+class RaceResults:
+    """Computed results for a race."""
+    finish_order: list[str] = field(default_factory=list)  # device_ids
+    boat_results: dict = field(default_factory=dict)  # device_id -> BoatRaceResult
+    computed_at: str = ""
+
+
+@dataclass
+class Race:
+    """A single race with boats, times, and results."""
+    race_id: str
+    name: str  # "Race 1"
+    date: str  # "2026-05-04"
+    start_time: str  # ISO timestamp (gun time)
+    end_time: str  # ISO timestamp
+    boats: list[RaceBoat] = field(default_factory=list)
+    regatta_id: Optional[str] = None
+    start_line: Optional[StartFinishLine] = None
+    finish_line: Optional[StartFinishLine] = None
+    finish_order: list[str] = field(default_factory=list)  # Manual entry
+    results: Optional[RaceResults] = None
+    created_at: str = ""
+    updated_at: str = ""

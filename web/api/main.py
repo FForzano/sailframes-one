@@ -14,6 +14,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .race import router as race_router
+
 app = FastAPI(
     title="SailFrames Analysis API",
     version="1.0.0",
@@ -26,6 +28,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include race/regatta router
+app.include_router(race_router)
 
 # Configuration
 S3_BUCKET = os.environ.get("SAILFRAMES_BUCKET", "sailframes-fleet-data-prod")
