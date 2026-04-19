@@ -232,8 +232,14 @@ Future Expansion:
 - GPS speed-triggered auto-recording (starts >2kt, stops after 5min <0.5kt)
 - Power button recording control (short press toggles recording)
 - Configuration loaded from SD card `config.txt`
-- **Libraries:** TFT_eSPI (display), NimBLE-Arduino (wind sensor BLE), ESP32 by Espressif Systems
-- **Arduino IDE:** ESP32 board support installed (v3.3.7)
+- **Libraries (tested versions):**
+  - TFT_eSPI (display)
+  - NimBLE-Arduino 2.4.0 (wind sensor BLE) — avoid 2.5.0
+  - Adafruit BusIO 1.17.4
+  - Adafruit GFX Library 1.12.6
+  - Adafruit BNO08x 1.2.6
+  - Adafruit DPS310 1.1.3
+- **Arduino IDE:** ESP32 board package 3.3.7 — avoid 3.3.8 (causes I2C/GPIO issues)
 - **Partition scheme:** huge_app (3MB app, no OTA) — required for code size
 
 **TFT Display Layout (Vakaros-style, white background):**
@@ -311,14 +317,14 @@ API Gateway entirely.
 - S3 supports HTTP natively
 - No need for API Gateway or presigned URLs
 
-**S3 Bucket Policy Required:**
+**S3 Bucket Policy Required (all fleet devices):**
 ```json
 {
-  "Sid": "E1DirectHTTPUpload",
+  "Sid": "FleetDirectHTTPUpload",
   "Effect": "Allow",
   "Principal": "*",
   "Action": "s3:PutObject",
-  "Resource": "arn:aws:s3:::sailframes-fleet-data-prod/raw/E1/*"
+  "Resource": "arn:aws:s3:::sailframes-fleet-data-prod/raw/*"
 }
 ```
 
@@ -1033,6 +1039,15 @@ contract or data schema, update this file so other sessions pick it up.
     exceeds default 1.3MB partition. Use `huge_app` partition scheme (3MB app, no OTA)
     in Arduino IDE: Tools → Partition Scheme → Huge APP.
 
+23. **ESP32 Arduino Core 3.3.8 breaks I2C and TFT** — Do not update to ESP32 board package
+    3.3.8. Causes I2C bus failures (devices not detected) and TFT display issues. Stick
+    with 3.3.7. If accidentally updated, downgrade with:
+    `arduino-cli core install esp32:esp32@3.3.7`
+
+24. **NimBLE-Arduino 2.5.0 compatibility** — Avoid NimBLE-Arduino 2.5.0, stick with 2.4.0.
+    Version 2.5.0 may have API changes affecting BLE/WiFi radio switching. Downgrade with:
+    `arduino-cli lib install "NimBLE-Arduino@2.4.0"`
+
 ---
 
 ## Weather Data Integration
@@ -1143,7 +1158,12 @@ Competitive analysis is maintained separately.
   - Race editor modal with boat assignments and drag-and-drop finish order
   - Auto-match sessions by time overlap with race window
   - Fixed E1 WiFi upload on battery (reduced TX power from 19.5dBm to 15dBm)
+- April 19, 2026: Library version compatibility documentation
+  - Documented tested library versions that work together
+  - ESP32 board package 3.3.8 causes I2C and TFT failures — use 3.3.7
+  - NimBLE-Arduino 2.5.0 may have issues — use 2.4.0
+  - Added Known Issues #23 and #24 for library version warnings
 
 ---
 
-*Last updated: April 18, 2026 — Race Dashboard for J/80 Spring Series*
+*Last updated: April 19, 2026 — Library version compatibility documentation*
