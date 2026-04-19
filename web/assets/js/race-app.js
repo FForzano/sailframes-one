@@ -72,6 +72,13 @@ function initMap() {
             attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
             maxZoom: 19,
         }),
+        'NOAA Charts': L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer', {
+            layers: '0,1,2,3,4,5,6,7',
+            format: 'image/png',
+            transparent: true,
+            attribution: '&copy; <a href="https://nauticalcharts.noaa.gov">NOAA</a>',
+            maxZoom: 18,
+        }),
         'ESRI Ocean': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
             attribution: '&copy; Esri, GEBCO, NOAA, National Geographic',
             maxZoom: 13,
