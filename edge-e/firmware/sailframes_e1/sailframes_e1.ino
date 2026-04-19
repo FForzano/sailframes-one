@@ -890,13 +890,25 @@ void setup() {
   oledOK = true;
   Serial.println("[TFT] ST7796U initialized (320x480 portrait)");
 
-  // Splash screen
+  // Splash screen - show device ID in VERY LARGE text taking full screen
+  tft.fillScreen(COLOR_BG);
   tft.setTextColor(COLOR_TEXT, COLOR_BG);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString("SAILFRAMES", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 30, 4);
+
+  // Draw device ID in HUGE font (fill most of the screen)
+  // Using font 4 with 8x scale for letters+numbers (E1, E2, etc.)
+  tft.setTextSize(8);
+  tft.drawString(config.boat_id, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 40, 4);
+
+  // Small "SAILFRAMES" label below
+  tft.setTextSize(1);
   tft.setTextColor(COLOR_LABEL, COLOR_BG);
-  tft.drawString("E1 Fleet Tracker v2.4", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 10, 2);
-  delay(1500);
+  tft.drawString("SAILFRAMES Fleet Tracker", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 120, 4);
+
+  delay(2500);  // Show device ID longer for visibility
+
+  // Reset text size for rest of display
+  tft.setTextSize(1);
 
   // IMU — BNO085
   Serial.println("[IMU] Initializing BNO085...");
