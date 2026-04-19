@@ -17,6 +17,10 @@ const BOAT_COLORS = {
     'E6': '#22d3ee',  // Cyan
 };
 
+// Fleet configuration - COURAGEOUS J80 Spring Racing Series 2026
+const FLEET_BOATS = ['Wizard', 'Fins', 'Doc Buck', 'Katu', 'Bliss & Ella', 'Amigo'];
+const FLEET_TEAMS = ['Vela Veloce', 'Seadogs', 'Mystic Mutiny', 'Rooster Alumni Club'];
+
 // State
 let regattas = [];
 let races = [];
@@ -30,6 +34,7 @@ let currentTime = 0;  // seconds from race start
 let raceDuration = 0;
 let playbackInterval = null;
 let speedChart = null;
+let availableSessions = {};  // device_id -> [session paths]
 
 // Initialize
 document.addEventListener('DOMContentLoaded', init);
@@ -64,6 +69,13 @@ function initMap() {
 
     // Base layers
     const baseLayers = {
+        'NOAA Charts': L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer', {
+            layers: '0,1,2,3,4,5,6,7',
+            format: 'image/png',
+            transparent: true,
+            attribution: '&copy; <a href="https://nauticalcharts.noaa.gov">NOAA</a>',
+            maxZoom: 18,
+        }),
         'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap, &copy; CARTO',
             maxZoom: 19,
@@ -71,13 +83,6 @@ function initMap() {
         'OSM': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
             maxZoom: 19,
-        }),
-        'NOAA Charts': L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer', {
-            layers: '0,1,2,3,4,5,6,7',
-            format: 'image/png',
-            transparent: true,
-            attribution: '&copy; <a href="https://nauticalcharts.noaa.gov">NOAA</a>',
-            maxZoom: 18,
         }),
         'ESRI Ocean': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
             attribution: '&copy; Esri, GEBCO, NOAA, National Geographic',
@@ -96,10 +101,18 @@ function initMap() {
             maxZoom: 18,
             opacity: 0.8,
         }),
+        'SHOM Bathymetry (FR)': L.tileLayer.wms('https://services.data.shom.fr/INSPIRE/wms/r', {
+            layers: 'LITTO3D_GUAD_2016_PYR_3857_WMSR,LITTO3D_MART_2016_PYR_3857_WMSR',
+            format: 'image/png',
+            transparent: true,
+            attribution: '&copy; <a href="https://data.shom.fr">SHOM</a>',
+            maxZoom: 18,
+            opacity: 0.7,
+        }),
     };
 
-    // Add default layer
-    baseLayers['Dark'].addTo(map);
+    // Add default layer (NOAA Charts)
+    baseLayers['NOAA Charts'].addTo(map);
 
     // Add layer control
     L.control.layers(baseLayers, overlayLayers, {
@@ -211,12 +224,19 @@ function renderBoatLegend() {
         const color = BOAT_COLORS[deviceId] || '#888888';
         const hasData = boatLayers[deviceId]?.data?.length > 0;
 
+        // Display team name if available, else boat name, else device ID
+        const displayName = boat.team_name || boat.boat_name || deviceId;
+        const subtitle = boat.team_name && boat.boat_name ? boat.boat_name : '';
+
         const item = document.createElement('div');
         item.className = `boat-legend-item ${hasData ? '' : 'disabled'}`;
         item.dataset.deviceId = deviceId;
         item.innerHTML = `
             <span class="boat-color-dot" style="background: ${color}"></span>
-            <span class="boat-legend-name">${boat.boat_name || deviceId}</span>
+            <div class="boat-legend-info">
+                <span class="boat-legend-name">${displayName}</span>
+                ${subtitle ? `<span class="boat-legend-subtitle">${subtitle}</span>` : ''}
+            </div>
             <span class="boat-legend-speed" id="legend-speed-${deviceId}">-- kn</span>
         `;
 
@@ -276,8 +296,8 @@ function renderLeaderboard() {
                 <div class="leaderboard-position ${posClass}">${pos}</div>
                 <div class="leaderboard-boat-color" style="background: ${color}"></div>
                 <div class="leaderboard-boat-info">
-                    <div class="leaderboard-boat-name">${item.boatName}</div>
-                    <div class="leaderboard-boat-device">${item.deviceId}</div>
+                    <div class="leaderboard-boat-name">${item.displayName}</div>
+                    <div class="leaderboard-boat-subtitle">${item.subtitle}</div>
                 </div>
                 <div class="leaderboard-stats">
                     <div class="leaderboard-speed">${item.speed.toFixed(1)} kn</div>
@@ -303,9 +323,14 @@ function calculatePositions() {
         const gps = boatData.sensors.gps;
         const lastPoint = gps[gps.length - 1];
 
+        // Display team name if available, else boat name, else device ID
+        const displayName = boat?.team_name || boat?.boat_name || deviceId;
+        const subtitle = boat?.team_name && boat?.boat_name ? boat.boat_name : deviceId;
+
         positions.push({
             deviceId,
-            boatName: boat?.boat_name || deviceId,
+            displayName,
+            subtitle,
             speed: lastPoint?.speed_kn || 0,
             delta: '',  // TODO: calculate time delta
         });
@@ -632,9 +657,37 @@ async function loadRaceData(raceId) {
 
 // --- Race Editor Modal ---
 
-function openRaceModal(race = null) {
+async function loadAvailableSessions() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/sessions`);
+        const data = await resp.json();
+        const sessions = data.sessions || [];
+
+        // Group sessions by device
+        availableSessions = {};
+        for (const session of sessions) {
+            const deviceId = session.device_id;
+            if (!availableSessions[deviceId]) {
+                availableSessions[deviceId] = [];
+            }
+            availableSessions[deviceId].push({
+                path: `${session.date}`,
+                label: `${session.date} (${session.duration_min || '?'}min)`,
+                name: session.name || '',
+            });
+        }
+        console.log('[Race] Loaded sessions:', availableSessions);
+    } catch (err) {
+        console.error('[Race] Failed to load sessions:', err);
+    }
+}
+
+async function openRaceModal(race = null) {
     const modal = document.getElementById('race-modal');
     const title = document.getElementById('modal-title');
+
+    // Load available sessions for dropdown
+    await loadAvailableSessions();
 
     if (race) {
         title.textContent = 'Edit Race';
@@ -658,14 +711,14 @@ function clearRaceForm() {
     document.getElementById('end-time-input').value = '18:30';
     document.getElementById('regatta-input').value = '';
 
-    // Default boat assignments
+    // Default boat assignments (6 boats)
     renderBoatAssignments([
-        { device_id: 'E1', boat_name: '', sail_number: '' },
-        { device_id: 'E2', boat_name: '', sail_number: '' },
-        { device_id: 'E3', boat_name: '', sail_number: '' },
-        { device_id: 'E4', boat_name: '', sail_number: '' },
-        { device_id: 'E5', boat_name: '', sail_number: '' },
-        { device_id: 'E6', boat_name: '', sail_number: '' },
+        { device_id: 'E1', boat_name: '', team_name: '', sail_number: '' },
+        { device_id: 'E2', boat_name: '', team_name: '', sail_number: '' },
+        { device_id: 'E3', boat_name: '', team_name: '', sail_number: '' },
+        { device_id: 'E4', boat_name: '', team_name: '', sail_number: '' },
+        { device_id: 'E5', boat_name: '', team_name: '', sail_number: '' },
+        { device_id: 'E6', boat_name: '', team_name: '', sail_number: '' },
     ]);
 }
 
@@ -690,11 +743,24 @@ function renderBoatAssignments(boats) {
         boatMap[b.device_id] = b;
     }
 
-    container.innerHTML = allDevices.map(deviceId => {
-        const boat = boatMap[deviceId] || { device_id: deviceId, boat_name: '', sail_number: '' };
+    // Build datalist options for autocomplete
+    const boatOptions = FLEET_BOATS.map(b => `<option value="${b}">`).join('');
+    const teamOptions = FLEET_TEAMS.map(t => `<option value="${t}">`).join('');
+
+    container.innerHTML = `
+        <datalist id="boat-names">${boatOptions}</datalist>
+        <datalist id="team-names">${teamOptions}</datalist>
+    ` + allDevices.map(deviceId => {
+        const boat = boatMap[deviceId] || { device_id: deviceId, boat_name: '', team_name: '', sail_number: '', session_path: '' };
         const color = BOAT_COLORS[deviceId];
-        const matched = boat.session_path ? 'matched' : '';
-        const status = boat.session_path ? 'Session matched' : 'No session';
+        const sessions = availableSessions[deviceId] || [];
+
+        // Build session dropdown options
+        const sessionOptions = sessions.map(s => {
+            const selected = boat.session_path === s.path ? 'selected' : '';
+            const label = s.name ? `${s.label} - ${s.name}` : s.label;
+            return `<option value="${s.path}" ${selected}>${label}</option>`;
+        }).join('');
 
         return `
             <div class="boat-assignment" data-device="${deviceId}">
@@ -702,9 +768,12 @@ function renderBoatAssignments(boats) {
                     <span class="boat-assignment-color" style="background: ${color}"></span>
                     <span>${deviceId}</span>
                 </div>
-                <input type="text" placeholder="Boat name" value="${boat.boat_name || ''}" data-field="boat_name">
-                <input type="text" placeholder="Sail #" value="${boat.sail_number || ''}" data-field="sail_number">
-                <span class="boat-assignment-status ${matched}">${status}</span>
+                <input type="text" placeholder="Team" value="${boat.team_name || ''}" data-field="team_name" list="team-names">
+                <input type="text" placeholder="Boat" value="${boat.boat_name || ''}" data-field="boat_name" list="boat-names">
+                <select data-field="session_path" class="session-select">
+                    <option value="">Select session...</option>
+                    ${sessionOptions}
+                </select>
             </div>
         `;
     }).join('');
@@ -799,14 +868,16 @@ function getFormData() {
     const boats = [];
     document.querySelectorAll('.boat-assignment').forEach(row => {
         const deviceId = row.dataset.device;
-        const boatName = row.querySelector('[data-field="boat_name"]').value;
-        const sailNumber = row.querySelector('[data-field="sail_number"]').value;
+        const teamName = row.querySelector('[data-field="team_name"]')?.value || '';
+        const boatName = row.querySelector('[data-field="boat_name"]')?.value || '';
+        const sessionPath = row.querySelector('[data-field="session_path"]')?.value || '';
 
-        if (boatName || sailNumber) {
+        if (teamName || boatName || sessionPath) {
             boats.push({
                 device_id: deviceId,
+                team_name: teamName,
                 boat_name: boatName,
-                sail_number: sailNumber,
+                session_path: sessionPath,
             });
         }
     });
@@ -933,6 +1004,22 @@ function setupEventListeners() {
 
     // Close modal on backdrop click
     document.querySelector('.modal-backdrop').addEventListener('click', closeRaceModal);
+
+    // Map expand button
+    const btnExpand = document.getElementById('btn-expand-map');
+    const mapPanel = document.getElementById('map-panel');
+    if (btnExpand && mapPanel) {
+        btnExpand.addEventListener('click', () => {
+            mapPanel.classList.toggle('expanded');
+            document.body.classList.toggle('map-expanded');
+            // Trigger map resize after expansion
+            setTimeout(() => {
+                if (map) {
+                    map.invalidateSize();
+                }
+            }, 350);
+        });
+    }
 
     // Playback controls
     setupPlaybackControls();

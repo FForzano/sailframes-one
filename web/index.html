@@ -74,8 +74,7 @@
                     <span class="stat"><label>GPS:</label> <span id="stat-gps-fix">--</span></span>
                     <span class="stat"><label>PPK:</label> <span id="stat-ppk-quality">--</span></span>
                 </div>
-                <button id="btn-collapse-map" class="btn-collapse" title="Collapse map">&#x25C0;</button>
-            </div>
+                </div>
             <!-- Wind data overlay -->
             <div class="wind-overlay" id="wind-overlay">
                 <div class="wind-section apparent">
@@ -96,7 +95,10 @@
                     </div>
                 </div>
             </div>
-            <div id="map" class="map-container"></div>
+            <div id="map" class="map-container">
+                <!-- Map expand button (floating inside map) -->
+                <button id="btn-expand-map" class="btn-expand-map" title="Expand map to fullscreen">⤢</button>
+            </div>
             <div class="resize-handle" id="map-resize-handle"></div>
         </section>
 

@@ -49,6 +49,13 @@ class MapView {
 
         // Base layers
         const baseLayers = {
+            'NOAA Charts': L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer', {
+                layers: '0,1,2,3,4,5,6,7',
+                format: 'image/png',
+                transparent: true,
+                attribution: '&copy; <a href="https://nauticalcharts.noaa.gov">NOAA</a>',
+                maxZoom: 18,
+            }),
             'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                 attribution: '&copy; OpenStreetMap &copy; CartoDB',
                 maxZoom: 19
@@ -56,13 +63,6 @@ class MapView {
             'OSM': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
                 maxZoom: 19,
-            }),
-            'NOAA Charts': L.tileLayer.wms('https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/WMSServer', {
-                layers: '0,1,2,3,4,5,6,7',
-                format: 'image/png',
-                transparent: true,
-                attribution: '&copy; <a href="https://nauticalcharts.noaa.gov">NOAA</a>',
-                maxZoom: 18,
             }),
             'ESRI Ocean': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
                 attribution: '&copy; Esri, GEBCO, NOAA, National Geographic',
@@ -81,10 +81,18 @@ class MapView {
                 maxZoom: 18,
                 opacity: 0.8,
             }),
+            'SHOM Bathymetry (FR)': L.tileLayer.wms('https://services.data.shom.fr/INSPIRE/wms/r', {
+                layers: 'LITTO3D_GUAD_2016_PYR_3857_WMSR,LITTO3D_MART_2016_PYR_3857_WMSR',
+                format: 'image/png',
+                transparent: true,
+                attribution: '&copy; <a href="https://data.shom.fr">SHOM</a>',
+                maxZoom: 18,
+                opacity: 0.7,
+            }),
         };
 
-        // Add default layer
-        baseLayers['Dark'].addTo(this.map);
+        // Add default layer (NOAA Charts)
+        baseLayers['NOAA Charts'].addTo(this.map);
 
         // Add layer control
         L.control.layers(baseLayers, overlayLayers, {

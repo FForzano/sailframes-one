@@ -101,6 +101,26 @@ async function init() {
         btnCleanup.addEventListener('click', cleanupSessions);
     }
 
+    // Setup map expand button
+    const btnExpand = document.getElementById('btn-expand-map');
+    const mapPanel = document.getElementById('map-panel');
+
+    if (btnExpand && mapPanel) {
+        btnExpand.addEventListener('click', () => {
+            const isExpanded = mapPanel.classList.toggle('expanded');
+            document.body.classList.toggle('map-expanded');
+            // Update button text
+            btnExpand.textContent = isExpanded ? '⤡' : '⤢';
+            btnExpand.title = isExpanded ? 'Exit fullscreen' : 'Expand map to fullscreen';
+            // Trigger map resize after expansion
+            setTimeout(() => {
+                if (mapView && mapView.map) {
+                    mapView.map.invalidateSize();
+                }
+            }, 350);
+        });
+    }
+
     console.log('Initialization complete');
 }
 

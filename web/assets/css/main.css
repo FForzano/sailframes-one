@@ -229,6 +229,64 @@ body {
     transform: rotate(180deg);
 }
 
+/* Expand map button - floating on map */
+.btn-expand-map {
+    position: absolute;
+    top: 10px;
+    right: 60px;
+    z-index: 1000;
+    background: rgba(15, 23, 42, 0.9);
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 20px;
+    font-weight: bold;
+    transition: all 0.2s;
+}
+
+.btn-expand-map:hover {
+    background: var(--accent);
+    color: white;
+    transform: scale(1.1);
+}
+
+/* Expanded map state - takes most of window */
+.map-panel.expanded {
+    position: fixed;
+    top: 60px;
+    left: 0;
+    right: 0;
+    bottom: 60px;
+    z-index: 1500;
+    flex: none;
+    max-width: none;
+    border-radius: 0;
+}
+
+.map-panel.expanded .map-container {
+    height: calc(100% - 40px);
+}
+
+.map-panel.expanded .resize-handle {
+    display: none;
+}
+
+.map-panel.expanded .btn-expand {
+    background: var(--accent);
+    color: white;
+}
+
+/* Hide other panels when map is expanded */
+body.map-expanded .data-panel {
+    display: none;
+}
+
+body.map-expanded .header {
+    z-index: 1600;
+}
+
 .resize-handle {
     position: absolute;
     right: 0;
@@ -249,6 +307,7 @@ body {
 .map-container {
     flex: 1;
     background: var(--bg-primary);
+    position: relative;
 }
 
 .stats {
