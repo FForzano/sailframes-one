@@ -283,6 +283,22 @@ Resources:
         S3Bucket: !Sub 'sailframes-lambda-code-${Environment}'
         S3Key: api_buoys.zip
 
+  ApiRaceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'sailframes-api-race-${Environment}'
+      Runtime: python3.11
+      Handler: handler.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Code:
+        S3Bucket: !Sub 'sailframes-lambda-code-${Environment}'
+        S3Key: api_race.zip
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref DataBucketName
+
   # ============================================
   # VIDEO LINKING (GoPro to E1 sessions)
   # ============================================
@@ -666,6 +682,107 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref ApiBuoysFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  # Race and Regatta endpoints
+  RaceIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ApiGateway
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ApiRaceFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  RacesListRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/races'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RacesCreateRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/races'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RaceGetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/races/{race_id}'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RaceUpdateRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'PATCH /api/races/{race_id}'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RaceDeleteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'DELETE /api/races/{race_id}'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RaceDataRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/races/{race_id}/data'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RaceMatchSessionsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/races/{race_id}/match-sessions'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RegattasListRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/regattas'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RegattasCreateRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/regattas'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RegattaGetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/regattas/{regatta_id}'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RegattaUpdateRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'PATCH /api/regattas/{regatta_id}'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RegattaDeleteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'DELETE /api/regattas/{regatta_id}'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RacePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiRaceFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'

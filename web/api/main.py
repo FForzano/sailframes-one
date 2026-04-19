@@ -780,6 +780,7 @@ def get_single_buoy_data(
 
 # --- Static files (frontend) ---
 
-frontend_dir = Path(__file__).parent.parent / "frontend" / "dist"
-if frontend_dir.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+# Serve web directory (contains race.html, index.html, assets/)
+web_dir = Path(__file__).parent.parent
+if web_dir.exists():
+    app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="frontend")

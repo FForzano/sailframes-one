@@ -7,7 +7,7 @@
  */
 
 // Configuration
-const API_BASE = window.location.origin;
+const API_BASE = window.SAILFRAMES_API_URL || window.location.origin;
 const BOAT_COLORS = {
     'E1': '#1d9bf0',  // Blue
     'E2': '#f59e0b',  // Orange
