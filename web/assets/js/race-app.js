@@ -62,10 +62,38 @@ function initMap() {
         zoomControl: true,
     });
 
-    // Dark tile layer
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap, &copy; CARTO',
-        maxZoom: 19,
+    // Base layers
+    const baseLayers = {
+        'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap, &copy; CARTO',
+            maxZoom: 19,
+        }),
+        'OSM': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+            maxZoom: 19,
+        }),
+        'NOAA Charts': L.tileLayer('https://tileservice.charts.noaa.gov/tiles/50000_1/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://charts.noaa.gov">NOAA</a>',
+            maxZoom: 18,
+            tms: false,
+        }),
+        'SHOM': L.tileLayer('https://services.data.shom.fr/INSPIRE/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=RASTER_MARINE_3857_WMTS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=3857&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', {
+            attribution: '&copy; <a href="https://data.shom.fr">SHOM</a>',
+            maxZoom: 18,
+        }),
+        'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri',
+            maxZoom: 19,
+        }),
+    };
+
+    // Add default layer
+    baseLayers['Dark'].addTo(map);
+
+    // Add layer control
+    L.control.layers(baseLayers, null, {
+        position: 'topright',
+        collapsed: true,
     }).addTo(map);
 }
 
