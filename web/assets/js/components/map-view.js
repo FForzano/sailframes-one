@@ -47,10 +47,42 @@ class MapView {
             zoomControl: true
         });
 
-        // Dark tile layer (CartoDB Dark Matter)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CartoDB',
-            maxZoom: 19
+        // Base layers
+        const baseLayers = {
+            'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CartoDB',
+                maxZoom: 19
+            }),
+            'OSM': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+                maxZoom: 19,
+            }),
+            'ESRI Ocean': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '&copy; Esri, GEBCO, NOAA, National Geographic',
+                maxZoom: 13,
+            }),
+            'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '&copy; Esri',
+                maxZoom: 19,
+            }),
+        };
+
+        // Overlay layers
+        const overlayLayers = {
+            'OpenSeaMap': L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openseamap.org">OpenSeaMap</a>',
+                maxZoom: 18,
+                opacity: 0.8,
+            }),
+        };
+
+        // Add default layer
+        baseLayers['Dark'].addTo(this.map);
+
+        // Add layer control
+        L.control.layers(baseLayers, overlayLayers, {
+            position: 'topright',
+            collapsed: true,
         }).addTo(this.map);
 
         // Track polyline (interactive for click-to-seek)

@@ -72,14 +72,9 @@ function initMap() {
             attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
             maxZoom: 19,
         }),
-        'NOAA Charts': L.tileLayer('https://tileservice.charts.noaa.gov/tiles/50000_1/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://charts.noaa.gov">NOAA</a>',
-            maxZoom: 18,
-            tms: false,
-        }),
-        'SHOM': L.tileLayer('https://services.data.shom.fr/INSPIRE/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=RASTER_MARINE_3857_WMTS&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=3857&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', {
-            attribution: '&copy; <a href="https://data.shom.fr">SHOM</a>',
-            maxZoom: 18,
+        'ESRI Ocean': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri, GEBCO, NOAA, National Geographic',
+            maxZoom: 13,
         }),
         'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: '&copy; Esri',
@@ -87,11 +82,20 @@ function initMap() {
         }),
     };
 
+    // Overlay layers (nautical marks)
+    const overlayLayers = {
+        'OpenSeaMap': L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openseamap.org">OpenSeaMap</a>',
+            maxZoom: 18,
+            opacity: 0.8,
+        }),
+    };
+
     // Add default layer
     baseLayers['Dark'].addTo(map);
 
     // Add layer control
-    L.control.layers(baseLayers, null, {
+    L.control.layers(baseLayers, overlayLayers, {
         position: 'topright',
         collapsed: true,
     }).addTo(map);
