@@ -744,6 +744,20 @@ Resources:
       RouteKey: 'POST /api/races/{race_id}/match-sessions'
       Target: !Sub 'integrations/${RaceIntegration}'
 
+  RaceAutoStartLineRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/races/{race_id}/auto-start-line'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
+  RaceSuggestMarksRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/races/{race_id}/suggest-marks'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
   RaceBoatGpxRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:

@@ -24,7 +24,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=9">
-    <link rel="stylesheet" href="./assets/css/race.css?v=4">
+    <link rel="stylesheet" href="./assets/css/race.css?v=6">
     <script src="./config.js"></script>
 </head>
 <body class="race-dashboard">
@@ -42,6 +42,7 @@
             </select>
             <button id="btn-new-race" class="btn-primary" title="Create new race">+ New Race</button>
             <button id="btn-edit-race" class="btn-secondary" title="Edit race" disabled>Edit</button>
+            <button id="btn-edit-course" class="btn-secondary" title="Edit course on map" disabled>Edit Course</button>
         </div>
         <a href="./sessions.html" class="nav-link">Sessions</a>
         <a href="./session.html" class="nav-link">Timeline</a>
@@ -60,11 +61,19 @@
             </div>
             <!-- Boat Legend -->
             <div class="boat-legend" id="boat-legend"></div>
-            <!-- Start/Finish Line Indicator -->
-            <div class="line-indicator" id="line-indicator" style="display: none;">
-                <span class="line-label">Start Line</span>
-                <button class="btn-edit-line" id="btn-edit-start-line">Edit</button>
+            <!-- Course Editor Toolbar (visible only in edit mode) -->
+            <div class="course-toolbar" id="course-toolbar" style="display: none;">
+                <span class="course-toolbar-label">Course Editor</span>
+                <button class="btn-course" id="btn-course-start-line" title="Place/update start line">Start Line</button>
+                <button class="btn-course" id="btn-course-finish-line" title="Place/update finish line">Finish Line</button>
+                <button class="btn-course" id="btn-course-add-mark" title="Add a new mark at map center">+ Mark</button>
+                <button class="btn-course" id="btn-course-auto-start" title="Estimate start line from boat positions at gun time">Auto Start Line</button>
+                <button class="btn-course" id="btn-course-auto-marks" title="Suggest marks from boat track roundings">Auto Marks</button>
+                <button class="btn-course btn-course-done" id="btn-course-done" title="Save course and exit edit mode">Done</button>
+                <button class="btn-course btn-course-cancel" id="btn-course-cancel" title="Discard changes">Cancel</button>
             </div>
+            <!-- Mark List (right side, edit mode only) -->
+            <div class="mark-list" id="mark-list" style="display: none;"></div>
             <div id="race-map" class="map-container"></div>
         </section>
 
@@ -172,6 +181,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=7"></script>
+    <script type="module" src="./assets/js/race-app.js?v=9"></script>
 </body>
 </html>

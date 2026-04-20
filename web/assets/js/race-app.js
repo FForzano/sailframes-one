@@ -58,6 +58,8 @@ async function init() {
     if (!IS_ADMIN) {
         document.getElementById('btn-new-race').style.display = 'none';
         document.getElementById('btn-edit-race').style.display = 'none';
+        const editCourseBtn = document.getElementById('btn-edit-course');
+        if (editCourseBtn) editCourseBtn.style.display = 'none';
     }
 
     // Initialize map
@@ -767,6 +769,8 @@ async function loadRaceData(raceId) {
         const localTimeStr = startLocal.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
         document.getElementById('race-time').textContent = `${currentRace.date} ${localTimeStr}`;
         document.getElementById('btn-edit-race').disabled = false;
+        const editCourseBtn = document.getElementById('btn-edit-course');
+        if (editCourseBtn) editCourseBtn.disabled = false;
 
         // Load sensor data for all boats
         const dataResp = await fetch(`${API_BASE}/api/races/${raceId}/data?sensors=gps,imu,wind`);
@@ -785,6 +789,7 @@ async function loadRaceData(raceId) {
 
         // Clear existing layers and add new ones
         clearBoatLayers();
+        clearCourseLayers();
 
         let totalGpsPoints = 0;
         for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
@@ -803,6 +808,9 @@ async function loadRaceData(raceId) {
 
         // Fit map to show all tracks
         fitMapToBounds();
+
+        // Render course (marks + start/finish lines) if present
+        renderCourseViewLayer(currentRace);
 
         // Render legend and leaderboard
         renderBoatLegend();
@@ -1359,6 +1367,377 @@ async function deleteRace() {
     }
 }
 
+// --- Course Editor ---
+
+let editCourseMode = false;
+let courseDraft = null;
+let courseEditLayer = null;
+let courseViewLayer = null;
+let markEditors = {};
+let lineEditors = {};
+
+const MARK_TYPE_COLORS = {
+    windward: '#f4212e',
+    leeward: '#00ba7c',
+    gate_port: '#a855f7',
+    gate_stbd: '#f59e0b',
+    offset: '#22d3ee',
+    custom: '#ffffff',
+};
+const MARK_TYPES = ['windward', 'leeward', 'gate_port', 'gate_stbd', 'offset', 'custom'];
+const LINE_COLORS = { start_line: '#22d3ee', finish_line: '#f4212e' };
+
+function markTypeColor(type) {
+    return MARK_TYPE_COLORS[type] || '#ffffff';
+}
+
+function markIcon(type, editable = false) {
+    const color = markTypeColor(type);
+    const size = editable ? 22 : 14;
+    const border = editable ? '3px solid #fff' : '2px solid #fff';
+    const html = `<div class="course-mark-dot" style="background:${color};width:${size}px;height:${size}px;border:${border};"></div>`;
+    return L.divIcon({ html, className: 'course-mark-divicon', iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+}
+
+function lineEndIcon(kind, editable = false) {
+    const color = kind === 'pin' ? '#ffd93d' : '#f97316';
+    const size = editable ? 20 : 12;
+    const radius = kind === 'pin' ? '50%' : '3px';
+    const html = `<div class="course-line-end" style="background:${color};width:${size}px;height:${size}px;border-radius:${radius};border:2px solid #fff;"></div>`;
+    return L.divIcon({ html, className: 'course-line-divicon', iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+}
+
+function clearCourseLayers() {
+    if (courseEditLayer) { map.removeLayer(courseEditLayer); courseEditLayer = null; }
+    if (courseViewLayer) { map.removeLayer(courseViewLayer); courseViewLayer = null; }
+    markEditors = {};
+    lineEditors = {};
+}
+
+function renderCourseViewLayer(race) {
+    if (!race) return;
+    if (courseViewLayer) { map.removeLayer(courseViewLayer); }
+    courseViewLayer = L.featureGroup().addTo(map);
+
+    for (const kind of ['start_line', 'finish_line']) {
+        const line = race[kind];
+        if (!line || line.pin_lat == null) continue;
+        const color = LINE_COLORS[kind];
+        L.polyline([[line.pin_lat, line.pin_lon], [line.boat_lat, line.boat_lon]], {
+            color, weight: 3, dashArray: '6 4', opacity: 0.85,
+        }).bindTooltip(kind === 'start_line' ? 'Start' : 'Finish').addTo(courseViewLayer);
+        L.marker([line.pin_lat, line.pin_lon], { icon: lineEndIcon('pin') })
+            .bindTooltip(`${kind === 'start_line' ? 'Start' : 'Finish'} pin`).addTo(courseViewLayer);
+        L.marker([line.boat_lat, line.boat_lon], { icon: lineEndIcon('boat') })
+            .bindTooltip(`${kind === 'start_line' ? 'Start' : 'Finish'} committee`).addTo(courseViewLayer);
+    }
+
+    for (const m of (race.marks || [])) {
+        L.marker([m.lat, m.lon], { icon: markIcon(m.mark_type) })
+            .bindTooltip(m.name || m.mark_type, { permanent: false })
+            .addTo(courseViewLayer);
+    }
+}
+
+function enterCourseEditMode() {
+    if (!currentRace) return;
+    editCourseMode = true;
+    courseDraft = {
+        start_line: currentRace.start_line ? { ...currentRace.start_line } : null,
+        finish_line: currentRace.finish_line ? { ...currentRace.finish_line } : null,
+        marks: (currentRace.marks || []).map(m => ({ ...m })),
+        course: [...(currentRace.course || [])],
+    };
+
+    if (courseViewLayer) { map.removeLayer(courseViewLayer); courseViewLayer = null; }
+
+    document.getElementById('course-toolbar').style.display = 'flex';
+    document.getElementById('mark-list').style.display = 'block';
+    document.body.classList.add('course-editing');
+
+    if (courseEditLayer) { map.removeLayer(courseEditLayer); }
+    courseEditLayer = L.featureGroup().addTo(map);
+    markEditors = {};
+    lineEditors = {};
+
+    if (courseDraft.start_line) renderEditableLine('start_line');
+    if (courseDraft.finish_line) renderEditableLine('finish_line');
+    for (const m of courseDraft.marks) renderEditableMark(m);
+
+    renderMarkList();
+}
+
+function exitCourseEditMode() {
+    editCourseMode = false;
+    courseDraft = null;
+    if (courseEditLayer) { map.removeLayer(courseEditLayer); courseEditLayer = null; }
+    markEditors = {};
+    lineEditors = {};
+    document.getElementById('course-toolbar').style.display = 'none';
+    document.getElementById('mark-list').style.display = 'none';
+    document.body.classList.remove('course-editing');
+    renderCourseViewLayer(currentRace);
+}
+
+function renderEditableLine(kind) {
+    const line = courseDraft[kind];
+    if (!line) return;
+    if (lineEditors[kind]) {
+        const e = lineEditors[kind];
+        map.removeLayer(e.pinMarker);
+        map.removeLayer(e.boatMarker);
+        map.removeLayer(e.polyline);
+    }
+    const color = LINE_COLORS[kind];
+    const pinMarker = L.marker([line.pin_lat, line.pin_lon], {
+        icon: lineEndIcon('pin', true), draggable: true,
+    }).bindTooltip(`${kind === 'start_line' ? 'Start' : 'Finish'} pin`, { permanent: true, direction: 'right', offset: [10, 0] }).addTo(courseEditLayer);
+    const boatMarker = L.marker([line.boat_lat, line.boat_lon], {
+        icon: lineEndIcon('boat', true), draggable: true,
+    }).bindTooltip(`${kind === 'start_line' ? 'Start' : 'Finish'} committee`, { permanent: true, direction: 'right', offset: [10, 0] }).addTo(courseEditLayer);
+    const poly = L.polyline([[line.pin_lat, line.pin_lon], [line.boat_lat, line.boat_lon]], {
+        color, weight: 3, dashArray: '6 4',
+    }).addTo(courseEditLayer);
+
+    const update = () => {
+        const pl = pinMarker.getLatLng();
+        const bl = boatMarker.getLatLng();
+        courseDraft[kind] = { pin_lat: pl.lat, pin_lon: pl.lng, boat_lat: bl.lat, boat_lon: bl.lng };
+        poly.setLatLngs([[pl.lat, pl.lng], [bl.lat, bl.lng]]);
+        updateLineListRow(kind);
+    };
+    pinMarker.on('drag', update);
+    boatMarker.on('drag', update);
+    lineEditors[kind] = { pinMarker, boatMarker, polyline: poly };
+}
+
+function renderEditableMark(mark) {
+    const marker = L.marker([mark.lat, mark.lon], {
+        icon: markIcon(mark.mark_type, true), draggable: true,
+    }).bindTooltip(mark.name || mark.mark_type, { permanent: true, direction: 'right', offset: [12, 0] })
+      .addTo(courseEditLayer);
+    marker.on('drag', (e) => {
+        const ll = e.target.getLatLng();
+        mark.lat = ll.lat;
+        mark.lon = ll.lng;
+        updateMarkListRow(mark.mark_id);
+    });
+    markEditors[mark.mark_id] = marker;
+}
+
+function placeStartLine() {
+    if (!courseDraft) return;
+    if (courseDraft.start_line) return;
+    const c = map.getCenter();
+    const dLat = 25 / 111320;
+    courseDraft.start_line = {
+        pin_lat: c.lat - dLat, pin_lon: c.lng - 0.0004,
+        boat_lat: c.lat + dLat, boat_lon: c.lng - 0.0004,
+    };
+    renderEditableLine('start_line');
+    renderMarkList();
+}
+
+function placeFinishLine() {
+    if (!courseDraft) return;
+    if (courseDraft.finish_line) return;
+    const c = map.getCenter();
+    const dLat = 25 / 111320;
+    courseDraft.finish_line = {
+        pin_lat: c.lat - dLat, pin_lon: c.lng + 0.0004,
+        boat_lat: c.lat + dLat, boat_lon: c.lng + 0.0004,
+    };
+    renderEditableLine('finish_line');
+    renderMarkList();
+}
+
+function addMarkAtMapCenter() {
+    if (!courseDraft) return;
+    const c = map.getCenter();
+    const idx = courseDraft.marks.length + 1;
+    const mark = {
+        mark_id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: `Mark ${idx}`,
+        mark_type: idx % 2 === 1 ? 'windward' : 'leeward',
+        lat: c.lat,
+        lon: c.lng,
+    };
+    courseDraft.marks.push(mark);
+    courseDraft.course.push(mark.mark_id);
+    renderEditableMark(mark);
+    renderMarkList();
+}
+
+async function autoStartLineFromTracks() {
+    if (!currentRace?.race_id || !courseDraft) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/races/${currentRace.race_id}/auto-start-line`, { method: 'POST' });
+        if (!resp.ok) { alert(`Auto start line failed: ${await resp.text()}`); return; }
+        const data = await resp.json();
+        courseDraft.start_line = data.start_line;
+        renderEditableLine('start_line');
+        renderMarkList();
+        const l = data.start_line;
+        map.panTo([(l.pin_lat + l.boat_lat) / 2, (l.pin_lon + l.boat_lon) / 2]);
+    } catch (err) {
+        console.error('[Race] Auto start line error:', err);
+        alert('Auto start line failed. Check console.');
+    }
+}
+
+async function autoSuggestMarksFromTracks() {
+    if (!currentRace?.race_id || !courseDraft) return;
+    try {
+        const resp = await fetch(`${API_BASE}/api/races/${currentRace.race_id}/suggest-marks`, { method: 'POST' });
+        if (!resp.ok) { alert(`Suggest marks failed: ${await resp.text()}`); return; }
+        const data = await resp.json();
+        if (!data.marks || data.marks.length === 0) {
+            alert(`No mark roundings detected (found ${data.roundings_found || 0} course changes, ${data.clusters_found || 0} clusters).`);
+            return;
+        }
+        for (const m of data.marks) {
+            const mark = {
+                mark_id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                name: m.name,
+                mark_type: m.mark_type,
+                lat: m.lat,
+                lon: m.lon,
+            };
+            courseDraft.marks.push(mark);
+            courseDraft.course.push(mark.mark_id);
+            renderEditableMark(mark);
+        }
+        renderMarkList();
+    } catch (err) {
+        console.error('[Race] Suggest marks error:', err);
+        alert('Suggest marks failed. Check console.');
+    }
+}
+
+function deleteMark(markId) {
+    if (!courseDraft) return;
+    courseDraft.marks = courseDraft.marks.filter(m => m.mark_id !== markId);
+    courseDraft.course = courseDraft.course.filter(id => id !== markId);
+    if (markEditors[markId]) {
+        map.removeLayer(markEditors[markId]);
+        delete markEditors[markId];
+    }
+    renderMarkList();
+}
+
+function clearLine(kind) {
+    if (!courseDraft) return;
+    courseDraft[kind] = null;
+    if (lineEditors[kind]) {
+        map.removeLayer(lineEditors[kind].pinMarker);
+        map.removeLayer(lineEditors[kind].boatMarker);
+        map.removeLayer(lineEditors[kind].polyline);
+        delete lineEditors[kind];
+    }
+    renderMarkList();
+}
+
+function renderMarkList() {
+    const el = document.getElementById('mark-list');
+    if (!el || !courseDraft) return;
+    const rows = [];
+    if (courseDraft.start_line) rows.push(renderLineRow('start_line', 'Start Line'));
+    if (courseDraft.finish_line) rows.push(renderLineRow('finish_line', 'Finish Line'));
+    for (const m of courseDraft.marks) rows.push(renderMarkRow(m));
+    const body = rows.length > 0 ? rows.join('') : '<div class="mark-empty">No lines or marks yet. Use the toolbar above.</div>';
+    el.innerHTML = `<div class="mark-list-header"><h3>Course</h3><small>Drag on map to reposition</small></div>${body}`;
+
+    for (const m of courseDraft.marks) {
+        const row = el.querySelector(`[data-mark-id="${m.mark_id}"]`);
+        if (!row) continue;
+        row.querySelector('[data-field="name"]')?.addEventListener('input', (e) => {
+            m.name = e.target.value;
+            const marker = markEditors[m.mark_id];
+            if (marker) marker.setTooltipContent(m.name || m.mark_type);
+        });
+        row.querySelector('[data-field="type"]')?.addEventListener('change', (e) => {
+            m.mark_type = e.target.value;
+            const marker = markEditors[m.mark_id];
+            if (marker) marker.setIcon(markIcon(m.mark_type, true));
+            row.querySelector('.mark-swatch').style.background = markTypeColor(m.mark_type);
+        });
+        row.querySelector('[data-action="delete"]')?.addEventListener('click', () => deleteMark(m.mark_id));
+    }
+    for (const kind of ['start_line', 'finish_line']) {
+        const lineRow = el.querySelector(`[data-line="${kind}"]`);
+        if (!lineRow) continue;
+        lineRow.querySelector('[data-action="delete"]')?.addEventListener('click', () => clearLine(kind));
+    }
+}
+
+function renderLineRow(kind, label) {
+    const line = courseDraft[kind];
+    const color = LINE_COLORS[kind];
+    return `
+        <div class="mark-row line-row" data-line="${kind}">
+            <span class="mark-swatch" style="background:${color}"></span>
+            <div class="mark-fields">
+                <strong>${label}</strong>
+                <small class="line-coords">Pin ${line.pin_lat.toFixed(5)}, ${line.pin_lon.toFixed(5)} · Boat ${line.boat_lat.toFixed(5)}, ${line.boat_lon.toFixed(5)}</small>
+            </div>
+            <button class="btn-mark-delete" data-action="delete" title="Remove line">✕</button>
+        </div>
+    `;
+}
+
+function renderMarkRow(mark) {
+    const opts = MARK_TYPES.map(t => `<option value="${t}" ${t === mark.mark_type ? 'selected' : ''}>${t}</option>`).join('');
+    const color = markTypeColor(mark.mark_type);
+    return `
+        <div class="mark-row" data-mark-id="${mark.mark_id}">
+            <span class="mark-swatch" style="background:${color}"></span>
+            <div class="mark-fields">
+                <input type="text" data-field="name" value="${mark.name || ''}" placeholder="Name">
+                <select data-field="type">${opts}</select>
+                <small class="mark-coords">${mark.lat.toFixed(5)}, ${mark.lon.toFixed(5)}</small>
+            </div>
+            <button class="btn-mark-delete" data-action="delete" title="Remove mark">✕</button>
+        </div>
+    `;
+}
+
+function updateMarkListRow(markId) {
+    const m = courseDraft?.marks.find(x => x.mark_id === markId);
+    if (!m) return;
+    const el = document.querySelector(`[data-mark-id="${markId}"] .mark-coords`);
+    if (el) el.textContent = `${m.lat.toFixed(5)}, ${m.lon.toFixed(5)}`;
+}
+
+function updateLineListRow(kind) {
+    const line = courseDraft?.[kind];
+    if (!line) return;
+    const el = document.querySelector(`[data-line="${kind}"] .line-coords`);
+    if (el) el.textContent = `Pin ${line.pin_lat.toFixed(5)}, ${line.pin_lon.toFixed(5)} · Boat ${line.boat_lat.toFixed(5)}, ${line.boat_lon.toFixed(5)}`;
+}
+
+async function saveCourseDraft() {
+    if (!currentRace?.race_id || !courseDraft) return;
+    try {
+        const body = {
+            start_line: courseDraft.start_line,
+            finish_line: courseDraft.finish_line,
+            marks: courseDraft.marks,
+            course: courseDraft.course,
+        };
+        const resp = await fetch(`${API_BASE}/api/races/${currentRace.race_id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+        currentRace = await resp.json();
+        exitCourseEditMode();
+    } catch (err) {
+        console.error('[Race] Failed to save course:', err);
+        alert(`Failed to save course: ${err.message}`);
+    }
+}
+
 // --- Event Listeners ---
 
 function setupEventListeners() {
@@ -1391,6 +1770,25 @@ function setupEventListeners() {
             openRaceModal(currentRace);
         }
     });
+
+    // Edit course button (toggles on-map editing)
+    const btnEditCourse = document.getElementById('btn-edit-course');
+    if (btnEditCourse) {
+        btnEditCourse.addEventListener('click', () => {
+            if (!currentRace) return;
+            if (editCourseMode) exitCourseEditMode();
+            else enterCourseEditMode();
+        });
+    }
+
+    // Course editor toolbar
+    document.getElementById('btn-course-start-line')?.addEventListener('click', placeStartLine);
+    document.getElementById('btn-course-finish-line')?.addEventListener('click', placeFinishLine);
+    document.getElementById('btn-course-add-mark')?.addEventListener('click', addMarkAtMapCenter);
+    document.getElementById('btn-course-auto-start')?.addEventListener('click', autoStartLineFromTracks);
+    document.getElementById('btn-course-auto-marks')?.addEventListener('click', autoSuggestMarksFromTracks);
+    document.getElementById('btn-course-done')?.addEventListener('click', saveCourseDraft);
+    document.getElementById('btn-course-cancel')?.addEventListener('click', () => exitCourseEditMode());
 
     // Modal controls
     document.getElementById('modal-close').addEventListener('click', closeRaceModal);

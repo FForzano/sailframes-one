@@ -79,6 +79,12 @@ def lambda_handler(event, context):
             if race_id and '/match-sessions' in path and http_method == 'POST':
                 return match_sessions(race_id)
 
+            # Course auto-suggest endpoints
+            if race_id and '/auto-start-line' in path and http_method == 'POST':
+                return auto_start_line(race_id)
+            if race_id and '/suggest-marks' in path and http_method == 'POST':
+                return suggest_marks(race_id)
+
             # GPX status/debug endpoint
             if race_id and '/gpx-status' in path and http_method == 'GET':
                 return get_gpx_status(race_id)
@@ -253,6 +259,8 @@ def create_race(body):
         'boats': boats,
         'start_line': body.get('start_line'),
         'finish_line': body.get('finish_line'),
+        'marks': body.get('marks', []),
+        'course': body.get('course', []),
         'finish_order': body.get('finish_order', []),
         'results': None,
         'created_at': now,
@@ -296,7 +304,7 @@ def update_race(race_id, body):
     if not race_data:
         return response(404, {'error': f'Race not found: {race_id}'})
 
-    for key in ['name', 'start_time', 'end_time', 'boats', 'start_line', 'finish_line', 'finish_order']:
+    for key in ['name', 'start_time', 'end_time', 'boats', 'start_line', 'finish_line', 'marks', 'course', 'finish_order']:
         if key in body and body[key] is not None:
             race_data[key] = body[key]
 
@@ -743,3 +751,227 @@ def iso_diff_seconds(end, start):
         return (end_dt - start_dt).total_seconds()
     except Exception:
         return 0
+
+
+# --- Course Auto-Suggest ---
+
+def meters_per_deg_lat():
+    return 111320.0
+
+
+def meters_per_deg_lon(lat):
+    return 111320.0 * math.cos(math.radians(lat))
+
+
+def offset_meters(lat, lon, bearing_deg, dist_m):
+    dx = dist_m * math.sin(math.radians(bearing_deg))
+    dy = dist_m * math.cos(math.radians(bearing_deg))
+    dlat = dy / meters_per_deg_lat()
+    dlon = dx / meters_per_deg_lon(lat)
+    return lat + dlat, lon + dlon
+
+
+def haversine_m(lat1, lon1, lat2, lon2):
+    R = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def mean_angle_deg(angles):
+    if not angles:
+        return 0.0
+    xs = sum(math.cos(math.radians(a)) for a in angles)
+    ys = sum(math.sin(math.radians(a)) for a in angles)
+    return (math.degrees(math.atan2(ys, xs)) + 360.0) % 360.0
+
+
+def angle_diff_deg(a, b):
+    return (a - b + 180.0) % 360.0 - 180.0
+
+
+def load_race_gps(race_data):
+    """Return {device_id: [gps_points]} filtered to the race window."""
+    start_time = race_data['start_time']
+    end_time = race_data['end_time']
+    out = {}
+    for boat in race_data.get('boats', []):
+        device_id = boat.get('device_id')
+        session_path = boat.get('session_path')
+        if not device_id or not session_path:
+            continue
+        key = f"processed/{device_id}/{session_path}/gps.json"
+        data = load_json(key)
+        if not isinstance(data, list):
+            continue
+        filtered = [d for d in data if start_time <= d.get('t', '') <= end_time]
+        if filtered:
+            out[device_id] = filtered
+    return out
+
+
+def points_near(points, iso_target, window_sec=30.0):
+    out = []
+    for p in points:
+        t = p.get('t', '')
+        if not t:
+            continue
+        if abs(iso_diff_seconds(t, iso_target)) <= window_sec:
+            out.append(p)
+    return out
+
+
+def auto_start_line(race_id):
+    """Estimate a start line from fleet positions at the gun time."""
+    race_data = load_json(f'races/{race_id}/race.json')
+    if not race_data:
+        return response(404, {'error': f'Race not found: {race_id}'})
+
+    boat_gps = load_race_gps(race_data)
+    if not boat_gps:
+        return response(400, {'error': 'No boat session data available for this race'})
+
+    start_iso = race_data['start_time']
+    positions = []
+    headings = []
+    for device_id, gps in boat_gps.items():
+        near = points_near(gps, start_iso, window_sec=30.0)
+        if not near:
+            continue
+        closest = min(near, key=lambda p: abs(iso_diff_seconds(p.get('t', ''), start_iso)))
+        lat, lon = closest.get('lat'), closest.get('lon')
+        if lat is None or lon is None:
+            continue
+        positions.append((lat, lon))
+        cog = closest.get('course')
+        if cog is not None:
+            headings.append(cog)
+
+    if len(positions) < 1:
+        return response(400, {'error': 'No boat positions available at start time'})
+
+    clat = sum(p[0] for p in positions) / len(positions)
+    clon = sum(p[1] for p in positions) / len(positions)
+    mean_heading = mean_angle_deg(headings) if headings else 0.0
+    perp = (mean_heading + 90.0) % 360.0
+
+    if len(positions) >= 2:
+        projs = []
+        for lat, lon in positions:
+            dx_m = (lon - clon) * meters_per_deg_lon(clat)
+            dy_m = (lat - clat) * meters_per_deg_lat()
+            proj = dx_m * math.sin(math.radians(perp)) + dy_m * math.cos(math.radians(perp))
+            projs.append(proj)
+        half_len = max(abs(min(projs)), abs(max(projs))) + 30.0
+    else:
+        half_len = 40.0
+
+    pin_lat, pin_lon = offset_meters(clat, clon, perp, half_len)
+    boat_lat, boat_lon = offset_meters(clat, clon, (perp + 180.0) % 360.0, half_len)
+
+    return response(200, {
+        'start_line': {
+            'pin_lat': pin_lat, 'pin_lon': pin_lon,
+            'boat_lat': boat_lat, 'boat_lon': boat_lon,
+        },
+        'mean_heading_deg': mean_heading,
+        'boats_used': len(positions),
+    })
+
+
+def suggest_marks(race_id):
+    """Detect rounding points across boat tracks and cluster them into candidate marks."""
+    race_data = load_json(f'races/{race_id}/race.json')
+    if not race_data:
+        return response(404, {'error': f'Race not found: {race_id}'})
+
+    boat_gps = load_race_gps(race_data)
+    if not boat_gps:
+        return response(400, {'error': 'No boat session data available for this race'})
+
+    COURSE_CHANGE_DEG = 60.0
+    WINDOW_SEC = 30.0
+    CLUSTER_RADIUS_M = 100.0
+
+    roundings = []
+    for device_id, gps in boat_gps.items():
+        pts = [p for p in gps if p.get('lat') is not None and p.get('course') is not None]
+        if len(pts) < 10:
+            continue
+        i = 0
+        while i < len(pts):
+            p = pts[i]
+            t_i = p.get('t', '')
+            cog_i = p['course']
+            j = i + 1
+            max_diff = 0.0
+            max_j = i
+            while j < len(pts):
+                t_j = pts[j].get('t', '')
+                if not t_j or iso_diff_seconds(t_j, t_i) > WINDOW_SEC:
+                    break
+                diff = abs(angle_diff_deg(pts[j]['course'], cog_i))
+                if diff > max_diff:
+                    max_diff = diff
+                    max_j = j
+                j += 1
+            if max_diff >= COURSE_CHANGE_DEG:
+                mid = pts[(i + max_j) // 2]
+                roundings.append({
+                    'lat': mid['lat'], 'lon': mid['lon'],
+                    't': mid.get('t', ''), 'device_id': device_id,
+                })
+                i = max_j + 1
+            else:
+                i += 1
+
+    if not roundings:
+        return response(200, {'marks': [], 'roundings_found': 0})
+
+    clusters = []
+    for r in roundings:
+        placed = False
+        for c in clusters:
+            d = haversine_m(r['lat'], r['lon'], c['centroid_lat'], c['centroid_lon'])
+            if d <= CLUSTER_RADIUS_M:
+                c['points'].append(r)
+                n = len(c['points'])
+                c['centroid_lat'] = sum(pt['lat'] for pt in c['points']) / n
+                c['centroid_lon'] = sum(pt['lon'] for pt in c['points']) / n
+                placed = True
+                break
+        if not placed:
+            clusters.append({
+                'centroid_lat': r['lat'],
+                'centroid_lon': r['lon'],
+                'points': [r],
+            })
+
+    clusters = [c for c in clusters if len(c['points']) >= 2]
+
+    def avg_time(c):
+        times = [pt['t'] for pt in c['points'] if pt['t']]
+        if not times:
+            return ''
+        return sorted(times)[len(times) // 2]
+
+    clusters.sort(key=avg_time)
+
+    suggested = []
+    for i, c in enumerate(clusters):
+        suggested.append({
+            'mark_id': f'sug_{i+1}',
+            'name': f'Mark {i + 1}',
+            'mark_type': 'windward' if i % 2 == 0 else 'leeward',
+            'lat': c['centroid_lat'],
+            'lon': c['centroid_lon'],
+            'rounding_count': len(c['points']),
+        })
+
+    return response(200, {
+        'marks': suggested,
+        'roundings_found': len(roundings),
+        'clusters_found': len(clusters),
+    })
