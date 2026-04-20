@@ -1,12 +1,17 @@
 """
 SailFrames API - Race and Regatta endpoints.
-Handles CRUD operations for races/regattas and multi-boat data loading.
+Handles CRUD operations for races/regattas, multi-boat data loading,
+and GPX track uploads as a GPS source for boats without E1 devices.
 """
 
+import base64
 import json
-import os
-import uuid
 import logging
+import math
+import os
+import re
+import uuid
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import boto3
@@ -59,6 +64,16 @@ def lambda_handler(event, context):
         # Races
         elif '/api/races' in path:
             race_id = path_params.get('race_id')
+
+            # GPX upload: POST /api/races/{race_id}/boats/{device_id}/gpx
+            if race_id and '/gpx' in path and http_method == 'POST':
+                device_id = path_params.get('device_id')
+                if not device_id:
+                    m = re.search(r'/boats/([^/]+)/gpx', path)
+                    device_id = m.group(1) if m else None
+                if not device_id:
+                    return response(400, {'error': 'device_id required'})
+                return upload_boat_gpx(race_id, device_id, event)
 
             # Match sessions endpoint
             if race_id and '/match-sessions' in path and http_method == 'POST':
@@ -340,18 +355,36 @@ def get_race_data(race_id, sensors_str):
     for boat in race_data.get('boats', []):
         device_id = boat['device_id']
         session_path = boat.get('session_path')
+        gpx_path = boat.get('gpx_path')
 
-        if not session_path:
+        if not session_path and not gpx_path:
             boats_data[device_id] = {'error': 'No session matched', 'boat': boat}
             continue
 
         boat_sensors = {}
         for sensor in requested_sensors:
+            # GPX upload serves as the GPS source for this boat
+            if sensor == 'gps' and gpx_path:
+                try:
+                    data = load_json(gpx_path)
+                    if isinstance(data, list):
+                        filtered = [d for d in data if _in_window(d.get('t', ''), start_time, end_time)]
+                        boat_sensors[sensor] = filtered
+                    else:
+                        boat_sensors[sensor] = []
+                except Exception as e:
+                    boat_sensors[sensor] = {'error': str(e)}
+                continue
+
+            if not session_path:
+                boat_sensors[sensor] = []
+                continue
+
             try:
                 sensor_key = f"processed/{device_id}/{session_path}/{sensor}.json"
                 data = load_json(sensor_key)
                 if isinstance(data, list):
-                    filtered = [d for d in data if start_time <= d.get('t', '') <= end_time]
+                    filtered = [d for d in data if _in_window(d.get('t', ''), start_time, end_time)]
                     boat_sensors[sensor] = filtered
                 else:
                     boat_sensors[sensor] = data
@@ -374,6 +407,182 @@ def get_race_data(race_id, sensors_str):
         'boats': boats_data,
         'time_bounds': {'start': start_time, 'end': end_time},
     })
+
+
+def _in_window(t, start, end):
+    """Check if timestamp t falls within [start, end] using normalized ISO comparison."""
+    # Normalize: strip trailing Z and milliseconds for consistent comparison
+    def norm(s):
+        return s.replace('Z', '').split('.')[0] if s else ''
+    tn, s, e = norm(t), norm(start), norm(end)
+    return s <= tn <= e
+
+
+# --- GPX Upload ---
+
+def upload_boat_gpx(race_id, device_id, event):
+    """Parse a GPX file upload and store it as the GPS source for a boat."""
+    race_data = load_json(f'races/{race_id}/race.json')
+    if not race_data:
+        return response(404, {'error': f'Race not found: {race_id}'})
+
+    boat = next((b for b in race_data.get('boats', []) if b['device_id'] == device_id), None)
+    if boat is None:
+        return response(404, {'error': f'Boat {device_id} not found in race {race_id}'})
+
+    gpx_bytes = _extract_multipart_file(event)
+    if not gpx_bytes:
+        return response(400, {'error': 'No file received — send as multipart/form-data with field name "file"'})
+
+    try:
+        track_points = _parse_gpx(gpx_bytes)
+    except Exception as e:
+        logger.error(f"GPX parse error: {e}", exc_info=True)
+        return response(400, {'error': f'Failed to parse GPX: {e}'})
+
+    if not track_points:
+        return response(400, {'error': 'GPX file contains no track points with timestamps'})
+
+    gpx_key = f'races/{race_id}/gpx/{device_id}.json'
+    save_json(gpx_key, track_points)
+
+    boat['gpx_path'] = gpx_key
+    boat['session_path'] = None  # GPX replaces E1 session
+    race_data['updated_at'] = now_iso()
+    save_json(f'races/{race_id}/race.json', race_data)
+
+    logger.info(f"GPX uploaded for {device_id} in race {race_id}: {len(track_points)} points")
+
+    return response(200, {
+        'device_id': device_id,
+        'gpx_path': gpx_key,
+        'points': len(track_points),
+        'start_time': track_points[0]['t'],
+        'end_time': track_points[-1]['t'],
+    })
+
+
+def _extract_multipart_file(event):
+    """Extract the raw file bytes from a multipart/form-data Lambda event."""
+    headers = {k.lower(): v for k, v in (event.get('headers') or {}).items()}
+    content_type = headers.get('content-type', '')
+
+    body_raw = event.get('body', '') or ''
+    if event.get('isBase64Encoded'):
+        body_bytes = base64.b64decode(body_raw)
+    else:
+        body_bytes = body_raw.encode('latin-1')
+
+    # Extract boundary from Content-Type header
+    boundary = None
+    for part in content_type.split(';'):
+        part = part.strip()
+        if part.lower().startswith('boundary='):
+            boundary = part[9:].strip('"\'')
+            break
+
+    if not boundary:
+        # No multipart — treat the raw body as the file
+        return body_bytes if body_bytes else None
+
+    delimiter = ('--' + boundary).encode('latin-1')
+    parts = body_bytes.split(delimiter)
+
+    for part in parts[1:]:  # skip preamble
+        if part in (b'--', b'--\r\n', b''):
+            continue
+        # Split headers from body
+        sep = b'\r\n\r\n'
+        if sep not in part:
+            continue
+        _, file_body = part.split(sep, 1)
+        file_body = file_body.rstrip(b'\r\n')
+        if file_body:
+            return file_body
+
+    return None
+
+
+# --- GPX Parsing ---
+
+def _parse_gpx(content: bytes) -> list:
+    """Parse GPX XML into GPS track points matching processed gps.json format."""
+    root = ET.fromstring(content)
+    ns_match = re.match(r'\{([^}]+)\}', root.tag)
+    ns = f"{{{ns_match.group(1)}}}" if ns_match else ""
+
+    raw = []
+    for seg in root.iter(f"{ns}trkseg"):
+        for trkpt in seg.iter(f"{ns}trkpt"):
+            lat = float(trkpt.get('lat', 0))
+            lon = float(trkpt.get('lon', 0))
+            time_el = trkpt.find(f"{ns}time")
+            if time_el is None or not time_el.text:
+                continue
+            t = time_el.text.strip()
+
+            speed_ms = None
+            for el in trkpt.iter():
+                local = el.tag.split('}')[-1] if '}' in el.tag else el.tag
+                if local == 'speed' and el.text:
+                    try:
+                        speed_ms = float(el.text)
+                    except ValueError:
+                        pass
+                    break
+
+            raw.append({'lat': lat, 'lon': lon, 't': t, '_speed_ms': speed_ms})
+
+    result = []
+    for i, pt in enumerate(raw):
+        sog = 0.0
+        cog = 0.0
+
+        if pt['_speed_ms'] is not None:
+            sog = pt['_speed_ms'] * 1.94384  # m/s → knots
+        elif i > 0:
+            prev = raw[i - 1]
+            try:
+                dt = iso_diff_seconds(pt['t'], prev['t'])
+                if dt > 0:
+                    dist_m = _haversine_m(prev['lat'], prev['lon'], pt['lat'], pt['lon'])
+                    sog = (dist_m / dt) * 1.94384
+            except Exception:
+                pass
+
+        if i > 0:
+            prev = raw[i - 1]
+            cog = _bearing(prev['lat'], prev['lon'], pt['lat'], pt['lon'])
+        elif i < len(raw) - 1:
+            nxt = raw[i + 1]
+            cog = _bearing(pt['lat'], pt['lon'], nxt['lat'], nxt['lon'])
+
+        result.append({
+            't': pt['t'],
+            'lat': pt['lat'],
+            'lon': pt['lon'],
+            'sog': round(sog, 2),
+            'cog': round(cog, 1),
+        })
+
+    return result
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _bearing(lat1, lon1, lat2, lon2):
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dlambda = math.radians(lon2 - lon1)
+    y = math.sin(dlambda) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
 
 
 # --- Session Matching ---

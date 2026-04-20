@@ -744,6 +744,13 @@ Resources:
       RouteKey: 'POST /api/races/{race_id}/match-sessions'
       Target: !Sub 'integrations/${RaceIntegration}'
 
+  RaceBoatGpxRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'POST /api/races/{race_id}/boats/{device_id}/gpx'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
   RegattasListRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
