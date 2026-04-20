@@ -43,6 +43,7 @@ let raceDuration = 0;
 let playbackInterval = null;
 let speedChart = null;
 let availableSessions = {};  // device_id -> [session paths]
+let pendingGpxFiles = {};   // device_id -> File (staged GPX uploads)
 
 // Pre-race display: show 3 minutes before start
 const PRE_RACE_SECONDS = 180;
@@ -876,6 +877,9 @@ async function openRaceModal(race = null) {
     const title = document.getElementById('modal-title');
     const deleteBtn = document.getElementById('btn-delete-race');
 
+    // Reset staged GPX files whenever modal opens
+    pendingGpxFiles = {};
+
     // Load available sessions for dropdown
     await loadAvailableSessions();
 
@@ -894,6 +898,58 @@ async function openRaceModal(race = null) {
 
 function closeRaceModal() {
     document.getElementById('race-modal').style.display = 'none';
+}
+
+function handleGpxFileSelect(event, deviceId) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    pendingGpxFiles[deviceId] = file;
+
+    const row = document.querySelector(`.boat-assignment[data-device="${deviceId}"]`);
+    if (!row) return;
+
+    row.dataset.gpxPath = '';  // Will be set by server after upload
+    row.querySelector('.session-select').classList.add('hidden');
+    row.querySelector('.gpx-badge').classList.remove('hidden');
+    row.querySelector('.gpx-badge-name').textContent = file.name;
+}
+
+function handleGpxClear(deviceId) {
+    delete pendingGpxFiles[deviceId];
+
+    const row = document.querySelector(`.boat-assignment[data-device="${deviceId}"]`);
+    if (!row) return;
+
+    row.dataset.gpxPath = '';
+    row.querySelector('.session-select').classList.remove('hidden');
+    row.querySelector('.gpx-badge').classList.add('hidden');
+    row.querySelector('.gpx-badge-name').textContent = '';
+
+    const fileInput = row.querySelector('.gpx-file-input');
+    if (fileInput) fileInput.value = '';
+}
+
+async function uploadPendingGpxFiles(raceId) {
+    for (const [deviceId, file] of Object.entries(pendingGpxFiles)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const resp = await fetch(`${API_BASE}/api/races/${raceId}/boats/${deviceId}/gpx`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (resp.ok) {
+                const result = await resp.json();
+                console.log(`[Race] GPX uploaded for ${deviceId}: ${result.points} points`);
+            } else {
+                console.error(`[Race] GPX upload failed for ${deviceId}:`, await resp.text());
+            }
+        } catch (err) {
+            console.error(`[Race] GPX upload error for ${deviceId}:`, err);
+        }
+    }
+    pendingGpxFiles = {};
 }
 
 function clearRaceForm() {
@@ -959,7 +1015,7 @@ function renderBoatAssignments(boats) {
         <datalist id="boat-names">${boatOptions}</datalist>
         <datalist id="team-names">${teamOptions}</datalist>
     ` + allDevices.map(deviceId => {
-        const boat = boatMap[deviceId] || { device_id: deviceId, boat_name: '', team_name: '', sail_number: '', session_path: '' };
+        const boat = boatMap[deviceId] || { device_id: deviceId, boat_name: '', team_name: '', sail_number: '', session_path: '', gpx_path: '' };
         const color = BOAT_COLORS[deviceId];
         const sessions = availableSessions[deviceId] || [];
 
@@ -970,21 +1026,43 @@ function renderBoatAssignments(boats) {
             return `<option value="${s.path}" ${selected}>${label}</option>`;
         }).join('');
 
+        const gpxActive = !!(boat.gpx_path || pendingGpxFiles[deviceId]);
+        const gpxLabel = pendingGpxFiles[deviceId]
+            ? pendingGpxFiles[deviceId].name
+            : (boat.gpx_path ? 'GPX uploaded' : '');
+
         return `
-            <div class="boat-assignment" data-device="${deviceId}">
+            <div class="boat-assignment" data-device="${deviceId}" data-gpx-path="${boat.gpx_path || ''}">
                 <div class="boat-assignment-device">
                     <span class="boat-assignment-color" style="background: ${color}"></span>
                     <span>${deviceId}</span>
                 </div>
                 <input type="text" placeholder="Team" value="${boat.team_name || ''}" data-field="team_name" list="team-names">
                 <input type="text" placeholder="Boat" value="${boat.boat_name || ''}" data-field="boat_name" list="boat-names">
-                <select data-field="session_path" class="session-select">
-                    <option value="">Select session...</option>
-                    ${sessionOptions}
-                </select>
+                <div class="session-or-gpx">
+                    <select data-field="session_path" class="session-select${gpxActive ? ' hidden' : ''}">
+                        <option value="">Select session...</option>
+                        ${sessionOptions}
+                    </select>
+                    <div class="gpx-badge${gpxActive ? '' : ' hidden'}">
+                        <span class="gpx-badge-name">${gpxLabel}</span>
+                        <button class="btn-gpx-clear" type="button" title="Remove GPX">&times;</button>
+                    </div>
+                    <label class="btn-gpx" title="Upload GPX track">GPX<input type="file" accept=".gpx" class="gpx-file-input" style="display:none"></label>
+                </div>
             </div>
         `;
     }).join('');
+
+    // Attach GPX file input and clear button listeners
+    container.querySelectorAll('.gpx-file-input').forEach(input => {
+        const deviceId = input.closest('.boat-assignment').dataset.device;
+        input.addEventListener('change', (e) => handleGpxFileSelect(e, deviceId));
+    });
+    container.querySelectorAll('.btn-gpx-clear').forEach(btn => {
+        const deviceId = btn.closest('.boat-assignment').dataset.device;
+        btn.addEventListener('click', () => handleGpxClear(deviceId));
+    });
 }
 
 function renderFinishOrder(order, boats) {
@@ -1100,14 +1178,19 @@ function getFormData() {
         const deviceId = row.dataset.device;
         const teamName = row.querySelector('[data-field="team_name"]')?.value || '';
         const boatName = row.querySelector('[data-field="boat_name"]')?.value || '';
-        const sessionPath = row.querySelector('[data-field="session_path"]')?.value || '';
+        const gpxPath = row.dataset.gpxPath || null;
+        const hasPendingGpx = !!pendingGpxFiles[deviceId];
+        const isGpxActive = hasPendingGpx || !!gpxPath;
+        // When GPX is active, clear session; when session active, clear gpx_path
+        const sessionPath = isGpxActive ? null : (row.querySelector('[data-field="session_path"]')?.value || null);
 
-        if (teamName || boatName || sessionPath) {
+        if (teamName || boatName || sessionPath || isGpxActive) {
             boats.push({
                 device_id: deviceId,
                 team_name: teamName,
                 boat_name: boatName,
                 session_path: sessionPath,
+                gpx_path: isGpxActive ? gpxPath : null,
             });
         }
     });
@@ -1164,6 +1247,11 @@ async function saveRace() {
 
         const savedRace = await resp.json();
         console.log('[Race] Saved race:', savedRace);
+
+        // Upload any GPX tracks staged for this race
+        if (Object.keys(pendingGpxFiles).length > 0) {
+            await uploadPendingGpxFiles(savedRace.race_id);
+        }
 
         closeRaceModal();
 
