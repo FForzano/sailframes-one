@@ -241,6 +241,16 @@ class RaceResults:
 
 
 @dataclass
+class Mark:
+    """A course mark (buoy) placed on the map."""
+    mark_id: str
+    name: str  # "Windward", "Leeward A", "Gate Port"
+    mark_type: str  # "windward" | "leeward" | "gate_port" | "gate_stbd" | "offset" | "start_pin" | "start_boat" | "finish_pin" | "finish_boat" | "custom"
+    lat: float
+    lon: float
+
+
+@dataclass
 class Race:
     """A single race with boats, times, and results."""
     race_id: str
@@ -252,6 +262,8 @@ class Race:
     regatta_id: Optional[str] = None
     start_line: Optional[StartFinishLine] = None
     finish_line: Optional[StartFinishLine] = None
+    marks: list[Mark] = field(default_factory=list)
+    course: list[str] = field(default_factory=list)  # ordered mark_ids defining leg sequence
     finish_order: list[str] = field(default_factory=list)  # Manual entry
     results: Optional[RaceResults] = None
     created_at: str = ""

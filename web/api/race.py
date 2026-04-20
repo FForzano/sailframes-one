@@ -31,6 +31,7 @@ s3 = boto3.client("s3") if not LOCAL_DATA_DIR else None
 # S3 paths for race data
 RACES_INDEX_KEY = "races/races.json"
 REGATTAS_INDEX_KEY = "regattas/regattas.json"
+RACEDAYS_INDEX_KEY = "racedays/racedays.json"
 
 
 # --- Pydantic Models for Request/Response ---
@@ -40,6 +41,14 @@ class StartFinishLineModel(BaseModel):
     pin_lon: float
     boat_lat: float
     boat_lon: float
+
+
+class MarkModel(BaseModel):
+    mark_id: str
+    name: str = ""
+    mark_type: str = "custom"  # windward|leeward|gate_port|gate_stbd|offset|custom
+    lat: float
+    lon: float
 
 
 class RaceBoatModel(BaseModel):
@@ -56,9 +65,12 @@ class RaceCreateModel(BaseModel):
     start_time: str  # ISO timestamp
     end_time: str  # ISO timestamp
     regatta_id: Optional[str] = None
+    raceday_id: Optional[str] = None
     boats: list[RaceBoatModel] = []
     start_line: Optional[StartFinishLineModel] = None
     finish_line: Optional[StartFinishLineModel] = None
+    marks: list[MarkModel] = []
+    course: list[str] = []
     finish_order: list[str] = []
 
 
@@ -69,7 +81,24 @@ class RaceUpdateModel(BaseModel):
     boats: Optional[list[RaceBoatModel]] = None
     start_line: Optional[StartFinishLineModel] = None
     finish_line: Optional[StartFinishLineModel] = None
+    marks: Optional[list[MarkModel]] = None
+    course: Optional[list[str]] = None
     finish_order: Optional[list[str]] = None
+    raceday_id: Optional[str] = None
+
+
+class RaceDayCreateModel(BaseModel):
+    date: str  # YYYY-MM-DD
+    type: str = "race_day"  # "race_day" | "training_day"
+    name: Optional[str] = None
+    regatta_id: Optional[str] = None
+
+
+class RaceDayUpdateModel(BaseModel):
+    date: Optional[str] = None
+    type: Optional[str] = None
+    name: Optional[str] = None
+    regatta_id: Optional[str] = None
 
 
 class RegattaCreateModel(BaseModel):
@@ -164,6 +193,17 @@ def _save_regattas_index(data: dict):
     _save_json(REGATTAS_INDEX_KEY, data)
 
 
+def _load_racedays_index() -> dict:
+    data = _load_json(RACEDAYS_INDEX_KEY)
+    if not data:
+        return {"race_days": []}
+    return data
+
+
+def _save_racedays_index(data: dict):
+    _save_json(RACEDAYS_INDEX_KEY, data)
+
+
 # --- Regatta Endpoints ---
 
 @router.get("/regattas")
@@ -250,11 +290,88 @@ def delete_regatta(regatta_id: str, request: Request):
     return {"deleted": regatta_id}
 
 
+# --- Race Day Endpoints ---
+
+@router.get("/racedays")
+def list_racedays(regatta_id: Optional[str] = None):
+    index = _load_racedays_index()
+    days = index.get("race_days", [])
+    if regatta_id:
+        days = [d for d in days if d.get("regatta_id") == regatta_id]
+    return {"race_days": sorted(days, key=lambda d: d.get("date", ""))}
+
+
+@router.get("/racedays/{raceday_id}")
+def get_raceday(raceday_id: str):
+    index = _load_racedays_index()
+    for day in index.get("race_days", []):
+        if day["raceday_id"] == raceday_id:
+            return day
+    raise HTTPException(404, f"Race day not found: {raceday_id}")
+
+
+@router.post("/racedays")
+def create_raceday(raceday: RaceDayCreateModel, request: Request):
+    require_admin(request)
+    raceday_id = str(uuid.uuid4())[:8]
+    now = _now_iso()
+
+    new_day = {
+        "raceday_id": raceday_id,
+        "date": raceday.date,
+        "type": raceday.type,
+        "name": raceday.name or None,
+        "regatta_id": raceday.regatta_id or None,
+        "race_ids": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    index = _load_racedays_index()
+    index["race_days"].append(new_day)
+    _save_racedays_index(index)
+
+    return new_day
+
+
+@router.patch("/racedays/{raceday_id}")
+def update_raceday(raceday_id: str, update: RaceDayUpdateModel, request: Request):
+    require_admin(request)
+    index = _load_racedays_index()
+    for i, day in enumerate(index.get("race_days", [])):
+        if day["raceday_id"] == raceday_id:
+            if update.date is not None:
+                day["date"] = update.date
+            if update.type is not None:
+                day["type"] = update.type
+            if update.name is not None:
+                day["name"] = update.name or None
+            if update.regatta_id is not None:
+                day["regatta_id"] = update.regatta_id or None
+            day["updated_at"] = _now_iso()
+            index["race_days"][i] = day
+            _save_racedays_index(index)
+            return day
+    raise HTTPException(404, f"Race day not found: {raceday_id}")
+
+
+@router.delete("/racedays/{raceday_id}")
+def delete_raceday(raceday_id: str, request: Request):
+    require_admin(request)
+    index = _load_racedays_index()
+    original_len = len(index.get("race_days", []))
+    index["race_days"] = [d for d in index["race_days"] if d["raceday_id"] != raceday_id]
+    if len(index["race_days"]) == original_len:
+        raise HTTPException(404, f"Race day not found: {raceday_id}")
+    _save_racedays_index(index)
+    return {"deleted": raceday_id}
+
+
 # --- Race Endpoints ---
 
 @router.get("/races")
-def list_races(regatta_id: Optional[str] = None, date: Optional[str] = None):
-    """List all races, optionally filtered by regatta or date."""
+def list_races(regatta_id: Optional[str] = None, date: Optional[str] = None, raceday_id: Optional[str] = None):
+    """List all races, optionally filtered by regatta, date, or race day."""
     index = _load_races_index()
     races = index.get("races", [])
 
@@ -262,6 +379,8 @@ def list_races(regatta_id: Optional[str] = None, date: Optional[str] = None):
         races = [r for r in races if r.get("regatta_id") == regatta_id]
     if date:
         races = [r for r in races if r.get("date") == date]
+    if raceday_id:
+        races = [r for r in races if r.get("raceday_id") == raceday_id]
 
     return {"races": sorted(races, key=lambda r: (r.get("date", ""), r.get("start_time", "")))}
 
@@ -289,9 +408,12 @@ def create_race(race: RaceCreateModel, request: Request):
         "start_time": race.start_time,
         "end_time": race.end_time,
         "regatta_id": race.regatta_id,
+        "raceday_id": race.raceday_id,
         "boats": [b.model_dump() for b in race.boats],
         "start_line": race.start_line.model_dump() if race.start_line else None,
         "finish_line": race.finish_line.model_dump() if race.finish_line else None,
+        "marks": [m.model_dump() for m in race.marks],
+        "course": race.course,
         "finish_order": race.finish_order,
         "results": None,
         "created_at": now,
@@ -310,9 +432,21 @@ def create_race(race: RaceCreateModel, request: Request):
         "start_time": race.start_time,
         "end_time": race.end_time,
         "regatta_id": race.regatta_id,
+        "raceday_id": race.raceday_id,
         "boat_count": len(race.boats),
     })
     _save_races_index(index)
+
+    # Update race day's race_ids if linked
+    if race.raceday_id:
+        racedays_index = _load_racedays_index()
+        for raceday in racedays_index.get("race_days", []):
+            if raceday["raceday_id"] == race.raceday_id:
+                if race_id not in raceday.get("race_ids", []):
+                    raceday.setdefault("race_ids", []).append(race_id)
+                    raceday["updated_at"] = now
+                break
+        _save_racedays_index(racedays_index)
 
     # Update regatta's race_ids if linked
     if race.regatta_id:
@@ -348,8 +482,14 @@ def update_race(race_id: str, update: RaceUpdateModel, request: Request):
         race_data["start_line"] = update.start_line.model_dump()
     if update.finish_line is not None:
         race_data["finish_line"] = update.finish_line.model_dump()
+    if update.marks is not None:
+        race_data["marks"] = [m.model_dump() for m in update.marks]
+    if update.course is not None:
+        race_data["course"] = update.course
     if update.finish_order is not None:
         race_data["finish_order"] = update.finish_order
+    if update.raceday_id is not None:
+        race_data["raceday_id"] = update.raceday_id or None
 
     race_data["updated_at"] = _now_iso()
     _save_json(f"races/{race_id}/race.json", race_data)
@@ -361,6 +501,7 @@ def update_race(race_id: str, update: RaceUpdateModel, request: Request):
             index["races"][i]["name"] = race_data["name"]
             index["races"][i]["start_time"] = race_data["start_time"]
             index["races"][i]["end_time"] = race_data["end_time"]
+            index["races"][i]["raceday_id"] = race_data.get("raceday_id")
             index["races"][i]["boat_count"] = len(race_data.get("boats", []))
             break
     _save_races_index(index)
@@ -737,3 +878,279 @@ def _iso_diff_seconds(end: str, start: str) -> float:
         return (end_dt - start_dt).total_seconds()
     except Exception:
         return 0
+
+
+# --- Course Auto-Suggest Helpers ---
+
+import math
+
+
+def _meters_per_deg_lat() -> float:
+    return 111320.0
+
+
+def _meters_per_deg_lon(lat: float) -> float:
+    return 111320.0 * math.cos(math.radians(lat))
+
+
+def _offset_meters(lat: float, lon: float, bearing_deg: float, dist_m: float) -> tuple[float, float]:
+    """Return (lat, lon) offset from given point by bearing+distance, flat-earth approx."""
+    dx = dist_m * math.sin(math.radians(bearing_deg))
+    dy = dist_m * math.cos(math.radians(bearing_deg))
+    dlat = dy / _meters_per_deg_lat()
+    dlon = dx / _meters_per_deg_lon(lat)
+    return lat + dlat, lon + dlon
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in meters."""
+    R = 6371000.0
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    dφ = math.radians(lat2 - lat1)
+    dλ = math.radians(lon2 - lon1)
+    a = math.sin(dφ / 2) ** 2 + math.cos(φ1) * math.cos(φ2) * math.sin(dλ / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _mean_angle_deg(angles: list[float]) -> float:
+    """Circular mean of angles in degrees."""
+    if not angles:
+        return 0.0
+    xs = sum(math.cos(math.radians(a)) for a in angles)
+    ys = sum(math.sin(math.radians(a)) for a in angles)
+    return (math.degrees(math.atan2(ys, xs)) + 360.0) % 360.0
+
+
+def _angle_diff_deg(a: float, b: float) -> float:
+    """Smallest signed difference a-b, in degrees, in [-180, 180]."""
+    d = (a - b + 180.0) % 360.0 - 180.0
+    return d
+
+
+def _load_race_gps(race_data: dict) -> dict:
+    """Return {device_id: [gps_points]} for all boats with session data, filtered to race window."""
+    start_time = race_data["start_time"]
+    end_time = race_data["end_time"]
+    out = {}
+    for boat in race_data.get("boats", []):
+        device_id = boat["device_id"]
+        session_path = boat.get("session_path")
+        if not session_path:
+            continue
+        key = f"processed/{device_id}/{session_path}/gps.json"
+        data = _load_json(key)
+        if not isinstance(data, list):
+            continue
+        filtered = [d for d in data if start_time <= d.get("t", "") <= end_time]
+        if filtered:
+            out[device_id] = filtered
+    return out
+
+
+def _points_near(points: list[dict], iso_target: str, window_sec: float = 30.0) -> list[dict]:
+    """Return points within window_sec of iso_target."""
+    out = []
+    for p in points:
+        t = p.get("t", "")
+        if not t:
+            continue
+        d = abs(_iso_diff_seconds(t, iso_target))
+        if d <= window_sec:
+            out.append(p)
+    return out
+
+
+# --- Auto-Suggest Endpoints ---
+
+@router.post("/races/{race_id}/auto-start-line")
+def auto_start_line(race_id: str, request: Request):
+    """
+    Estimate a start line from fleet positions at the gun time.
+
+    Places the line perpendicular to the mean fleet heading, through the fleet
+    centroid. Length scales to cover the fleet with 30m padding on each end.
+    """
+    require_admin(request)
+    race_data = _load_json(f"races/{race_id}/race.json")
+    if not race_data:
+        raise HTTPException(404, f"Race not found: {race_id}")
+
+    boat_gps = _load_race_gps(race_data)
+    if not boat_gps:
+        raise HTTPException(400, "No boat session data available for this race")
+
+    # Gather position + heading for each boat at start_time
+    start_iso = race_data["start_time"]
+    positions = []
+    headings = []
+    for device_id, gps in boat_gps.items():
+        near = _points_near(gps, start_iso, window_sec=30.0)
+        if not near:
+            continue
+        # Closest to start
+        closest = min(near, key=lambda p: abs(_iso_diff_seconds(p.get("t", ""), start_iso)))
+        lat, lon = closest.get("lat"), closest.get("lon")
+        if lat is None or lon is None:
+            continue
+        positions.append((lat, lon))
+        cog = closest.get("course")
+        if cog is not None:
+            headings.append(cog)
+
+    if len(positions) < 1:
+        raise HTTPException(400, "No boat positions available at start time")
+
+    # Centroid
+    clat = sum(p[0] for p in positions) / len(positions)
+    clon = sum(p[1] for p in positions) / len(positions)
+
+    # Mean heading, fallback to north if unknown
+    mean_heading = _mean_angle_deg(headings) if headings else 0.0
+
+    # Line perpendicular to heading
+    perp = (mean_heading + 90.0) % 360.0
+
+    # Length: fleet spread along perpendicular + 30m padding each side
+    if len(positions) >= 2:
+        # Project each point onto the perpendicular axis to measure spread
+        projs = []
+        for lat, lon in positions:
+            dx_m = (lon - clon) * _meters_per_deg_lon(clat)
+            dy_m = (lat - clat) * _meters_per_deg_lat()
+            # Component along perp direction (sin/cos of perp)
+            proj = dx_m * math.sin(math.radians(perp)) + dy_m * math.cos(math.radians(perp))
+            projs.append(proj)
+        half_len = max(abs(min(projs)), abs(max(projs))) + 30.0
+    else:
+        half_len = 40.0
+
+    # Pin = perp direction, boat = opposite
+    pin_lat, pin_lon = _offset_meters(clat, clon, perp, half_len)
+    boat_lat, boat_lon = _offset_meters(clat, clon, (perp + 180.0) % 360.0, half_len)
+
+    return {
+        "start_line": {
+            "pin_lat": pin_lat,
+            "pin_lon": pin_lon,
+            "boat_lat": boat_lat,
+            "boat_lon": boat_lon,
+        },
+        "mean_heading_deg": mean_heading,
+        "boats_used": len(positions),
+    }
+
+
+@router.post("/races/{race_id}/suggest-marks")
+def suggest_marks(race_id: str, request: Request):
+    """
+    Detect rounding points across boat tracks and cluster them into candidate marks.
+
+    A rounding point is where a boat's course changes by >= 60° within a 30-second
+    window. Points within 100m of each other are clustered; each cluster centroid
+    becomes a suggested mark, ordered by the average time of the cluster.
+    """
+    require_admin(request)
+    race_data = _load_json(f"races/{race_id}/race.json")
+    if not race_data:
+        raise HTTPException(404, f"Race not found: {race_id}")
+
+    boat_gps = _load_race_gps(race_data)
+    if not boat_gps:
+        raise HTTPException(400, "No boat session data available for this race")
+
+    COURSE_CHANGE_DEG = 60.0
+    WINDOW_SEC = 30.0
+    CLUSTER_RADIUS_M = 100.0
+
+    # Detect rounding points across all boats
+    roundings = []  # list of {lat, lon, t, device_id}
+    for device_id, gps in boat_gps.items():
+        pts = [p for p in gps if p.get("lat") is not None and p.get("course") is not None]
+        if len(pts) < 10:
+            continue
+        i = 0
+        while i < len(pts):
+            p = pts[i]
+            t_i = p.get("t", "")
+            cog_i = p["course"]
+            # Find furthest point within WINDOW_SEC
+            j = i + 1
+            max_diff = 0.0
+            max_j = i
+            while j < len(pts):
+                t_j = pts[j].get("t", "")
+                if not t_j or _iso_diff_seconds(t_j, t_i) > WINDOW_SEC:
+                    break
+                diff = abs(_angle_diff_deg(pts[j]["course"], cog_i))
+                if diff > max_diff:
+                    max_diff = diff
+                    max_j = j
+                j += 1
+            if max_diff >= COURSE_CHANGE_DEG:
+                # Midpoint of i..max_j is the rounding location
+                mid = pts[(i + max_j) // 2]
+                roundings.append({
+                    "lat": mid["lat"],
+                    "lon": mid["lon"],
+                    "t": mid.get("t", ""),
+                    "device_id": device_id,
+                })
+                # Skip past this rounding
+                i = max_j + 1
+            else:
+                i += 1
+
+    if not roundings:
+        return {"marks": [], "roundings_found": 0}
+
+    # Cluster by distance (simple greedy single-linkage)
+    clusters = []
+    for r in roundings:
+        placed = False
+        for c in clusters:
+            # Distance to cluster centroid
+            d = _haversine_m(r["lat"], r["lon"], c["centroid_lat"], c["centroid_lon"])
+            if d <= CLUSTER_RADIUS_M:
+                c["points"].append(r)
+                # Update centroid
+                n = len(c["points"])
+                c["centroid_lat"] = sum(p["lat"] for p in c["points"]) / n
+                c["centroid_lon"] = sum(p["lon"] for p in c["points"]) / n
+                placed = True
+                break
+        if not placed:
+            clusters.append({
+                "centroid_lat": r["lat"],
+                "centroid_lon": r["lon"],
+                "points": [r],
+            })
+
+    # Filter weak clusters (at least 2 boats or 2 roundings)
+    clusters = [c for c in clusters if len(c["points"]) >= 2]
+
+    # Sort clusters by average rounding time
+    def avg_time(c):
+        times = [p["t"] for p in c["points"] if p["t"]]
+        if not times:
+            return ""
+        return sorted(times)[len(times) // 2]
+
+    clusters.sort(key=avg_time)
+
+    # Build mark suggestions
+    suggested = []
+    for i, c in enumerate(clusters):
+        suggested.append({
+            "mark_id": f"sug_{i+1}",
+            "name": f"Mark {i + 1}",
+            "mark_type": "windward" if i % 2 == 0 else "leeward",
+            "lat": c["centroid_lat"],
+            "lon": c["centroid_lon"],
+            "rounding_count": len(c["points"]),
+        })
+
+    return {
+        "marks": suggested,
+        "roundings_found": len(roundings),
+        "clusters_found": len(clusters),
+    }
