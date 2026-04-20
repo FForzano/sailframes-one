@@ -263,6 +263,43 @@ deploy_website() {
     log "Website deployed"
 }
 
+# Invalidate CloudFront cache
+# Discovers the distribution by matching the website bucket as an origin —
+# works whether or not the distribution is managed by this CloudFormation stack.
+invalidate_cdn() {
+    log "Looking for CloudFront distribution..."
+
+    local website_bucket
+    website_bucket=$(aws cloudformation describe-stacks \
+        --stack-name "$STACK_NAME" \
+        --query "Stacks[0].Outputs[?OutputKey=='WebsiteBucketName'].OutputValue" \
+        --output text \
+        --profile "$AWS_PROFILE" \
+        --region "$REGION" 2>/dev/null)
+
+    if [ -z "$website_bucket" ] || [ "$website_bucket" = "None" ]; then
+        warn "Could not resolve website bucket — skipping CDN invalidation"
+        return
+    fi
+
+    local distro_id
+    distro_id=$(aws cloudfront list-distributions \
+        --query "DistributionList.Items[?contains(Origins.Items[0].DomainName, '${website_bucket}')].Id | [0]" \
+        --output text \
+        --profile "$AWS_PROFILE" 2>/dev/null)
+
+    if [ -n "$distro_id" ] && [ "$distro_id" != "None" ] && [ "$distro_id" != "null" ]; then
+        log "Invalidating CloudFront distribution $distro_id..."
+        aws cloudfront create-invalidation \
+            --distribution-id "$distro_id" \
+            --paths "/*" \
+            --profile "$AWS_PROFILE"
+        log "Cache invalidation submitted (propagates in ~1 min)"
+    else
+        warn "No CloudFront distribution found for bucket '$website_bucket' — skipping invalidation"
+    fi
+}
+
 # Print stack outputs
 print_outputs() {
     log "Stack outputs:"
@@ -324,6 +361,7 @@ main() {
     build_frontend
     deploy_stack
     deploy_website
+    invalidate_cdn
     print_outputs
 
     echo ""
