@@ -109,6 +109,39 @@ package_lambdas() {
     log "Lambda functions uploaded"
 }
 
+# Force-update Lambda function code from S3.
+# CloudFormation uses a fixed S3 key with no versioning, so update-stack
+# reports "no changes" even when zip contents change. This step ensures
+# every deployed zip is actually live.
+update_lambda_code() {
+    local bucket="$1"
+    log "Updating Lambda function code..."
+
+    local functions=("process_upload" "api_sessions" "api_data" "api_video" "api_analysis" "api_e1" "api_buoys" "api_race" "link_videos" "transcode_complete" "cors_download")
+    local stack_prefix="sailframes"
+
+    for func in "${functions[@]}"; do
+        local func_dir="$LAMBDA_DIR/$func"
+        [ -d "$func_dir" ] || continue
+
+        # Derive Lambda function name from CloudFormation naming convention
+        local lambda_name="${stack_prefix}-${func//_/-}-${ENVIRONMENT}"
+
+        aws lambda update-function-code \
+            --function-name "$lambda_name" \
+            --s3-bucket "$bucket" \
+            --s3-key "${func}.zip" \
+            --profile "$AWS_PROFILE" \
+            --region "$REGION" \
+            --output text \
+            --query "LastModified" 2>/dev/null \
+            && log "  Updated $lambda_name" \
+            || warn "  Could not update $lambda_name (may not exist yet)"
+    done
+
+    log "Lambda function code updated"
+}
+
 # Deploy CloudFormation stack
 deploy_stack() {
     log "Deploying CloudFormation stack: $STACK_NAME"
@@ -120,7 +153,7 @@ deploy_stack() {
     fi
 
     # Check if stack exists
-    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --profile "$AWS_PROFILE" &> /dev/null; then
+    if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --profile "$AWS_PROFILE" --region "$REGION" &> /dev/null; then
         log "Updating existing stack..."
         aws cloudformation update-stack \
             --stack-name "$STACK_NAME" \
@@ -131,8 +164,8 @@ deploy_stack() {
             --profile "$AWS_PROFILE" \
             --region "$REGION" 2>&1 || {
                 local exit_code=$?
-                # Check if "No updates" message
-                if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --profile "$AWS_PROFILE" &> /dev/null; then
+                # "No updates to be performed" is not a real error
+                if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --profile "$AWS_PROFILE" --region "$REGION" &> /dev/null; then
                     log "Stack exists, may have no updates needed"
                     return 0
                 fi
@@ -360,6 +393,7 @@ main() {
     package_lambdas "$lambda_bucket"
     build_frontend
     deploy_stack
+    update_lambda_code "$lambda_bucket"
     deploy_website
     invalidate_cdn
     print_outputs
