@@ -489,6 +489,7 @@ body.course-editing .boat-legend {
     align-items: center;
     padding: 0 1rem;
     gap: 1rem;
+    z-index: 1100;  /* above Leaflet (1000), below modal (2000) */
 }
 
 .playback-controls {
