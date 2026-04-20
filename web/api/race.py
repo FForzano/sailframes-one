@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Optional
 
 import boto3
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
+
+from .auth import require_admin
 
 router = APIRouter(prefix="/api", tags=["races"])
 
@@ -184,8 +186,9 @@ def get_regatta(regatta_id: str):
 
 
 @router.post("/regattas")
-def create_regatta(regatta: RegattaCreateModel):
+def create_regatta(regatta: RegattaCreateModel, request: Request):
     """Create a new regatta."""
+    require_admin(request)
     regatta_id = str(uuid.uuid4())[:8]
     now = _now_iso()
 
@@ -209,8 +212,9 @@ def create_regatta(regatta: RegattaCreateModel):
 
 
 @router.patch("/regattas/{regatta_id}")
-def update_regatta(regatta_id: str, update: RegattaUpdateModel):
+def update_regatta(regatta_id: str, update: RegattaUpdateModel, request: Request):
     """Update a regatta."""
+    require_admin(request)
     index = _load_regattas_index()
     for i, regatta in enumerate(index.get("regattas", [])):
         if regatta["regatta_id"] == regatta_id:
@@ -230,8 +234,9 @@ def update_regatta(regatta_id: str, update: RegattaUpdateModel):
 
 
 @router.delete("/regattas/{regatta_id}")
-def delete_regatta(regatta_id: str):
+def delete_regatta(regatta_id: str, request: Request):
     """Delete a regatta (does not delete races)."""
+    require_admin(request)
     index = _load_regattas_index()
     original_len = len(index.get("regattas", []))
     index["regattas"] = [r for r in index["regattas"] if r["regatta_id"] != regatta_id]
@@ -267,8 +272,9 @@ def get_race(race_id: str):
 
 
 @router.post("/races")
-def create_race(race: RaceCreateModel):
+def create_race(race: RaceCreateModel, request: Request):
     """Create a new race."""
+    require_admin(request)
     race_id = str(uuid.uuid4())[:8]
     now = _now_iso()
 
@@ -319,8 +325,9 @@ def create_race(race: RaceCreateModel):
 
 
 @router.patch("/races/{race_id}")
-def update_race(race_id: str, update: RaceUpdateModel):
+def update_race(race_id: str, update: RaceUpdateModel, request: Request):
     """Update a race."""
+    require_admin(request)
     race_data = _load_json(f"races/{race_id}/race.json")
     if not race_data:
         raise HTTPException(404, f"Race not found: {race_id}")
@@ -358,8 +365,9 @@ def update_race(race_id: str, update: RaceUpdateModel):
 
 
 @router.delete("/races/{race_id}")
-def delete_race(race_id: str):
+def delete_race(race_id: str, request: Request):
     """Delete a race."""
+    require_admin(request)
     race_data = _load_json(f"races/{race_id}/race.json")
     if not race_data:
         raise HTTPException(404, f"Race not found: {race_id}")
@@ -458,13 +466,14 @@ def get_race_data(
 # --- Session Matching ---
 
 @router.post("/races/{race_id}/match-sessions")
-def match_sessions_to_race(race_id: str):
+def match_sessions_to_race(race_id: str, request: Request):
     """
     Auto-match E1-E6 device sessions to a race based on time overlap.
 
     Finds sessions from each device that overlap with the race time window
     and updates the race's boat session_path fields.
     """
+    require_admin(request)
     race_data = _load_json(f"races/{race_id}/race.json")
     if not race_data:
         raise HTTPException(404, f"Race not found: {race_id}")

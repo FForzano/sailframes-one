@@ -16,6 +16,8 @@
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
+            height: auto;
+            overflow-y: auto;
         }
 
         .sessions-container {
@@ -437,8 +439,8 @@
 
     <div class="sessions-container">
         <div class="toolbar" id="toolbar" style="display: none;">
-            <button class="btn-cleanup" id="btn-cleanup" disabled>Cleanup (0)</button>
-            <span class="cleanup-hint">Delete sessions &lt;15min or without boat assigned</span>
+            <button class="btn-cleanup" id="btn-cleanup" disabled style="display: none;">Cleanup (0)</button>
+            <span class="cleanup-hint" id="cleanup-hint" style="display: none;">Delete sessions &lt;15min or without boat assigned</span>
         </div>
 
         <div id="sessions-content">
@@ -451,6 +453,12 @@
 
     <script src="./config.js?v=3"></script>
     <script>
+        // Check if user is authenticated via Cloudflare Access
+        function isAdmin() {
+            return document.cookie.includes('CF_Authorization');
+        }
+        const IS_ADMIN = isAdmin();
+
         // Initialize dayjs plugins
         dayjs.extend(dayjs_plugin_utc);
         dayjs.extend(dayjs_plugin_timezone);
@@ -582,6 +590,11 @@
             const grouped = groupSessionsByDate();
             const container = document.getElementById('sessions-content');
             document.getElementById('toolbar').style.display = 'flex';
+            // Show cleanup controls only for admins
+            if (IS_ADMIN) {
+                document.getElementById('btn-cleanup').style.display = '';
+                document.getElementById('cleanup-hint').style.display = '';
+            }
 
             if (grouped.length === 0) {
                 container.innerHTML = `
@@ -641,7 +654,7 @@
                         </div>
                         <div class="session-actions">
                             <button class="btn-view" data-device="${session.device_id}" data-path="${session.sessionPath}">View in Dashboard</button>
-                            <button class="btn-delete" data-device="${session.device_id}" data-path="${session.sessionPath}" data-name="${session.name || session.displayName}" data-duration="${session.duration_minutes || 0}">Delete</button>
+                            ${IS_ADMIN ? `<button class="btn-delete" data-device="${session.device_id}" data-path="${session.sessionPath}" data-name="${session.name || session.displayName}" data-duration="${session.duration_minutes || 0}">Delete</button>` : ''}
                         </div>
                     </div>
                     ${isExpanded ? renderPpkDetails(session) : ''}

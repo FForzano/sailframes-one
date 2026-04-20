@@ -10,10 +10,11 @@ import os
 from pathlib import Path
 
 import boto3
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .auth import require_admin
 from .race import router as race_router
 
 app = FastAPI(
@@ -585,8 +586,9 @@ def _delete_s3_prefix(prefix: str) -> int:
 
 
 @app.delete("/api/sessions/{device_id}/{date}")
-def delete_session(device_id: str, date: str):
+def delete_session(device_id: str, date: str, request: Request):
     """Delete a session and all its data (processed folder)."""
+    require_admin(request)
     prefix = f"{DATA_PREFIX}/{device_id}/{date}/"
     deleted_count = _delete_s3_prefix(prefix)
 
@@ -603,6 +605,7 @@ def delete_session(device_id: str, date: str):
 
 @app.post("/api/sessions/cleanup")
 def cleanup_sessions(
+    request: Request,
     max_duration_minutes: int = Query(15, description="Delete sessions shorter than this"),
     require_boat: bool = Query(True, description="Delete sessions with no boat selected"),
     dry_run: bool = Query(True, description="Preview without deleting"),
@@ -611,6 +614,7 @@ def cleanup_sessions(
 
     By default runs in dry_run mode - set dry_run=false to actually delete.
     """
+    require_admin(request)
     # Get all sessions
     keys = _list_keys(f"{DATA_PREFIX}/")
     manifests = [k for k in keys if k.endswith("manifest.json")]

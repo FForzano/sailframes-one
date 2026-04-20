@@ -3,6 +3,12 @@
  * Main entry point that coordinates all components
  */
 
+// Check if user is authenticated via Cloudflare Access
+function isAdmin() {
+    return document.cookie.includes('CF_Authorization');
+}
+const IS_ADMIN = isAdmin();
+
 // API base URL - will be set by config or use relative path
 // For S3 hosting, this will be injected as window.SAILFRAMES_API_URL
 const API_BASE = window.SAILFRAMES_API_URL || '';
@@ -95,10 +101,14 @@ async function init() {
         });
     }
 
-    // Setup cleanup button
+    // Setup cleanup button (admin only)
     const btnCleanup = document.getElementById('btn-cleanup');
     if (btnCleanup) {
-        btnCleanup.addEventListener('click', cleanupSessions);
+        if (IS_ADMIN) {
+            btnCleanup.addEventListener('click', cleanupSessions);
+        } else {
+            btnCleanup.style.display = 'none';
+        }
     }
 
     // Setup map expand button

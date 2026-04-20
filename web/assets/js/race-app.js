@@ -6,6 +6,12 @@
  * and playback controls.
  */
 
+// Check if user is authenticated via Cloudflare Access
+function isAdmin() {
+    return document.cookie.includes('CF_Authorization');
+}
+const IS_ADMIN = isAdmin();
+
 // Configuration
 const API_BASE = window.SAILFRAMES_API_URL || window.location.origin;
 const BOAT_COLORS = {
@@ -23,7 +29,9 @@ const FLEET_TEAMS = ['Vela Veloce', 'Seadogs', 'Mystic Mutiny', 'Rooster Alumni 
 
 // State
 let regattas = [];
-let races = [];
+let raceDays = [];  // Race days for selected regatta
+let races = [];     // Races for selected race day
+let currentRaceDay = null;
 let currentRace = null;
 let raceData = null;
 let map = null;
@@ -36,11 +44,20 @@ let playbackInterval = null;
 let speedChart = null;
 let availableSessions = {};  // device_id -> [session paths]
 
+// Pre-race display: show 3 minutes before start
+const PRE_RACE_SECONDS = 180;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
     console.log('[Race] Initializing race dashboard...');
+
+    // Hide admin controls for non-authenticated users
+    if (!IS_ADMIN) {
+        document.getElementById('btn-new-race').style.display = 'none';
+        document.getElementById('btn-edit-race').style.display = 'none';
+    }
 
     // Initialize map
     initMap();
@@ -48,14 +65,61 @@ async function init() {
     // Initialize chart
     initSpeedChart();
 
-    // Load data
+    // Load regattas (race days and races loaded on selection)
     await loadRegattas();
-    await loadRaces();
 
     // Setup event listeners
     setupEventListeners();
 
+    // Auto-load the most recent race with boat data
+    await loadLatestRaceWithData();
+
     console.log('[Race] Dashboard ready');
+}
+
+async function loadLatestRaceWithData() {
+    try {
+        // Fetch all races
+        const resp = await fetch(`${API_BASE}/api/races`);
+        const data = await resp.json();
+        const allRaces = data.races || [];
+
+        const now = new Date();
+
+        // Find races with boats assigned (boat_count > 0), not in the future, sorted by date descending
+        const racesWithBoats = allRaces
+            .filter(r => r.boat_count > 0 && new Date(r.start_time) <= now)
+            .sort((a, b) => {
+                // Sort by start_time descending (most recent first)
+                return new Date(b.start_time) - new Date(a.start_time);
+            });
+
+        if (racesWithBoats.length === 0) {
+            console.log('[Race] No past races with boats found');
+            return;
+        }
+
+        const latestRace = racesWithBoats[0];
+        console.log('[Race] Auto-loading latest race with data:', latestRace.name, latestRace.date, latestRace.race_id);
+
+        // Set the regatta dropdown (use __all__ for races without regatta)
+        const regattaId = latestRace.regatta_id || '__all__';
+        document.getElementById('regatta-select').value = regattaId;
+        await loadRaceDays(regattaId);
+
+        // Set the race day dropdown
+        document.getElementById('raceday-select').value = latestRace.date;
+        loadRacesForDay(latestRace.date);
+
+        // Set the race dropdown
+        document.getElementById('race-select').value = latestRace.race_id;
+
+        // Load the race data
+        await loadRaceData(latestRace.race_id);
+
+    } catch (err) {
+        console.error('[Race] Failed to auto-load latest race:', err);
+    }
 }
 
 // --- Map ---
@@ -133,6 +197,23 @@ function clearBoatLayers() {
     boatLayers = {};
 }
 
+function createBoatIcon(color, rotation = 0) {
+    // SVG boat shape (triangle pointing up, rotated by heading)
+    const svg = `
+        <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"
+             style="transform: rotate(${rotation}deg);">
+            <path d="M12 2 L20 20 L12 16 L4 20 Z"
+                  fill="${color}" stroke="white" stroke-width="1.5"/>
+        </svg>`;
+
+    return L.divIcon({
+        html: svg,
+        className: 'boat-marker',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+    });
+}
+
 function addBoatTrack(deviceId, gpsData, boat) {
     const color = BOAT_COLORS[deviceId] || '#888888';
 
@@ -145,12 +226,10 @@ function addBoatTrack(deviceId, gpsData, boat) {
     }).addTo(map);
 
     // Create boat marker (triangle pointing in direction of travel)
-    const marker = L.circleMarker([0, 0], {
-        radius: 8,
-        color: color,
-        fillColor: color,
-        fillOpacity: 1,
-        weight: 2,
+    const initialCourse = gpsData[0]?.course || 0;
+    const marker = L.marker([0, 0], {
+        icon: createBoatIcon(color, initialCourse),
+        rotationOrigin: 'center center',
     }).addTo(map);
 
     boatLayers[deviceId] = {
@@ -158,6 +237,7 @@ function addBoatTrack(deviceId, gpsData, boat) {
         marker,
         data: gpsData,
         boat,
+        color,
         visible: true,
     };
 }
@@ -183,9 +263,13 @@ function updateBoatPositions(timeSeconds) {
             }
         }
 
-        // Update marker position
+        // Update marker position and rotation
         if (closest && closest.lat && closest.lon) {
             layer.marker.setLatLng([closest.lat, closest.lon]);
+
+            // Update boat icon rotation based on course
+            const course = closest.course || 0;
+            layer.marker.setIcon(createBoatIcon(layer.color, course));
 
             // Update legend with current speed
             updateLegendSpeed(deviceId, closest.speed_kn || 0);
@@ -205,9 +289,14 @@ function fitMapToBounds() {
         }
     }
 
+    console.log(`[Race] fitMapToBounds: ${allCoords.length} coordinates`);
+
     if (allCoords.length > 0) {
         const bounds = L.latLngBounds(allCoords);
+        console.log('[Race] Fitting to bounds:', bounds.toBBoxString());
         map.fitBounds(bounds, { padding: [50, 50] });
+    } else {
+        console.warn('[Race] No coordinates to fit map bounds');
     }
 }
 
@@ -566,35 +655,103 @@ async function loadRegattas() {
             `<option value="${r.regatta_id}">${r.name}</option>`
         ).join('');
 
-        regattaSelect.innerHTML = '<option value="">All Regattas</option>' + options;
+        regattaSelect.innerHTML = '<option value="">Select Regatta...</option>' +
+            '<option value="__all__">All Races</option>' + options;
         regattaInput.innerHTML = '<option value="">None</option>' + options;
+
+        // Clear dependent selects
+        document.getElementById('raceday-select').innerHTML = '<option value="">Select Day...</option>';
+        document.getElementById('race-select').innerHTML = '<option value="">Select Race...</option>';
 
     } catch (err) {
         console.error('[Race] Failed to load regattas:', err);
     }
 }
 
-async function loadRaces(regattaId = null) {
-    try {
-        let url = `${API_BASE}/api/races`;
-        if (regattaId) {
-            url += `?regatta_id=${regattaId}`;
-        }
+async function loadRaceDays(regattaId) {
+    const raceDaySelect = document.getElementById('raceday-select');
+    const raceSelect = document.getElementById('race-select');
 
+    if (!regattaId) {
+        raceDaySelect.innerHTML = '<option value="">Select Day...</option>';
+        raceSelect.innerHTML = '<option value="">Select Race...</option>';
+        raceDays = [];
+        races = [];
+        return;
+    }
+
+    try {
+        // Load races - either for specific regatta or all races
+        const url = regattaId === '__all__'
+            ? `${API_BASE}/api/races`
+            : `${API_BASE}/api/races?regatta_id=${regattaId}`;
         const resp = await fetch(url);
         const data = await resp.json();
-        races = data.races || [];
+        const allRaces = data.races || [];
 
-        // Populate race select
-        const raceSelect = document.getElementById('race-select');
-        raceSelect.innerHTML = '<option value="">Select a race...</option>' +
-            races.map(r =>
-                `<option value="${r.race_id}">${r.name} (${r.date})</option>`
-            ).join('');
+        // Group by date to get race days
+        const dayMap = {};
+        for (const race of allRaces) {
+            if (!dayMap[race.date]) {
+                dayMap[race.date] = [];
+            }
+            dayMap[race.date].push(race);
+        }
+
+        // Sort dates and create race days
+        raceDays = Object.keys(dayMap).sort().map(date => ({
+            date: date,
+            races: dayMap[date].sort((a, b) => a.start_time.localeCompare(b.start_time)),
+        }));
+
+        // Populate race day select
+        raceDaySelect.innerHTML = '<option value="">Select Day...</option>' +
+            raceDays.map(d => {
+                const raceCount = d.races.length;
+                const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                return `<option value="${d.date}">${dayName} (${raceCount} race${raceCount !== 1 ? 's' : ''})</option>`;
+            }).join('');
+
+        // Clear race select
+        raceSelect.innerHTML = '<option value="">Select Race...</option>';
+        races = [];
+
+        console.log('[Race] Loaded race days:', raceDays);
 
     } catch (err) {
-        console.error('[Race] Failed to load races:', err);
+        console.error('[Race] Failed to load race days:', err);
     }
+}
+
+function loadRacesForDay(date) {
+    const raceSelect = document.getElementById('race-select');
+
+    if (!date) {
+        raceSelect.innerHTML = '<option value="">Select Race...</option>';
+        races = [];
+        currentRaceDay = null;
+        return;
+    }
+
+    // Find the race day
+    currentRaceDay = raceDays.find(d => d.date === date);
+    if (!currentRaceDay) {
+        raceSelect.innerHTML = '<option value="">Select Race...</option>';
+        races = [];
+        return;
+    }
+
+    races = currentRaceDay.races;
+
+    // Populate race select with race name and start time (local time)
+    raceSelect.innerHTML = '<option value="">Select Race...</option>' +
+        races.map(r => {
+            const startLocal = new Date(r.start_time);
+            const startTime = startLocal.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+            return `<option value="${r.race_id}">${r.name} @ ${startTime}</option>`;
+        }).join('');
+
+    console.log('[Race] Loaded races for', date, ':', races);
 }
 
 async function loadRaceData(raceId) {
@@ -603,15 +760,19 @@ async function loadRaceData(raceId) {
         const raceResp = await fetch(`${API_BASE}/api/races/${raceId}`);
         currentRace = await raceResp.json();
 
-        // Update UI
+        // Update UI with local time
         document.getElementById('race-name').textContent = currentRace.name;
-        document.getElementById('race-time').textContent =
-            `${currentRace.date} ${currentRace.start_time.split('T')[1]?.slice(0, 5) || ''}`;
+        const startLocal = new Date(currentRace.start_time);
+        const localTimeStr = startLocal.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        document.getElementById('race-time').textContent = `${currentRace.date} ${localTimeStr}`;
         document.getElementById('btn-edit-race').disabled = false;
 
         // Load sensor data for all boats
         const dataResp = await fetch(`${API_BASE}/api/races/${raceId}/data?sensors=gps,imu,wind`);
         raceData = await dataResp.json();
+
+        console.log('[Race] Race time window:', currentRace.start_time, 'to', currentRace.end_time);
+        console.log('[Race] Loaded data:', raceData);
 
         // Calculate race duration
         const start = new Date(currentRace.start_time).getTime();
@@ -624,14 +785,20 @@ async function loadRaceData(raceId) {
         // Clear existing layers and add new ones
         clearBoatLayers();
 
+        let totalGpsPoints = 0;
         for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
             if (boatData.error || !boatData.sensors?.gps?.length) {
-                console.warn(`[Race] No data for ${deviceId}:`, boatData.error);
+                console.warn(`[Race] No GPS data for ${deviceId}:`, boatData.error || 'empty array');
                 continue;
             }
 
+            const gpsCount = boatData.sensors.gps.length;
+            totalGpsPoints += gpsCount;
+            console.log(`[Race] ${deviceId}: ${gpsCount} GPS points, first:`, boatData.sensors.gps[0]);
             addBoatTrack(deviceId, boatData.sensors.gps, boatData.boat);
         }
+
+        console.log(`[Race] Total GPS points: ${totalGpsPoints}, boatLayers:`, Object.keys(boatLayers));
 
         // Fit map to show all tracks
         fitMapToBounds();
@@ -670,9 +837,31 @@ async function loadAvailableSessions() {
             if (!availableSessions[deviceId]) {
                 availableSessions[deviceId] = [];
             }
+            // Full session path is "date-session_id" (e.g., "2026-04-19-154818")
+            const fullPath = `${session.date}-${session.session_id}`;
+
+            // Format start time in LOCAL time (not UTC)
+            let startTimeStr = '';
+            if (session.start_time) {
+                const startDate = new Date(session.start_time);
+                startTimeStr = startDate.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true
+                });
+            }
+
+            // Get duration in minutes
+            let durationMin = '?';
+            if (session.duration_minutes !== undefined && session.duration_minutes !== null) {
+                durationMin = session.duration_minutes;
+            } else if (session.duration_sec !== undefined && session.duration_sec !== null) {
+                durationMin = Math.round(session.duration_sec / 60);
+            }
+
             availableSessions[deviceId].push({
-                path: `${session.date}`,
-                label: `${session.date} (${session.duration_min || '?'}min)`,
+                path: fullPath,
+                label: `${session.date} @ ${startTimeStr} (${durationMin}min)`,
                 name: session.name || '',
             });
         }
@@ -685,6 +874,7 @@ async function loadAvailableSessions() {
 async function openRaceModal(race = null) {
     const modal = document.getElementById('race-modal');
     const title = document.getElementById('modal-title');
+    const deleteBtn = document.getElementById('btn-delete-race');
 
     // Load available sessions for dropdown
     await loadAvailableSessions();
@@ -692,9 +882,11 @@ async function openRaceModal(race = null) {
     if (race) {
         title.textContent = 'Edit Race';
         populateRaceForm(race);
+        deleteBtn.style.display = IS_ADMIN ? 'block' : 'none';  // Show delete button for admins only
     } else {
         title.textContent = 'New Race';
         clearRaceForm();
+        deleteBtn.style.display = 'none';   // Hide delete button for new races
     }
 
     modal.style.display = 'flex';
@@ -725,8 +917,24 @@ function clearRaceForm() {
 function populateRaceForm(race) {
     document.getElementById('race-name-input').value = race.name || '';
     document.getElementById('race-date-input').value = race.date || '';
-    document.getElementById('start-time-input').value = race.start_time?.split('T')[1]?.slice(0, 8) || '';
-    document.getElementById('end-time-input').value = race.end_time?.split('T')[1]?.slice(0, 8) || '';
+
+    // Convert UTC times to local time for display
+    if (race.start_time) {
+        const startLocal = new Date(race.start_time);
+        document.getElementById('start-time-input').value =
+            startLocal.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } else {
+        document.getElementById('start-time-input').value = '';
+    }
+
+    if (race.end_time) {
+        const endLocal = new Date(race.end_time);
+        document.getElementById('end-time-input').value =
+            endLocal.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } else {
+        document.getElementById('end-time-input').value = '';
+    }
+
     document.getElementById('regatta-input').value = race.regatta_id || '';
 
     renderBoatAssignments(race.boats || []);
@@ -861,8 +1069,30 @@ function updateFinishOrderPositions() {
 
 function getFormData() {
     const date = document.getElementById('race-date-input').value;
-    const startTime = document.getElementById('start-time-input').value;
-    const endTime = document.getElementById('end-time-input').value;
+    const startTime = document.getElementById('start-time-input').value || '00:00';
+    const endTime = document.getElementById('end-time-input').value || '00:30';
+
+    // Validate date
+    if (!date) {
+        throw new Error('Date is required');
+    }
+
+    // Convert local time to UTC ISO string
+    // Input is in local time (user's timezone), we need to convert to UTC for storage
+    const startLocal = new Date(`${date}T${startTime}`);
+    const endLocal = new Date(`${date}T${endTime}`);
+
+    // Validate dates
+    if (isNaN(startLocal.getTime())) {
+        throw new Error('Invalid start time');
+    }
+    if (isNaN(endLocal.getTime())) {
+        throw new Error('Invalid end time');
+    }
+
+    // toISOString() returns UTC
+    const startUTC = startLocal.toISOString();
+    const endUTC = endLocal.toISOString();
 
     // Build boats array from form
     const boats = [];
@@ -891,8 +1121,8 @@ function getFormData() {
     return {
         name: document.getElementById('race-name-input').value,
         date: date,
-        start_time: `${date}T${startTime}:00Z`,
-        end_time: `${date}T${endTime}:00Z`,
+        start_time: startUTC,
+        end_time: endUTC,
         regatta_id: document.getElementById('regatta-input').value || null,
         boats,
         finish_order: finishOrder,
@@ -900,7 +1130,13 @@ function getFormData() {
 }
 
 async function saveRace() {
-    const formData = getFormData();
+    let formData;
+    try {
+        formData = getFormData();
+    } catch (err) {
+        alert(err.message);
+        return;
+    }
 
     try {
         let resp;
@@ -921,22 +1157,32 @@ async function saveRace() {
         }
 
         if (!resp.ok) {
-            throw new Error(`HTTP ${resp.status}`);
+            const errorText = await resp.text();
+            console.error('[Race] API error:', resp.status, errorText);
+            throw new Error(`HTTP ${resp.status}: ${errorText}`);
         }
 
         const savedRace = await resp.json();
         console.log('[Race] Saved race:', savedRace);
 
         closeRaceModal();
-        await loadRaces();
 
-        // Load the saved race
-        document.getElementById('race-select').value = savedRace.race_id;
+        // Directly load the saved race data (this will update map, charts, etc.)
         await loadRaceData(savedRace.race_id);
+
+        // Update dropdown selections to reflect current race
+        const regattaId = savedRace.regatta_id || '__all__';
+        document.getElementById('regatta-select').value = regattaId;
+        await loadRaceDays(regattaId);
+        if (savedRace.date) {
+            document.getElementById('raceday-select').value = savedRace.date;
+            loadRacesForDay(savedRace.date);
+            document.getElementById('race-select').value = savedRace.race_id;
+        }
 
     } catch (err) {
         console.error('[Race] Failed to save race:', err);
-        alert('Failed to save race. Check console for details.');
+        alert(`Failed to save race: ${err.message}`);
     }
 }
 
@@ -968,15 +1214,77 @@ async function matchSessions() {
     }
 }
 
+async function deleteRace() {
+    if (!currentRace?.race_id) {
+        return;
+    }
+
+    const raceName = currentRace.name || 'this race';
+    if (!confirm(`Delete "${raceName}"? This cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/races/${currentRace.race_id}`, {
+            method: 'DELETE',
+        });
+
+        if (!resp.ok) {
+            const errorText = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${errorText}`);
+        }
+
+        console.log('[Race] Deleted race:', currentRace.race_id);
+
+        // Close modal
+        closeRaceModal();
+
+        // Clear current race state
+        const regattaId = currentRace.regatta_id;
+        const raceDate = currentRace.date;
+        currentRace = null;
+        raceData = null;
+
+        // Clear map and UI
+        clearBoatLayers();
+        document.getElementById('leaderboard').innerHTML = '<div class="leaderboard-empty">Select a race to view standings</div>';
+        document.getElementById('boat-legend').innerHTML = '';
+        document.getElementById('race-name').textContent = 'No race selected';
+        document.getElementById('race-time').textContent = '';
+        document.getElementById('btn-edit-race').disabled = true;
+
+        // Reload race days and races for current regatta
+        if (regattaId) {
+            await loadRaceDays(regattaId);
+            if (raceDate) {
+                document.getElementById('raceday-select').value = raceDate;
+                loadRacesForDay(raceDate);
+            }
+        }
+
+        // Reset race selector
+        document.getElementById('race-select').value = '';
+
+    } catch (err) {
+        console.error('[Race] Failed to delete race:', err);
+        alert(`Failed to delete race: ${err.message}`);
+    }
+}
+
 // --- Event Listeners ---
 
 function setupEventListeners() {
-    // Regatta filter
+    // Regatta selection -> load race days
     document.getElementById('regatta-select').addEventListener('change', (e) => {
-        loadRaces(e.target.value || null);
+        loadRaceDays(e.target.value || null);
     });
 
-    // Race selection
+    // Race day selection -> load races for that day
+    document.getElementById('raceday-select').addEventListener('change', (e) => {
+        loadRacesForDay(e.target.value || null);
+    });
+
+    // Race selection -> load race data
     document.getElementById('race-select').addEventListener('change', (e) => {
         if (e.target.value) {
             loadRaceData(e.target.value);
@@ -1001,6 +1309,7 @@ function setupEventListeners() {
     document.getElementById('btn-cancel').addEventListener('click', closeRaceModal);
     document.getElementById('btn-save-race').addEventListener('click', saveRace);
     document.getElementById('btn-match-sessions').addEventListener('click', matchSessions);
+    document.getElementById('btn-delete-race').addEventListener('click', deleteRace);
 
     // Close modal on backdrop click
     document.querySelector('.modal-backdrop').addEventListener('click', closeRaceModal);
