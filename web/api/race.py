@@ -5,15 +5,20 @@ and session matching functionality.
 """
 
 import json
+import math
 import os
+import re
 import uuid
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import boto3
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
+
+from .auth import require_admin
 
 router = APIRouter(prefix="/api", tags=["races"])
 
@@ -42,6 +47,7 @@ class RaceBoatModel(BaseModel):
     boat_name: str
     sail_number: str = ""
     session_path: Optional[str] = None
+    gpx_path: Optional[str] = None  # Set after GPX track upload
 
 
 class RaceCreateModel(BaseModel):
@@ -184,8 +190,9 @@ def get_regatta(regatta_id: str):
 
 
 @router.post("/regattas")
-def create_regatta(regatta: RegattaCreateModel):
+def create_regatta(regatta: RegattaCreateModel, request: Request):
     """Create a new regatta."""
+    require_admin(request)
     regatta_id = str(uuid.uuid4())[:8]
     now = _now_iso()
 
@@ -209,8 +216,9 @@ def create_regatta(regatta: RegattaCreateModel):
 
 
 @router.patch("/regattas/{regatta_id}")
-def update_regatta(regatta_id: str, update: RegattaUpdateModel):
+def update_regatta(regatta_id: str, update: RegattaUpdateModel, request: Request):
     """Update a regatta."""
+    require_admin(request)
     index = _load_regattas_index()
     for i, regatta in enumerate(index.get("regattas", [])):
         if regatta["regatta_id"] == regatta_id:
@@ -230,8 +238,9 @@ def update_regatta(regatta_id: str, update: RegattaUpdateModel):
 
 
 @router.delete("/regattas/{regatta_id}")
-def delete_regatta(regatta_id: str):
+def delete_regatta(regatta_id: str, request: Request):
     """Delete a regatta (does not delete races)."""
+    require_admin(request)
     index = _load_regattas_index()
     original_len = len(index.get("regattas", []))
     index["regattas"] = [r for r in index["regattas"] if r["regatta_id"] != regatta_id]
@@ -267,8 +276,9 @@ def get_race(race_id: str):
 
 
 @router.post("/races")
-def create_race(race: RaceCreateModel):
+def create_race(race: RaceCreateModel, request: Request):
     """Create a new race."""
+    require_admin(request)
     race_id = str(uuid.uuid4())[:8]
     now = _now_iso()
 
@@ -319,8 +329,9 @@ def create_race(race: RaceCreateModel):
 
 
 @router.patch("/races/{race_id}")
-def update_race(race_id: str, update: RaceUpdateModel):
+def update_race(race_id: str, update: RaceUpdateModel, request: Request):
     """Update a race."""
+    require_admin(request)
     race_data = _load_json(f"races/{race_id}/race.json")
     if not race_data:
         raise HTTPException(404, f"Race not found: {race_id}")
@@ -358,8 +369,9 @@ def update_race(race_id: str, update: RaceUpdateModel):
 
 
 @router.delete("/races/{race_id}")
-def delete_race(race_id: str):
+def delete_race(race_id: str, request: Request):
     """Delete a race."""
+    require_admin(request)
     race_data = _load_json(f"races/{race_id}/race.json")
     if not race_data:
         raise HTTPException(404, f"Race not found: {race_id}")
@@ -412,18 +424,38 @@ def get_race_data(
     for boat in race_data.get("boats", []):
         device_id = boat["device_id"]
         session_path = boat.get("session_path")
+        gpx_path = boat.get("gpx_path")
 
-        if not session_path:
+        if not session_path and not gpx_path:
             boats_data[device_id] = {"error": "No session matched", "boat": boat}
             continue
 
         boat_sensors = {}
         for sensor in requested_sensors:
+            # GPX upload replaces the GPS sensor for this boat
+            if sensor == "gps" and gpx_path:
+                try:
+                    data = _load_json(gpx_path)
+                    if isinstance(data, list):
+                        filtered = [
+                            d for d in data
+                            if start_time <= d.get("t", "") <= end_time
+                        ]
+                        boat_sensors[sensor] = filtered
+                    else:
+                        boat_sensors[sensor] = []
+                except Exception as e:
+                    boat_sensors[sensor] = {"error": str(e)}
+                continue
+
+            if not session_path:
+                boat_sensors[sensor] = []
+                continue
+
             try:
                 sensor_key = f"processed/{device_id}/{session_path}/{sensor}.json"
                 data = _load_json(sensor_key)
                 if isinstance(data, list):
-                    # Filter to race time window
                     filtered = [
                         d for d in data
                         if start_time <= d.get("t", "") <= end_time
@@ -458,13 +490,14 @@ def get_race_data(
 # --- Session Matching ---
 
 @router.post("/races/{race_id}/match-sessions")
-def match_sessions_to_race(race_id: str):
+def match_sessions_to_race(race_id: str, request: Request):
     """
     Auto-match E1-E6 device sessions to a race based on time overlap.
 
     Finds sessions from each device that overlap with the race time window
     and updates the race's boat session_path fields.
     """
+    require_admin(request)
     race_data = _load_json(f"races/{race_id}/race.json")
     if not race_data:
         raise HTTPException(404, f"Race not found: {race_id}")
@@ -523,6 +556,47 @@ def match_sessions_to_race(race_id: str):
     return {"race_id": race_id, "matched": matched}
 
 
+@router.post("/races/{race_id}/boats/{device_id}/gpx")
+async def upload_boat_gpx(
+    race_id: str, device_id: str, request: Request, file: UploadFile = File(...)
+):
+    """Upload a GPX track file as the GPS source for a boat in a race."""
+    require_admin(request)
+
+    race_data = _load_json(f"races/{race_id}/race.json")
+    if not race_data:
+        raise HTTPException(404, f"Race not found: {race_id}")
+
+    boat = next((b for b in race_data.get("boats", []) if b["device_id"] == device_id), None)
+    if boat is None:
+        raise HTTPException(404, f"Boat {device_id} not found in race {race_id}")
+
+    content = await file.read()
+    try:
+        track_points = _parse_gpx(content)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse GPX: {e}")
+
+    if not track_points:
+        raise HTTPException(400, "GPX file contains no track points")
+
+    gpx_key = f"races/{race_id}/gpx/{device_id}.json"
+    _save_json(gpx_key, track_points)
+
+    boat["gpx_path"] = gpx_key
+    boat["session_path"] = None  # GPX replaces session
+    race_data["updated_at"] = _now_iso()
+    _save_json(f"races/{race_id}/race.json", race_data)
+
+    return {
+        "device_id": device_id,
+        "gpx_path": gpx_key,
+        "points": len(track_points),
+        "start_time": track_points[0]["t"],
+        "end_time": track_points[-1]["t"],
+    }
+
+
 def _find_device_sessions(device_id: str, date: str) -> list[dict]:
     """Find all sessions for a device on a given date."""
     sessions = []
@@ -568,6 +642,86 @@ def _find_device_sessions(device_id: str, date: str) -> list[dict]:
             pass
 
     return sessions
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    R = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dlambda = math.radians(lon2 - lon1)
+    y = math.sin(dlambda) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def _parse_gpx(content: bytes) -> list[dict]:
+    """Parse GPX XML into GPS track points matching processed gps.json format."""
+    root = ET.fromstring(content)
+    ns_match = re.match(r'\{([^}]+)\}', root.tag)
+    ns = f"{{{ns_match.group(1)}}}" if ns_match else ""
+
+    raw: list[dict] = []
+    for seg in root.iter(f"{ns}trkseg"):
+        for trkpt in seg.iter(f"{ns}trkpt"):
+            lat = float(trkpt.get("lat", 0))
+            lon = float(trkpt.get("lon", 0))
+            time_el = trkpt.find(f"{ns}time")
+            if time_el is None or not time_el.text:
+                continue
+            t = time_el.text.strip()
+
+            speed_ms = None
+            for el in trkpt.iter():
+                local = el.tag.split("}")[-1] if "}" in el.tag else el.tag
+                if local == "speed" and el.text:
+                    try:
+                        speed_ms = float(el.text)
+                    except ValueError:
+                        pass
+                    break
+
+            raw.append({"lat": lat, "lon": lon, "t": t, "_speed_ms": speed_ms})
+
+    result = []
+    for i, pt in enumerate(raw):
+        sog = 0.0
+        cog = 0.0
+
+        if pt["_speed_ms"] is not None:
+            sog = pt["_speed_ms"] * 1.94384  # m/s → knots
+        elif i > 0:
+            prev = raw[i - 1]
+            try:
+                dt = _iso_diff_seconds(pt["t"], prev["t"])
+                if dt > 0:
+                    dist_m = _haversine_m(prev["lat"], prev["lon"], pt["lat"], pt["lon"])
+                    sog = (dist_m / dt) * 1.94384
+            except Exception:
+                pass
+
+        if i > 0:
+            prev = raw[i - 1]
+            cog = _bearing(prev["lat"], prev["lon"], pt["lat"], pt["lon"])
+        elif i < len(raw) - 1:
+            nxt = raw[i + 1]
+            cog = _bearing(pt["lat"], pt["lon"], nxt["lat"], nxt["lon"])
+
+        result.append({
+            "t": pt["t"],
+            "lat": pt["lat"],
+            "lon": pt["lon"],
+            "sog": round(sog, 2),
+            "cog": round(cog, 1),
+        })
+
+    return result
 
 
 def _iso_diff_seconds(end: str, start: str) -> float:

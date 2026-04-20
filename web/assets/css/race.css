@@ -528,14 +528,87 @@
     border-radius: 6px;
 }
 
+/* Session / GPX toggle container */
+.session-or-gpx {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
 .session-select {
+    flex: 1;
+    min-width: 0;
     padding: 0.5rem;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--text-primary);
     font-size: 0.8rem;
-    max-width: 200px;
+}
+
+.session-select.hidden {
+    display: none;
+}
+
+/* GPX badge shown when a track is loaded */
+.gpx-badge {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    background: rgba(29, 155, 240, 0.15);
+    border: 1px solid rgba(29, 155, 240, 0.4);
+    border-radius: 4px;
+    min-width: 0;
+}
+
+.gpx-badge.hidden {
+    display: none;
+}
+
+.gpx-badge-name {
+    font-size: 0.75rem;
+    color: var(--accent, #1d9bf0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+}
+
+.btn-gpx-clear {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    font-size: 1rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.btn-gpx-clear:hover {
+    color: var(--text-primary);
+}
+
+/* GPX upload button (label wrapping hidden file input) */
+.btn-gpx {
+    flex-shrink: 0;
+    padding: 0.4rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+}
+
+.btn-gpx:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 .boat-assignment-device {
