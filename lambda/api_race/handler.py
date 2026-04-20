@@ -79,6 +79,10 @@ def lambda_handler(event, context):
             if race_id and '/match-sessions' in path and http_method == 'POST':
                 return match_sessions(race_id)
 
+            # GPX status/debug endpoint
+            if race_id and '/gpx-status' in path and http_method == 'GET':
+                return get_gpx_status(race_id)
+
             # Race data endpoint
             if race_id and '/data' in path and http_method == 'GET':
                 qs = event.get('queryStringParameters', {}) or {}
@@ -363,15 +367,12 @@ def get_race_data(race_id, sensors_str):
 
         boat_sensors = {}
         for sensor in requested_sensors:
-            # GPX upload serves as the GPS source for this boat
+            # GPX upload serves as the GPS source for this boat.
+            # No window filter — user explicitly assigned this file to the race.
             if sensor == 'gps' and gpx_path:
                 try:
                     data = load_json(gpx_path)
-                    if isinstance(data, list):
-                        filtered = [d for d in data if _in_window(d.get('t', ''), start_time, end_time)]
-                        boat_sensors[sensor] = filtered
-                    else:
-                        boat_sensors[sensor] = []
+                    boat_sensors[sensor] = data if isinstance(data, list) else []
                 except Exception as e:
                     boat_sensors[sensor] = {'error': str(e)}
                 continue
@@ -407,6 +408,43 @@ def get_race_data(race_id, sensors_str):
         'boats': boats_data,
         'time_bounds': {'start': start_time, 'end': end_time},
     })
+
+
+def get_gpx_status(race_id):
+    """Return per-boat GPX import summary for debugging."""
+    race_data = load_json(f'races/{race_id}/race.json')
+    if not race_data:
+        return response(404, {'error': f'Race not found: {race_id}'})
+
+    start_time = race_data.get('start_time', '')
+    end_time = race_data.get('end_time', '')
+    status = []
+
+    for boat in race_data.get('boats', []):
+        device_id = boat['device_id']
+        gpx_path = boat.get('gpx_path')
+        entry = {'device_id': device_id, 'gpx_path': gpx_path}
+
+        if not gpx_path:
+            entry['status'] = 'no_gpx'
+        else:
+            data = load_json(gpx_path)
+            if not isinstance(data, list) or not data:
+                entry['status'] = 'empty'
+            else:
+                in_window = [d for d in data if _in_window(d.get('t', ''), start_time, end_time)]
+                entry.update({
+                    'status': 'ok',
+                    'total_points': len(data),
+                    'points_in_window': len(in_window),
+                    'track_start': data[0].get('t'),
+                    'track_end': data[-1].get('t'),
+                    'race_window_start': start_time,
+                    'race_window_end': end_time,
+                })
+        status.append(entry)
+
+    return response(200, {'race_id': race_id, 'boats': status})
 
 
 def _in_window(t, start, end):
@@ -505,6 +543,33 @@ def _extract_multipart_file(event):
 
 # --- GPX Parsing ---
 
+_GPX_TS_FORMATS = [
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%dT%H:%M:%S",
+    "%b %d, %Y %I:%M:%S %p",
+    "%b %d, %Y %I:%M %p",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M",
+]
+
+
+def _normalize_gpx_ts(t: str) -> str:
+    """Normalize any GPX timestamp to ISO 8601 UTC string."""
+    t = t.strip()
+    # Already standard ISO — fast path
+    if re.match(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', t):
+        return t.replace('+0000', 'Z').rstrip('+0000') if '+0000' in t else t
+    for fmt in _GPX_TS_FORMATS:
+        try:
+            dt = datetime.strptime(t, fmt)
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            continue
+    return t  # Return as-is if unrecognized
+
+
 def _parse_gpx(content: bytes) -> list:
     """Parse GPX XML into GPS track points matching processed gps.json format."""
     root = ET.fromstring(content)
@@ -519,7 +584,7 @@ def _parse_gpx(content: bytes) -> list:
             time_el = trkpt.find(f"{ns}time")
             if time_el is None or not time_el.text:
                 continue
-            t = time_el.text.strip()
+            t = _normalize_gpx_ts(time_el.text)
 
             speed_ms = None
             for el in trkpt.iter():

@@ -278,14 +278,14 @@ deploy_website() {
         --profile "$AWS_PROFILE" \
         --region "$REGION"
 
-    # Deploy static dashboard (web/index.html and web/assets/)
-    log "Deploying static dashboard to /dashboard/..."
+    # Deploy static dashboard (web/*.html and web/assets/) to S3 root
+    log "Deploying static dashboard..."
 
     # Create config.js for dashboard
     echo "window.SAILFRAMES_API_URL = '${api_endpoint}';" > "$WEB_DIR/config.js"
 
-    # Sync dashboard static files
-    aws s3 sync "$WEB_DIR" "s3://$website_bucket/dashboard/" \
+    # Sync dashboard static files to S3 root (served at sailframes.com/race.html etc.)
+    aws s3 sync "$WEB_DIR" "s3://$website_bucket/" \
         --exclude "frontend/*" \
         --exclude "api/*" \
         --exclude ".DS_Store" \
