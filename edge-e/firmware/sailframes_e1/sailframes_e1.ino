@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.04.29.1"
+#define FW_VERSION    "2026.04.29.2"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -2269,31 +2269,43 @@ void updateDisplayD2() {
     // VAKAROS-STYLE: White bg, HUGE bold black numbers
     // Top bar: BLACK bg, WHITE text
     // Bottom bar: BLACK bg, WHITE text
-    // Layout:
+    // Layout (wind disabled - bigger numbers):
     // [BLACK: REC | SAT x HDOP x.x]  (30px)
-    // [    COG 000                ]  (190px)
-    // [    SOG 00                 ]  (190px)
-    // [AWS 0.0 | AWA 000          ]  (35px)
-    // [BLACK: H P BAT WIND WiFi   ]  (35px)
+    // [    COG 000                ]  (205px)
+    // [    SOG 00                 ]  (205px)
+    // [BLACK: H P BAT WiFi        ]  (40px)
+    //
+    // Layout (wind enabled):
+    // [BLACK: REC | SAT x HDOP x.x]  (30px)
+    // [    COG 000                ]  (165px)
+    // [    SOG 00                 ]  (165px)
+    // [AWS 0.0 | AWA 000          ]  (40px)
+    // [BLACK: H P BAT WIND WiFi   ]  (40px)
 
     // BLACK bars for top and bottom
     tft.fillRect(0, 0, SCREEN_WIDTH, 30, TFT_BLACK);
-    tft.fillRect(0, 445, SCREEN_WIDTH, 35, TFT_BLACK);
+    tft.fillRect(0, 440, SCREEN_WIDTH, 40, TFT_BLACK);
 
-    // Dividers - light grey lines
+    // Dividers and labels depend on wind enabled
     uint16_t lineColor = tft.color565(180, 180, 180);
-    tft.drawFastHLine(0, 220, SCREEN_WIDTH, lineColor);
-    tft.drawFastHLine(0, 410, SCREEN_WIDTH, lineColor);
-
-    // Labels for main data - dark grey on white
     uint16_t labelColor = tft.color565(100, 100, 100);
     tft.setTextColor(labelColor, COLOR_BG);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString("COG", 5, 35, 2);
-    tft.drawString("SOG", 5, 225, 2);
+
     if (config.wind_enabled) {
-      tft.drawString("AWS", 5, 415, 2);
-      tft.drawString("AWA", SCREEN_WIDTH/2 + 5, 415, 2);
+      // Smaller layout with wind row
+      tft.drawFastHLine(0, 195, SCREEN_WIDTH, lineColor);
+      tft.drawFastHLine(0, 360, SCREEN_WIDTH, lineColor);
+      tft.drawFastHLine(0, 400, SCREEN_WIDTH, lineColor);
+      tft.drawString("COG", 5, 35, 2);
+      tft.drawString("SOG", 5, 200, 2);
+      tft.drawString("AWS", 5, 365, 2);
+      tft.drawString("AWA", SCREEN_WIDTH/2 + 5, 365, 2);
+    } else {
+      // Larger layout without wind
+      tft.drawFastHLine(0, 235, SCREEN_WIDTH, lineColor);
+      tft.drawString("COG", 5, 35, 2);
+      tft.drawString("SOG", 5, 240, 2);
     }
 
     // Reset prev values
@@ -2356,46 +2368,75 @@ void updateDisplayD2() {
     }
   }
 
-  // COG - HUGE clean number using setTextSize(2) on Font 8 (75px * 2 = 150px)
-  if (abs(gps.course - prevCOG) > 0.5) {
-    prevCOG = gps.course;
-    tft.fillRect(0, 50, SCREEN_WIDTH, 165, COLOR_BG);
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextSize(2);
-    snprintf(buf, sizeof(buf), "%03d", (int)gps.course);
-    tft.drawString(buf, SCREEN_WIDTH/2, 125, 8);
-    tft.setTextSize(1);
-  }
-
-  // SOG - HUGE clean number, no decimal (whole knots)
-  int sogInt = (int)(gps.speed_kts + 0.5);
-  if (sogInt != (int)(prevSOG + 0.5)) {
-    prevSOG = gps.speed_kts;
-    tft.fillRect(0, 240, SCREEN_WIDTH, 165, COLOR_BG);
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextSize(2);
-    snprintf(buf, sizeof(buf), "%d", sogInt);
-    tft.drawString(buf, SCREEN_WIDTH/2, 315, 8);
-    tft.setTextSize(1);
+  // COG and SOG - HUGE numbers, size depends on wind enabled
+  if (config.wind_enabled) {
+    // Smaller layout with wind row
+    // COG area: 30-195 (165px), center at 112
+    if (abs(gps.course - prevCOG) > 0.5) {
+      prevCOG = gps.course;
+      tft.fillRect(0, 50, SCREEN_WIDTH, 140, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(2);
+      snprintf(buf, sizeof(buf), "%03d", (int)gps.course);
+      tft.drawString(buf, SCREEN_WIDTH/2, 115, 8);
+      tft.setTextSize(1);
+    }
+    // SOG area: 195-360 (165px), center at 277
+    int sogInt = (int)(gps.speed_kts + 0.5);
+    if (sogInt != (int)(prevSOG + 0.5)) {
+      prevSOG = gps.speed_kts;
+      tft.fillRect(0, 215, SCREEN_WIDTH, 140, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(2);
+      snprintf(buf, sizeof(buf), "%d", sogInt);
+      tft.drawString(buf, SCREEN_WIDTH/2, 280, 8);
+      tft.setTextSize(1);
+    }
+  } else {
+    // MAXIMUM SIZE - no wind row, use full screen
+    // COG area: 30-235 (205px), center at 132
+    if (abs(gps.course - prevCOG) > 0.5) {
+      prevCOG = gps.course;
+      tft.fillRect(0, 50, SCREEN_WIDTH, 180, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(3);  // Even larger!
+      snprintf(buf, sizeof(buf), "%03d", (int)gps.course);
+      tft.drawString(buf, SCREEN_WIDTH/2, 130, 8);
+      tft.setTextSize(1);
+    }
+    // SOG area: 235-440 (205px), center at 337
+    int sogInt = (int)(gps.speed_kts + 0.5);
+    if (sogInt != (int)(prevSOG + 0.5)) {
+      prevSOG = gps.speed_kts;
+      tft.fillRect(0, 255, SCREEN_WIDTH, 180, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextSize(3);  // Even larger!
+      snprintf(buf, sizeof(buf), "%d", sogInt);
+      tft.drawString(buf, SCREEN_WIDTH/2, 340, 8);
+      tft.setTextSize(1);
+    }
   }
 
   // AWS | AWA row (Font 4 = 26px) - only if wind sensor enabled
+  // Wind row: 360-400 (40px), center at 380
   if (config.wind_enabled) {
     if (abs(aws - prevAWS2) > 0.3) {
       prevAWS2 = aws;
       tft.setTextColor(TFT_BLACK, COLOR_BG);
       tft.setTextDatum(MC_DATUM);
       snprintf(buf, sizeof(buf), "%.1f  ", aws);
-      tft.drawString(buf, SCREEN_WIDTH/4, 430, 4);
+      tft.drawString(buf, SCREEN_WIDTH/4, 380, 4);
     }
     if (abs(awa - prevAWA2) > 1) {
       prevAWA2 = awa;
       tft.setTextColor(TFT_BLACK, COLOR_BG);
       tft.setTextDatum(MC_DATUM);
       snprintf(buf, sizeof(buf), "%03d ", (int)awa);
-      tft.drawString(buf, 3*SCREEN_WIDTH/4, 430, 4);
+      tft.drawString(buf, 3*SCREEN_WIDTH/4, 380, 4);
     }
   }
 
@@ -2421,11 +2462,11 @@ void updateDisplayD2() {
 
     // BOTTOM BAR: Single formatted string - WHITE on BLACK
     // Clear entire bottom bar first
-    tft.fillRect(0, 445, SCREEN_WIDTH, 35, TFT_BLACK);
+    tft.fillRect(0, 440, SCREEN_WIDTH, 40, TFT_BLACK);
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
-    int y = 452;
+    int y = 450;
 
     // Line 1: H P BAT
     char line1[40];
