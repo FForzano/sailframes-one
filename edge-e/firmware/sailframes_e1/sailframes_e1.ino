@@ -1,5 +1,5 @@
 /*
- * SailFrames E1 — Fleet Tracker Firmware v2.4
+ * SailFrames E1 — Fleet Tracker Firmware
  *
  * Hardware:
  *   - ESP32 DevKit V1 (ELEGOO)
@@ -97,6 +97,9 @@
 // ============================================================
 // CONFIGURATION
 // ============================================================
+// Firmware version: YYYY.MM.DD.N (date + daily build number)
+#define FW_VERSION    "2026.04.29.1"
+
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
 #define SCREEN_WIDTH  320     // TFT portrait width
@@ -792,7 +795,7 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(500);
   Serial.println("\n=================================");
-  Serial.println("  SailFrames E1 v2.4 — PPK Logger");
+  Serial.printf("  SailFrames E1 %s — PPK Logger\n", FW_VERSION);
   Serial.println("  Hardware Power Switch Edition");
   Serial.println("=================================");
 
@@ -944,22 +947,25 @@ void setup() {
   oledOK = true;
   Serial.println("[TFT] ST7796U initialized (320x480 portrait)");
 
-  // Splash screen - show device ID in VERY LARGE text taking full screen
+  // Splash screen - show device ID and firmware version
   tft.fillScreen(COLOR_BG);
   tft.setTextColor(COLOR_TEXT, COLOR_BG);
   tft.setTextDatum(MC_DATUM);
 
   // Draw device ID in HUGE font (fill most of the screen)
-  // Using font 4 with 8x scale for letters+numbers (E1, E2, etc.)
   tft.setTextSize(8);
-  tft.drawString(config.boat_id, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 40, 4);
+  tft.drawString(config.boat_id, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 80, 4);
+
+  // Firmware version in large text
+  tft.setTextSize(2);
+  tft.setTextColor(COLOR_LABEL, COLOR_BG);
+  tft.drawString(FW_VERSION, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 60, 4);
 
   // Small "SAILFRAMES" label below
   tft.setTextSize(1);
-  tft.setTextColor(COLOR_LABEL, COLOR_BG);
-  tft.drawString("SAILFRAMES Fleet Tracker", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 120, 4);
+  tft.drawString("SAILFRAMES Fleet Tracker", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 140, 4);
 
-  delay(2500);  // Show device ID longer for visibility
+  delay(2500);  // Show splash screen
 
   // Reset text size for rest of display
   tft.setTextSize(1);
@@ -1860,7 +1866,7 @@ void handleTelnet() {
       if (telnetClient) telnetClient.stop();
       telnetClient = telnetServer.available();
       telnetClient.println("\n=================================");
-      telnetClient.println("  SailFrames E1 Telnet Console");
+      telnetClient.printf("  SailFrames E1 %s\n", FW_VERSION);
       telnetClient.printf("  Boat: %s\n", config.boat_id);
       telnetClient.println("  Type 'help' for commands");
       telnetClient.println("=================================\n");
