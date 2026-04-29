@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.04.29.7"
+#define FW_VERSION    "2026.04.29.8"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -956,15 +956,15 @@ void setup() {
   tft.setTextSize(8);
   tft.drawString(config.boat_id, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 60, 4);
 
-  // "Sailframes.com" - larger, black
+  // "Sailframes.com" - black, medium size
   tft.setTextColor(TFT_BLACK, COLOR_BG);
-  tft.setTextSize(2);
+  tft.setTextSize(1);
   tft.drawString("Sailframes.com", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 80, 4);
 
-  // Firmware version at bottom - smaller
+  // Firmware version at bottom - larger
   tft.setTextColor(COLOR_LABEL, COLOR_BG);
   tft.setTextSize(1);
-  tft.drawString(FW_VERSION, SCREEN_WIDTH/2, SCREEN_HEIGHT - 30, 2);
+  tft.drawString(FW_VERSION, SCREEN_WIDTH/2, SCREEN_HEIGHT - 25, 4);
 
   delay(2500);  // Show splash screen
 
