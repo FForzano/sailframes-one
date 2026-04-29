@@ -268,8 +268,8 @@ struct Config {
   char s3_region[32] = "us-east-1";
   char boat_id[16] = "E1";
   int gps_rate_hz = 10;
-  char wind_mac[20] = "C3:09:6D:1E:8A:FC";  // Calypso Mini MAC (can override in config.txt)
-  bool wind_enabled = true;
+  char wind_mac[20] = "";  // Calypso Mini MAC (loaded from /wind_mac.txt if present)
+  bool wind_enabled = false;  // Auto-enabled if /wind_mac.txt exists on SD
   int wind_offset = 0;  // Heading offset in degrees (added to raw AWA for sensor mounting correction)
   // Recording thresholds
   float start_speed_knots = 1.5;
@@ -478,17 +478,22 @@ void saveWindMAC(const char* mac) {
   }
 }
 
-// Load saved wind MAC from SD
+// Load wind MAC from SD - if /wind_mac.txt exists, enable wind sensor
 void loadWindMAC() {
   File f = SD.open("/wind_mac.txt", FILE_READ);
   if (f) {
     String mac = f.readStringUntil('\n');
     mac.trim();
-    if (mac.length() > 0) {
+    if (mac.length() >= 17) {  // Valid MAC is 17 chars (XX:XX:XX:XX:XX:XX)
       mac.toCharArray(config.wind_mac, sizeof(config.wind_mac));
-      Serial.printf("[WIND] Loaded saved MAC: %s\n", config.wind_mac);
+      config.wind_enabled = true;
+      Serial.printf("[WIND] Loaded MAC from SD: %s - wind ENABLED\n", config.wind_mac);
+    } else {
+      Serial.println("[WIND] /wind_mac.txt exists but invalid MAC format");
     }
     f.close();
+  } else {
+    Serial.println("[WIND] No /wind_mac.txt on SD - wind DISABLED");
   }
 }
 
@@ -680,8 +685,13 @@ bool connectToCalypso() {
 
 // Initialize BLE for wind sensor
 void initWindSensor() {
+  // Check for /wind_mac.txt on SD first - this enables wind if file exists
+  if (sdOK) {
+    loadWindMAC();
+  }
+
   if (!config.wind_enabled) {
-    Serial.println("[WIND] Disabled in config");
+    Serial.println("[WIND] No wind_mac.txt found - wind sensor disabled");
     return;
   }
 
@@ -690,12 +700,7 @@ void initWindSensor() {
   bleInitialized = true;
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);  // Max power for range
 
-  // Load saved MAC from SD
-  if (sdOK) {
-    loadWindMAC();
-  }
-
-  // Try to connect
+  // Try to connect using MAC from wind_mac.txt
   connectToCalypso();
 }
 
@@ -2280,8 +2285,10 @@ void updateDisplayD2() {
     tft.setTextDatum(TL_DATUM);
     tft.drawString("COG", 5, 35, 2);
     tft.drawString("SOG", 5, 225, 2);
-    tft.drawString("AWS", 5, 415, 2);
-    tft.drawString("AWA", SCREEN_WIDTH/2 + 5, 415, 2);
+    if (config.wind_enabled) {
+      tft.drawString("AWS", 5, 415, 2);
+      tft.drawString("AWA", SCREEN_WIDTH/2 + 5, 415, 2);
+    }
 
     // Reset prev values
     prevSOG = prevCOG = prevHeel = prevPitch = -999;
@@ -2368,20 +2375,22 @@ void updateDisplayD2() {
     tft.setTextSize(1);
   }
 
-  // AWS | AWA row (Font 4 = 26px)
-  if (abs(aws - prevAWS2) > 0.3) {
-    prevAWS2 = aws;
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    snprintf(buf, sizeof(buf), "%.1f  ", aws);
-    tft.drawString(buf, SCREEN_WIDTH/4, 430, 4);
-  }
-  if (abs(awa - prevAWA2) > 1) {
-    prevAWA2 = awa;
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    snprintf(buf, sizeof(buf), "%03d ", (int)awa);
-    tft.drawString(buf, 3*SCREEN_WIDTH/4, 430, 4);
+  // AWS | AWA row (Font 4 = 26px) - only if wind sensor enabled
+  if (config.wind_enabled) {
+    if (abs(aws - prevAWS2) > 0.3) {
+      prevAWS2 = aws;
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      snprintf(buf, sizeof(buf), "%.1f  ", aws);
+      tft.drawString(buf, SCREEN_WIDTH/4, 430, 4);
+    }
+    if (abs(awa - prevAWA2) > 1) {
+      prevAWA2 = awa;
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      snprintf(buf, sizeof(buf), "%03d ", (int)awa);
+      tft.drawString(buf, 3*SCREEN_WIDTH/4, 430, 4);
+    }
   }
 
   // Bottom status bar - NO fillRect, just overwrite text
@@ -2421,7 +2430,7 @@ void updateDisplayD2() {
     // Line 1 right side: WiFi + upload status
     char right[20];
 #if ENABLE_WIND
-    const char* windInd = wind.connected ? "W " : "";
+    const char* windInd = (config.wind_enabled && wind.connected) ? "W " : "";
 #else
     const char* windInd = "";
 #endif
@@ -2514,13 +2523,17 @@ void updateDisplayD3() {
     uint16_t labelColor = tft.color565(100, 100, 100);
     tft.setTextColor(labelColor, COLOR_BG);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString("AWS", 5, R1 + 2, 2);
-    tft.drawString("AWA", HALF + 5, R1 + 2, 2);
-    tft.drawString("TWS", 5, R2 + 2, 2);
-    tft.drawString("TWA", HALF + 5, R2 + 2, 2);
+    if (config.wind_enabled) {
+      tft.drawString("AWS", 5, R1 + 2, 2);
+      tft.drawString("AWA", HALF + 5, R1 + 2, 2);
+      tft.drawString("TWS", 5, R2 + 2, 2);
+      tft.drawString("TWA", HALF + 5, R2 + 2, 2);
+    }
     tft.drawString("SOG", 5, R3 + 2, 2);
     tft.drawString("COG", HALF + 5, R3 + 2, 2);
-    tft.drawString("TWD", 5, R4 + 2, 2);
+    if (config.wind_enabled) {
+      tft.drawString("TWD", 5, R4 + 2, 2);
+    }
 
     prevD3AWS = prevD3AWA = prevD3TWS = prevD3TWA = -999;
     prevD3TWD = prevD3SOG = prevD3COG = -999;
@@ -2574,44 +2587,47 @@ void updateDisplayD3() {
   // Helper: value y-center for each row = row_top + 58 (label 16px + gap + 75px/2)
   // Clear area: row_top + 20 to row_top + 100 (80px tall, fits 75px font)
 
-  // AWS (row 1 left)
-  if (abs(aws - prevD3AWS) > 0.2) {
-    prevD3AWS = aws;
-    tft.fillRect(0, R1 + 20, HALF - 2, 80, COLOR_BG);
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    snprintf(buf, sizeof(buf), "%.1f", aws);
-    tft.drawString(buf, HALF / 2, R1 + 58, 8);
-  }
+  // Wind values only if wind sensor enabled
+  if (config.wind_enabled) {
+    // AWS (row 1 left)
+    if (abs(aws - prevD3AWS) > 0.2) {
+      prevD3AWS = aws;
+      tft.fillRect(0, R1 + 20, HALF - 2, 80, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      snprintf(buf, sizeof(buf), "%.1f", aws);
+      tft.drawString(buf, HALF / 2, R1 + 58, 8);
+    }
 
-  // AWA (row 1 right)
-  if (abs(awa - prevD3AWA) > 1) {
-    prevD3AWA = awa;
-    tft.fillRect(HALF + 2, R1 + 20, HALF - 2, 80, COLOR_BG);
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    snprintf(buf, sizeof(buf), "%03d", (int)awa);
-    tft.drawString(buf, HALF + HALF / 2, R1 + 58, 8);
-  }
+    // AWA (row 1 right)
+    if (abs(awa - prevD3AWA) > 1) {
+      prevD3AWA = awa;
+      tft.fillRect(HALF + 2, R1 + 20, HALF - 2, 80, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      snprintf(buf, sizeof(buf), "%03d", (int)awa);
+      tft.drawString(buf, HALF + HALF / 2, R1 + 58, 8);
+    }
 
-  // TWS (row 2 left)
-  if (abs(tws - prevD3TWS) > 0.2) {
-    prevD3TWS = tws;
-    tft.fillRect(0, R2 + 20, HALF - 2, 80, COLOR_BG);
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    snprintf(buf, sizeof(buf), "%.1f", tws);
-    tft.drawString(buf, HALF / 2, R2 + 58, 8);
-  }
+    // TWS (row 2 left)
+    if (abs(tws - prevD3TWS) > 0.2) {
+      prevD3TWS = tws;
+      tft.fillRect(0, R2 + 20, HALF - 2, 80, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      snprintf(buf, sizeof(buf), "%.1f", tws);
+      tft.drawString(buf, HALF / 2, R2 + 58, 8);
+    }
 
-  // TWA (row 2 right)
-  if (abs(twa - prevD3TWA) > 1) {
-    prevD3TWA = twa;
-    tft.fillRect(HALF + 2, R2 + 20, HALF - 2, 80, COLOR_BG);
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    snprintf(buf, sizeof(buf), "%03d", (int)twa);
-    tft.drawString(buf, HALF + HALF / 2, R2 + 58, 8);
+    // TWA (row 2 right)
+    if (abs(twa - prevD3TWA) > 1) {
+      prevD3TWA = twa;
+      tft.fillRect(HALF + 2, R2 + 20, HALF - 2, 80, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      snprintf(buf, sizeof(buf), "%03d", (int)twa);
+      tft.drawString(buf, HALF + HALF / 2, R2 + 58, 8);
+    }
   }
 
   // SOG (row 3 left)
@@ -2634,14 +2650,16 @@ void updateDisplayD3() {
     tft.drawString(buf, HALF + HALF / 2, R3 + 58, 8);
   }
 
-  // TWD (row 4 full width)
-  if (abs(twd - prevD3TWD) > 1) {
-    prevD3TWD = twd;
-    tft.fillRect(0, R4 + 20, SCREEN_WIDTH, 80, COLOR_BG);
-    tft.setTextColor(TFT_BLACK, COLOR_BG);
-    tft.setTextDatum(MC_DATUM);
-    snprintf(buf, sizeof(buf), "%03d", (int)twd);
-    tft.drawString(buf, SCREEN_WIDTH / 2, R4 + 58, 8);
+  // TWD (row 4 full width) - only if wind enabled
+  if (config.wind_enabled) {
+    if (abs(twd - prevD3TWD) > 1) {
+      prevD3TWD = twd;
+      tft.fillRect(0, R4 + 20, SCREEN_WIDTH, 80, COLOR_BG);
+      tft.setTextColor(TFT_BLACK, COLOR_BG);
+      tft.setTextDatum(MC_DATUM);
+      snprintf(buf, sizeof(buf), "%03d", (int)twd);
+      tft.drawString(buf, SCREEN_WIDTH / 2, R4 + 58, 8);
+    }
   }
 
   // Bottom bar: Heel + WiFi/upload status
