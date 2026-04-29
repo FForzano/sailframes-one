@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.04.29.3"
+#define FW_VERSION    "2026.04.29.4"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -2954,13 +2954,14 @@ String extractDateFromPath(const char* filepath) {
 bool uploadFile(const char* filepath) {
   uploadCount++;
 
-  // Extract short filename for display
+  // Extract short filename for display (main loop will update display)
   const char* lastSlash = strrchr(filepath, '/');
   const char* shortName = lastSlash ? lastSlash + 1 : filepath;
   strncpy(uploadCurrentFile, shortName, sizeof(uploadCurrentFile) - 1);
   uploadCurrentFile[sizeof(uploadCurrentFile) - 1] = '\0';
 
-  updateDisplay();
+  // Don't call updateDisplay() here - it runs on Core 1, we're on Core 0
+  // The main loop will pick up uploadCount/uploadCurrentFile changes
 
   // Feed watchdog before file operations
   yield();
@@ -3067,7 +3068,7 @@ bool uploadFile(const char* filepath) {
   if (httpCode == 200 || httpCode == 201 || httpCode == 204) {
     Serial.printf("[UPLOAD] Success: %s (HTTP %d, %lus)\n", filepath, httpCode, elapsed);
     uploadSuccess++;
-    updateDisplay();
+    // Don't call updateDisplay() - runs on Core 1, main loop handles it
     return true;
   } else {
     const char* errMsg = "";
@@ -3084,7 +3085,7 @@ bool uploadFile(const char* filepath) {
       Serial.printf("[UPLOAD] Response: %s\n", response.c_str());
     }
     uploadFailed++;
-    updateDisplay();
+    // Don't call updateDisplay() - runs on Core 1, main loop handles it
     return false;
   }
 }
@@ -3212,16 +3213,14 @@ void uploadDirectory(const char* dirname) {
         }
 
         // Longer pause between uploads to prevent crashes
-        // Also service OTA and telnet during this time
-        for (int i = 0; i < 10; i++) {
-          yield();
-          delay(50);
-          ArduinoOTA.handle();
-          handleTelnet();
-        }
+        // Use vTaskDelay to properly yield to other tasks on this core
+        vTaskDelay(pdMS_TO_TICKS(200));
 
-        // Update display
-        updateDisplay();
+        // Service OTA and telnet
+        ArduinoOTA.handle();
+        handleTelnet();
+
+        // Don't call updateDisplay() - it runs on Core 1, main loop handles it
       }
     }
 
@@ -4168,14 +4167,22 @@ const char* getRecStateStr() {
 // COUNT PENDING UPLOADS
 // ============================================================
 void countPendingUploads() {
-  if (!sdOK) {
-    pendingUploads = 0;
+  // IMPORTANT: Skip counting while logging to avoid SD card conflicts
+  // The logging task on Core 1 owns the SD card during recording
+  if (!sdOK || logging) {
+    // Don't change pendingUploads - keep last known value
     return;
+  }
+
+  // Try to get mutex, but don't block - skip if busy
+  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    return;  // SD busy, try again later
   }
 
   int count = 0;
   File root = SD.open("/sf");
   if (!root) {
+    xSemaphoreGive(sdMutex);
     pendingUploads = 0;
     return;
   }
@@ -4183,6 +4190,7 @@ void countPendingUploads() {
   // Count session folders that have at least one file without .uploaded marker
   File session = root.openNextFile();
   while (session) {
+    yield();  // Prevent watchdog timeout
     if (session.isDirectory()) {
       String sessName = session.name();
       // Skip if session name starts with "." (hidden)
@@ -4210,6 +4218,7 @@ void countPendingUploads() {
     session = root.openNextFile();
   }
   root.close();
+  xSemaphoreGive(sdMutex);
   pendingUploads = count;
 }
 
