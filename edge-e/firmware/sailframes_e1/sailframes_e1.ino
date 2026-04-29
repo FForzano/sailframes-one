@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.04.29.6"
+#define FW_VERSION    "2026.04.29.7"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -947,23 +947,24 @@ void setup() {
   oledOK = true;
   Serial.println("[TFT] ST7796U initialized (320x480 portrait)");
 
-  // Splash screen - show device ID and firmware version
+  // Splash screen - show device ID, domain, and firmware version
   tft.fillScreen(COLOR_BG);
-  tft.setTextColor(COLOR_TEXT, COLOR_BG);
   tft.setTextDatum(MC_DATUM);
 
   // Draw device ID in HUGE font (fill most of the screen)
+  tft.setTextColor(COLOR_TEXT, COLOR_BG);
   tft.setTextSize(8);
-  tft.drawString(config.boat_id, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 80, 4);
+  tft.drawString(config.boat_id, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 60, 4);
 
-  // Firmware version in large text
+  // "Sailframes.com" - larger, black
+  tft.setTextColor(TFT_BLACK, COLOR_BG);
   tft.setTextSize(2);
-  tft.setTextColor(COLOR_LABEL, COLOR_BG);
-  tft.drawString(FW_VERSION, SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 60, 4);
+  tft.drawString("Sailframes.com", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 80, 4);
 
-  // Small "SAILFRAMES" label below
+  // Firmware version at bottom - smaller
+  tft.setTextColor(COLOR_LABEL, COLOR_BG);
   tft.setTextSize(1);
-  tft.drawString("SAILFRAMES Fleet Tracker", SCREEN_WIDTH/2, SCREEN_HEIGHT/2 + 140, 4);
+  tft.drawString(FW_VERSION, SCREEN_WIDTH/2, SCREEN_HEIGHT - 30, 2);
 
   delay(2500);  // Show splash screen
 
