@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.04.30.1"
+#define FW_VERSION    "2026.04.30.2"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -396,7 +396,7 @@ const unsigned long UPLOAD_CHECK_INTERVAL_MS = 30000;  // Check every 30 seconds
 int uploadRetryCount = 0;
 const int MAX_UPLOAD_RETRIES = 5;  // More attempts before 25-min backoff
 unsigned long lastUploadAttempt = 0;
-const unsigned long UPLOAD_RETRY_DELAY_MS = 300000;  // Wait 5 minutes between retries after failure
+const unsigned long UPLOAD_RETRY_DELAY_MS = 30000;  // Wait 30 seconds between retries after failure
 
 // ============================================================
 // WIND SENSOR (CALYPSO BLE)
