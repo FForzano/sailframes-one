@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.04.29.8"
+#define FW_VERSION    "2026.04.30.1"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -4249,7 +4249,14 @@ void uploadTaskFunc(void* param) {
     if (triggerUpload && !logging) {
       // Recording just stopped - attempt upload (but respect recent WiFi failures)
       triggerUpload = false;
-      if (uploadRetryCount >= MAX_UPLOAD_RETRIES && now - lastUploadAttempt < UPLOAD_RETRY_DELAY_MS) {
+
+      // Force recount now that logging stopped (count was skipped during recording)
+      countPendingUploads();
+      Serial.printf("[UPLOAD] Recording stopped, %d sessions pending\n", pendingUploads);
+
+      if (pendingUploads == 0) {
+        Serial.println("[UPLOAD] Nothing to upload");
+      } else if (uploadRetryCount >= MAX_UPLOAD_RETRIES && now - lastUploadAttempt < UPLOAD_RETRY_DELAY_MS) {
         Serial.println("[UPLOAD] Recording stopped but WiFi backing off — will retry later");
       } else {
         shouldUpload = true;
