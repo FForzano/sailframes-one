@@ -240,7 +240,7 @@ Future Expansion:
   - Adafruit BNO08x 1.2.6
   - Adafruit DPS310 1.1.3
 - **Arduino IDE:** ESP32 board package 3.3.7 — avoid 3.3.8 (causes I2C/GPIO issues)
-- **Partition scheme:** huge_app (3MB app, no OTA) — required for code size
+- **Partition scheme:** Minimal SPIFFS (1.9MB APP with OTA, 128KB SPIFFS) — leaves room for OTA partition
 
 **TFT Display Layout (Vakaros-style, white background):**
 - Main area: Large speed (kt) and COG (°) in black
@@ -1035,9 +1035,10 @@ contract or data schema, update this file so other sessions pick it up.
     SPI buses — TFT on VSPI (GPIO18/19/23), SD on HSPI (GPIO14/35/13). This completely
     eliminates flicker.
 
-22. **ESP32 partition scheme for large firmware** — E1 firmware with TFT_eSPI + NimBLE
-    exceeds default 1.3MB partition. Use `huge_app` partition scheme (3MB app, no OTA)
-    in Arduino IDE: Tools → Partition Scheme → Huge APP.
+22. **ESP32 partition scheme for E1 firmware** — Use `Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)`
+    in Arduino IDE: Tools → Partition Scheme → Minimal SPIFFS. This keeps OTA partitions
+    available (required for over-the-air firmware updates) while fitting the firmware.
+    Do NOT use `huge_app` — it disables OTA.
 
 23. **ESP32 Arduino Core 3.3.8 breaks I2C and TFT** — Do not update to ESP32 board package
     3.3.8. Causes I2C bus failures (devices not detected) and TFT display issues. Stick

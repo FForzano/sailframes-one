@@ -1,0 +1,120 @@
+name: E1 Firmware Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'edge-e/firmware/sailframes_e1/**'
+      - '.github/workflows/firmware-e1.yml'
+  pull_request:
+    paths:
+      - 'edge-e/firmware/sailframes_e1/**'
+      - '.github/workflows/firmware-e1.yml'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Compile sailframes_e1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="$HOME/bin" sh
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Configure arduino-cli
+        run: |
+          arduino-cli config init
+          arduino-cli config set board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+
+      - name: Install ESP32 core 3.3.7 (pinned — 3.3.8 breaks I2C/TFT)
+        run: arduino-cli core install esp32:esp32@3.3.7
+
+      - name: Install libraries (versions pinned per CLAUDE.md)
+        run: |
+          arduino-cli lib install "NimBLE-Arduino@2.4.0"
+          arduino-cli lib install "Adafruit BusIO@1.17.4"
+          arduino-cli lib install "Adafruit GFX Library@1.12.6"
+          arduino-cli lib install "Adafruit BNO08x@1.2.6"
+          arduino-cli lib install "Adafruit DPS310@1.1.3"
+          arduino-cli lib install "TFT_eSPI"
+
+      - name: Install TFT_eSPI User_Setup.h
+        run: |
+          TFT_LIB="$HOME/Arduino/libraries/TFT_eSPI"
+          if [ ! -d "$TFT_LIB" ]; then
+            echo "TFT_eSPI library not found at $TFT_LIB"
+            ls -la "$HOME/Arduino/libraries/"
+            exit 1
+          fi
+          cp edge-e/firmware/sailframes_e1/User_Setup.h "$TFT_LIB/User_Setup.h"
+          echo "Installed User_Setup.h into $TFT_LIB"
+
+      - name: Extract firmware version
+        id: version
+        run: |
+          VERSION=$(grep '#define FW_VERSION' edge-e/firmware/sailframes_e1/sailframes_e1.ino | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "Failed to extract FW_VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Firmware version: $VERSION"
+
+      - name: Compile firmware (min_spiffs partition for OTA)
+        run: |
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn 'esp32:esp32:esp32:PartitionScheme=min_spiffs,FlashSize=4M,FlashFreq=80,FlashMode=qio,CPUFreq=240,UploadSpeed=921600' \
+            --output-dir build \
+            --warnings none \
+            edge-e/firmware/sailframes_e1
+
+      - name: Report binary size
+        run: |
+          SIZE=$(stat -c%s build/sailframes_e1.ino.bin)
+          MAX=1966080  # 1.9MB OTA partition limit
+          PCT=$(awk "BEGIN { printf \"%.1f\", ($SIZE / $MAX) * 100 }")
+          echo "Binary size: $SIZE bytes (${PCT}% of 1.9MB OTA partition)"
+          if [ "$SIZE" -gt "$MAX" ]; then
+            echo "::error::Binary exceeds min_spiffs OTA partition (1.9MB)"
+            exit 1
+          fi
+
+      - name: Rename and hash artifacts
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          cp build/sailframes_e1.ino.bin "build/sailframes_e1_${V}.bin"
+          cp build/sailframes_e1.ino.partitions.bin "build/sailframes_e1_${V}.partitions.bin" 2>/dev/null || true
+          cp build/sailframes_e1.ino.bootloader.bin "build/sailframes_e1_${V}.bootloader.bin" 2>/dev/null || true
+          cd build
+          sha256sum "sailframes_e1_${V}.bin" > "sailframes_e1_${V}.bin.sha256"
+          ls -la
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: e1-firmware-${{ steps.version.outputs.version }}-${{ github.sha }}
+          path: |
+            build/sailframes_e1_${{ steps.version.outputs.version }}.bin
+            build/sailframes_e1_${{ steps.version.outputs.version }}.bin.sha256
+            build/sailframes_e1_${{ steps.version.outputs.version }}.partitions.bin
+            build/sailframes_e1_${{ steps.version.outputs.version }}.bootloader.bin
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/sailframes_e1_${{ steps.version.outputs.version }}.bin
+            build/sailframes_e1_${{ steps.version.outputs.version }}.bin.sha256
+            build/sailframes_e1_${{ steps.version.outputs.version }}.partitions.bin
+            build/sailframes_e1_${{ steps.version.outputs.version }}.bootloader.bin
