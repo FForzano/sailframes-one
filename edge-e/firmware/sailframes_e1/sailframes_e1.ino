@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.01.3"
+#define FW_VERSION    "2026.05.01.4"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -4291,8 +4291,9 @@ void uploadTaskFunc(void* param) {
       else if (pendingUploads == 0) {
         // Nothing to upload — don't connect WiFi
       }
-      // Only upload when stationary (speed < 0.5 kt)
-      else if (gps.speed_kts >= 0.5) {
+      // Only upload when stationary (speed < 0.5 kt) or no GPS fix
+      // If no GPS fix, assume stationary (allow upload)
+      else if (gps.valid && gps.speed_kts >= 0.5) {
         stationaryStart = 0;  // reset — boat is moving
       }
       else {
