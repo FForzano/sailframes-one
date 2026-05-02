@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.02.03"
+#define FW_VERSION    "2026.05.02.04"
 
 // SSID where large RTCM3 PPK files are allowed to upload. On any other
 // network (e.g. iPhone hotspot) RTCM3 files are skipped — they're too big
@@ -4471,11 +4471,19 @@ void loop() {
   //     we own the handlers. Gated on !uploading && !triggerUpload to avoid
   //     racing a new upload cycle that just kicked off.
   // ----------------------------------------------------------
+  // Helper: disconnect from AP without powering down the radio.
+  // WiFi.disconnect(true) (wifioff=true) reconfigures the radio, which
+  // races with the BLE wind-sensor scanner on the shared ESP32 radio
+  // (CLAUDE.md known issues #11/#12) and panicked Core 1 in firmware
+  // 2026.05.02.03. WiFi.disconnect(false, false) just leaves the AP —
+  // the iPhone hotspot slot is freed, which was the goal — while the
+  // radio stays in STA mode so BLE coexistence is undisturbed.
   if (wifiConnected && WiFi.status() != WL_CONNECTED) {
     Serial.printf("[WIFI] Lost connection (status=%d) — clearing stale flag\n", WiFi.status());
+    Serial.flush();
     if (telnetClient && telnetClient.connected()) telnetClient.stop();
     telnetServer.end();
-    WiFi.disconnect(true);
+    WiFi.disconnect(false, false);
     connectedSSID[0] = '\0';
     wifiConnected = false;
     wifiTeardownRequested = false;  // Already torn down
@@ -4483,12 +4491,15 @@ void loop() {
 
   if (wifiTeardownRequested && !uploading && !triggerUpload && wifiConnected) {
     Serial.println("[WIFI] Honoring teardown request (Core 1)");
+    Serial.flush();
     if (telnetClient && telnetClient.connected()) telnetClient.stop();
     telnetServer.end();
-    WiFi.disconnect(true);
+    WiFi.disconnect(false, false);
     connectedSSID[0] = '\0';
     wifiConnected = false;
     wifiTeardownRequested = false;
+    Serial.println("[WIFI] Teardown complete");
+    Serial.flush();
   }
 
   // Handle OTA updates (highest priority)
