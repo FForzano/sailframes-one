@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.02.01"
+#define FW_VERSION    "2026.05.02.02"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -388,6 +388,10 @@ unsigned long stopDelayMs = 180000;  // 3 minutes sustained before stop
 
 // Dual-core upload
 volatile bool triggerUpload = false;
+// Set by Core 0 (upload task) when uploads are done and WiFi should be released.
+// Honored by Core 1 (main loop), which owns the OTA/telnet handlers and is the
+// only safe place to tear down the WiFi stack.
+volatile bool wifiTeardownRequested = false;
 SemaphoreHandle_t sdMutex = NULL;
 TaskHandle_t uploadTaskHandle = NULL;
 
@@ -4391,11 +4395,17 @@ void uploadTaskFunc(void* param) {
           pendingUploads = (remaining > 0) ? remaining : 0;
 
           if (remaining <= 0) {
-            // All done — leave WiFi connected. Tearing down the WiFi stack
-            // while Core 1 may be mid-call in ArduinoOTA.handle()/handleTelnet()
-            // is unsafe and was a contributing cause of the 2026.05.01.4
-            // post-upload crashes. Idle WiFi power cost is negligible.
-            Serial.println("[UPLOAD] All files uploaded — leaving WiFi up");
+            // All done — request WiFi teardown. We do NOT tear down here on
+            // Core 0: ArduinoOTA.handle()/handleTelnet() run on Core 1 in the
+            // main loop; tearing down WiFi from Core 0 races against them
+            // (caused the 2026.05.01.4 post-upload crashes). The main loop
+            // sees this flag, gates on !uploading && !triggerUpload, and
+            // performs the teardown safely on Core 1.
+            // Releasing WiFi is also required so the iPhone hotspot frees
+            // a client slot for any boat that hasn't uploaded yet (only ~5
+            // simultaneous clients allowed).
+            Serial.println("[UPLOAD] All files uploaded — requesting WiFi teardown on Core 1");
+            wifiTeardownRequested = true;
           } else {
             Serial.printf("[UPLOAD] %d files remaining — will retry\n", remaining);
           }
@@ -4423,6 +4433,39 @@ void uploadTaskFunc(void* param) {
 // ============================================================
 void loop() {
   unsigned long now = millis();
+
+  // ----------------------------------------------------------
+  // WiFi state management — MUST run before any handler call.
+  //
+  // (1) Sync wifiConnected with reality. WiFi.setAutoReconnect(false) means
+  //     if the iPhone hotspot kicks an idle device, WiFi.status() flips to
+  //     WL_DISCONNECTED but our flag stays stale. Calling ArduinoOTA.handle()
+  //     or handleTelnet() against a dead stack panics the device.
+  //
+  // (2) Honor teardown requests from the upload task. Core 0 sets the flag
+  //     after a successful upload cycle; we tear down here on Core 1 because
+  //     we own the handlers. Gated on !uploading && !triggerUpload to avoid
+  //     racing a new upload cycle that just kicked off.
+  // ----------------------------------------------------------
+  if (wifiConnected && WiFi.status() != WL_CONNECTED) {
+    Serial.printf("[WIFI] Lost connection (status=%d) — clearing stale flag\n", WiFi.status());
+    if (telnetClient && telnetClient.connected()) telnetClient.stop();
+    telnetServer.end();
+    WiFi.disconnect(true);
+    connectedSSID[0] = '\0';
+    wifiConnected = false;
+    wifiTeardownRequested = false;  // Already torn down
+  }
+
+  if (wifiTeardownRequested && !uploading && !triggerUpload && wifiConnected) {
+    Serial.println("[WIFI] Honoring teardown request (Core 1)");
+    if (telnetClient && telnetClient.connected()) telnetClient.stop();
+    telnetServer.end();
+    WiFi.disconnect(true);
+    connectedSSID[0] = '\0';
+    wifiConnected = false;
+    wifiTeardownRequested = false;
+  }
 
   // Handle OTA updates (highest priority)
   if (wifiConnected) {
