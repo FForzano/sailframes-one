@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.01.4"
+#define FW_VERSION    "2026.05.02.01"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -3228,11 +3228,10 @@ void uploadDirectory(const char* dirname) {
         // Use vTaskDelay to properly yield to other tasks on this core
         vTaskDelay(pdMS_TO_TICKS(200));
 
-        // Service OTA and telnet
-        ArduinoOTA.handle();
-        handleTelnet();
-
-        // Don't call updateDisplay() - it runs on Core 1, main loop handles it
+        // Do NOT call ArduinoOTA.handle()/handleTelnet() here — those run on
+        // Core 1 in the main loop. WiFi stack and telnet globals are not
+        // thread-safe; calling from Core 0 corrupts heap and crashes after
+        // upload finishes (see firmware 2026.05.01.4 fleet crashes).
       }
     }
 
@@ -4378,30 +4377,27 @@ void uploadTaskFunc(void* param) {
           uploadRetryCount = 0;  // Reset on successful cycle
           Serial.println("[UPLOAD] Cycle complete");
 
-          // After upload cycle, recount pending to get accurate number
-          pendingUploads = 0;  // Assume 0 until next countPendingUploads() confirms
-          int remaining = countFilesToUpload("/sf");
+          // After upload cycle, recount pending to get accurate number.
+          // MUST hold sdMutex — countFilesToUpload walks the SD tree and races
+          // with Core 1's logging/recording start otherwise.
+          int remaining = -1;
+          if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(2000))) {
+            remaining = countFilesToUpload("/sf");
+            xSemaphoreGive(sdMutex);
+          } else {
+            Serial.println("[UPLOAD] Could not lock SD for recount — assuming 0");
+            remaining = 0;
+          }
+          pendingUploads = (remaining > 0) ? remaining : 0;
 
-          if (remaining == 0) {
-            // All done — disconnect WiFi and stop cycling
-            Serial.println("[UPLOAD] All files uploaded — disconnecting WiFi");
-
-            // CRITICAL: Set flag BEFORE disconnect to prevent race condition
-            // Core 1 main loop checks this flag before calling OTA/telnet handlers
-            wifiConnected = false;
-            vTaskDelay(pdMS_TO_TICKS(100));  // Let Core 1 exit any WiFi calls
-
-            // Stop telnet services before WiFi teardown
-            if (telnetClient && telnetClient.connected()) {
-              telnetClient.stop();
-            }
-            telnetServer.end();
-
-            WiFi.disconnect(true);
-            connectedSSID[0] = '\0';
+          if (remaining <= 0) {
+            // All done — leave WiFi connected. Tearing down the WiFi stack
+            // while Core 1 may be mid-call in ArduinoOTA.handle()/handleTelnet()
+            // is unsafe and was a contributing cause of the 2026.05.01.4
+            // post-upload crashes. Idle WiFi power cost is negligible.
+            Serial.println("[UPLOAD] All files uploaded — leaving WiFi up");
           } else {
             Serial.printf("[UPLOAD] %d files remaining — will retry\n", remaining);
-            pendingUploads = remaining;
           }
         }
       } else {
