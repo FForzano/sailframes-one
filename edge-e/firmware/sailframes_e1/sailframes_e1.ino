@@ -98,7 +98,12 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.02.02"
+#define FW_VERSION    "2026.05.02.03"
+
+// SSID where large RTCM3 PPK files are allowed to upload. On any other
+// network (e.g. iPhone hotspot) RTCM3 files are skipped — they're too big
+// to push over a mobile connection and don't need to be uploaded mid-event.
+#define HOME_WIFI_SSID "Home-IOT"
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
@@ -3093,7 +3098,18 @@ bool uploadFile(const char* filepath) {
   }
 }
 
-// Count files to upload in directory
+// Returns true if this filename should NOT be uploaded on the current
+// connected SSID. RTCM3 PPK files are large and only uploaded on the
+// home network — on hotspots they're deferred until back at base.
+static bool isSkippedForCurrentNetwork(const String& filename) {
+  if (!filename.endsWith(".rtcm3")) return false;
+  return strcmp(connectedSSID, HOME_WIFI_SSID) != 0;
+}
+
+// Count files we will actually try to upload on the current SSID.
+// Files that would be skipped (e.g. RTCM3 on hotspot) are NOT counted —
+// otherwise the post-upload "remaining" check sees them, never reaches 0,
+// and we never request WiFi teardown.
 int countFilesToUpload(const char* dirname) {
   int count = 0;
   File root = SD.open(dirname);
@@ -3108,7 +3124,9 @@ int countFilesToUpload(const char* dirname) {
       count += countFilesToUpload(filepath);
     } else {
       String name = String(file.name());
-      if (!name.endsWith(".uploaded") && !isUploaded(filepath)) {
+      if (!name.endsWith(".uploaded") &&
+          !isUploaded(filepath) &&
+          !isSkippedForCurrentNetwork(name)) {
         count++;
       }
     }
@@ -3207,10 +3225,12 @@ void uploadDirectory(const char* dirname) {
       file.close();  // Close file handle before upload
 
       if (!name.endsWith(".uploaded") && !isUploaded(filepath)) {
-        // Skip RTCM3 files unless on Home-IOT WiFi (too large for mobile upload)
-        if (name.endsWith(".rtcm3") && strcmp(connectedSSID, "Home-IOT") != 0) {
-          Serial.printf("[UPLOAD] Skipping RTCM3 on %s (Home-IOT only): %s\n", connectedSSID, name.c_str());
-          // Don't mark as uploaded - will upload when on Home-IOT
+        // Defer RTCM3 PPK files until back on home WiFi — too large for
+        // mobile hotspots and not needed for in-event analytics.
+        if (isSkippedForCurrentNetwork(name)) {
+          Serial.printf("[UPLOAD] Skipping RTCM3 on %s (%s only): %s\n",
+                        connectedSSID, HOME_WIFI_SSID, name.c_str());
+          // Don't mark as uploaded — will upload when on home WiFi.
         } else {
           // Check if boat started moving - abort upload to allow recording to start
           if (gps.speed_kts >= config.start_speed_knots || recState == REC_ARMED) {
@@ -4217,13 +4237,17 @@ void countPendingUploads() {
       String sessName = session.name();
       // Skip if session name starts with "." (hidden)
       if (!sessName.startsWith(".")) {
+        // Display count is "sessions with non-RTCM3 unuploaded files".
+        // RTCM3 PPK files are uploaded later at home and shouldn't keep
+        // a session listed as pending after a sail.
         bool hasUnuploaded = false;
         File f = session.openNextFile();
         while (f) {
           if (!hasUnuploaded) {
             String fname = f.name();
-            if (!fname.endsWith(".uploaded") && !fname.startsWith(".")) {
-              // Check if .uploaded marker exists
+            if (!fname.endsWith(".uploaded") &&
+                !fname.startsWith(".") &&
+                !fname.endsWith(".rtcm3")) {
               String markerPath = String("/sf/") + sessName + "/" + fname + ".uploaded";
               if (!SD.exists(markerPath.c_str())) {
                 hasUnuploaded = true;
