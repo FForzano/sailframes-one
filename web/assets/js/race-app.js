@@ -276,10 +276,18 @@ function updateBoatPositions(timeSeconds) {
             const course = closest.course || 0;
             layer.marker.setIcon(createBoatIcon(layer.color, course));
 
+            // Cache current playback-time point so the leaderboard reads
+            // the same value the map shows (was reading the final GPS
+            // point in the whole dataset, hence "0.0 kn" for everyone).
+            layer.current = closest;
+
             // Update legend with current speed
             updateLegendSpeed(deviceId, closest.speed_kn || 0);
         }
     }
+
+    // Refresh leaderboard at playback time, not at race-load time
+    renderLeaderboard();
 }
 
 function fitMapToBounds() {
@@ -413,9 +421,11 @@ function calculatePositions() {
         const layer = boatLayers[deviceId];
         const boat = boatData.boat;
 
-        // Get current speed from most recent position
+        // Use the playback-time point cached by updateBoatPositions().
+        // Falls back to the last point if playback hasn't set it yet
+        // (e.g. before the first tick after race load).
         const gps = boatData.sensors.gps;
-        const lastPoint = gps[gps.length - 1];
+        const point = layer?.current || gps[gps.length - 1];
 
         // Display team name if available, else boat name, else device ID
         const displayName = boat?.team_name || boat?.boat_name || deviceId;
@@ -425,7 +435,8 @@ function calculatePositions() {
             deviceId,
             displayName,
             subtitle,
-            speed: lastPoint?.speed_kn || 0,
+            speed: point?.speed_kn || 0,
+            heading: point?.course || 0,
             delta: '',  // TODO: calculate time delta
         });
     }
