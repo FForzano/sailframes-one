@@ -42,6 +42,9 @@ let currentTime = 0;  // seconds from race start
 let raceDuration = 0;
 let playbackInterval = null;
 let speedChart = null;
+let heelChart = null;
+let windChart = null;
+let playCursorSeconds = 0;
 let availableSessions = {};  // device_id -> [session paths]
 let pendingGpxFiles = {};   // device_id -> File (staged GPX uploads)
 
@@ -219,6 +222,16 @@ function createBoatIcon(color, rotation = 0) {
     });
 }
 
+function haversineMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = (d) => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 function addBoatTrack(deviceId, gpsData, boat) {
     const color = BOAT_COLORS[deviceId] || '#888888';
 
@@ -237,10 +250,23 @@ function addBoatTrack(deviceId, gpsData, boat) {
         rotationOrigin: 'center center',
     }).addTo(map);
 
+    // Pre-compute cumulative distance (meters) per GPS sample so the
+    // leaderboard can sort by progress rather than instantaneous speed.
+    const cumDist = new Float32Array(gpsData.length);
+    for (let i = 1; i < gpsData.length; i++) {
+        const a = gpsData[i - 1];
+        const b = gpsData[i];
+        const seg = (a.lat && a.lon && b.lat && b.lon)
+            ? haversineMeters(a.lat, a.lon, b.lat, b.lon)
+            : 0;
+        cumDist[i] = cumDist[i - 1] + seg;
+    }
+
     boatLayers[deviceId] = {
         track,
         marker,
         data: gpsData,
+        cumDist,
         boat,
         color,
         visible: true,
@@ -248,25 +274,24 @@ function addBoatTrack(deviceId, gpsData, boat) {
 }
 
 function updateBoatPositions(timeSeconds) {
+    const startTime = currentRace ? new Date(currentRace.start_time).getTime() : 0;
+    const targetTime = startTime + timeSeconds * 1000;
+
     for (const [deviceId, layer] of Object.entries(boatLayers)) {
         if (!layer.visible || !layer.data.length) continue;
 
-        // Find position at current time
-        const startTime = new Date(currentRace.start_time).getTime();
-        const targetTime = startTime + timeSeconds * 1000;
-
-        // Find closest data point
-        let closest = layer.data[0];
+        // Find closest data point + its index
+        let closestIdx = 0;
         let minDiff = Infinity;
-
-        for (const point of layer.data) {
-            const pointTime = new Date(point.t).getTime();
+        for (let i = 0; i < layer.data.length; i++) {
+            const pointTime = new Date(layer.data[i].t).getTime();
             const diff = Math.abs(pointTime - targetTime);
             if (diff < minDiff) {
                 minDiff = diff;
-                closest = point;
+                closestIdx = i;
             }
         }
+        const closest = layer.data[closestIdx];
 
         // Update marker position and rotation
         if (closest && closest.lat && closest.lon) {
@@ -276,18 +301,20 @@ function updateBoatPositions(timeSeconds) {
             const course = closest.course || 0;
             layer.marker.setIcon(createBoatIcon(layer.color, course));
 
-            // Cache current playback-time point so the leaderboard reads
-            // the same value the map shows (was reading the final GPS
-            // point in the whole dataset, hence "0.0 kn" for everyone).
+            // Cache current playback-time point + index so the leaderboard
+            // reads the same value the map shows and can look up cumulative
+            // distance traveled.
             layer.current = closest;
+            layer.currentIdx = closestIdx;
 
             // Update legend with current speed
             updateLegendSpeed(deviceId, closest.speed_kn || 0);
         }
     }
 
-    // Refresh leaderboard at playback time, not at race-load time
+    // Refresh leaderboard + chart play cursors at playback time
     renderLeaderboard();
+    updatePlayCursor(timeSeconds);
 }
 
 function fitMapToBounds() {
@@ -422,10 +449,14 @@ function calculatePositions() {
         const boat = boatData.boat;
 
         // Use the playback-time point cached by updateBoatPositions().
-        // Falls back to the last point if playback hasn't set it yet
-        // (e.g. before the first tick after race load).
+        // Falls back to the last point if playback hasn't set it yet.
         const gps = boatData.sensors.gps;
+        const idx = layer?.currentIdx ?? (gps.length - 1);
         const point = layer?.current || gps[gps.length - 1];
+
+        // Cumulative distance traveled at the current playback time, in meters.
+        const distM = (layer?.cumDist && layer.cumDist[idx] !== undefined)
+            ? layer.cumDist[idx] : 0;
 
         // Display team name if available, else boat name, else device ID
         const displayName = boat?.team_name || boat?.boat_name || deviceId;
@@ -437,20 +468,26 @@ function calculatePositions() {
             subtitle,
             speed: point?.speed_kn || 0,
             heading: point?.course || 0,
-            delta: '',  // TODO: calculate time delta
+            distM,
+            delta: '',
         });
     }
 
-    // Sort by speed (descending) for now
-    // TODO: Sort by actual race position (distance to finish, etc.)
-    positions.sort((a, b) => b.speed - a.speed);
+    // Rank by cumulative distance traveled (more = farther along the course).
+    // For a one-design fleet on the same start, this is a fair proxy for race
+    // position until course-defined distance-to-mark is wired up.
+    positions.sort((a, b) => b.distM - a.distM);
 
-    // Add deltas
+    // Delta is meters behind the leader (or speed for the leader).
     if (positions.length > 0) {
         const leader = positions[0];
+        positions[0].delta = `${leader.speed.toFixed(1)} kn`;
         for (let i = 1; i < positions.length; i++) {
-            const diff = leader.speed - positions[i].speed;
-            positions[i].delta = diff > 0 ? `-${diff.toFixed(1)} kn` : '';
+            const gap = leader.distM - positions[i].distM;
+            const gapStr = gap >= 1000
+                ? `-${(gap / 1000).toFixed(2)} km`
+                : `-${gap.toFixed(0)} m`;
+            positions[i].delta = gapStr;
         }
     }
 
@@ -459,102 +496,168 @@ function calculatePositions() {
 
 // --- Speed Chart ---
 
-function initSpeedChart() {
-    const ctx = document.getElementById('speed-chart').getContext('2d');
+// Vertical play-cursor line drawn over each comparison chart.
+// The cursor X is `playCursorSeconds` (seconds from race start), matching
+// the X axis of all three charts so a single global value drives all of them.
+const playCursorPlugin = {
+    id: 'playCursor',
+    afterDatasetsDraw: (chart) => {
+        const xScale = chart.scales.x;
+        const yScale = chart.scales.y;
+        if (!xScale || !yScale) return;
+        if (playCursorSeconds < xScale.min || playCursorSeconds > xScale.max) return;
+        const x = xScale.getPixelForValue(playCursorSeconds);
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x, yScale.top);
+        ctx.lineTo(x, yScale.bottom);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.restore();
+    },
+};
+if (typeof Chart !== 'undefined') Chart.register(playCursorPlugin);
 
-    speedChart = new Chart(ctx, {
+const COMPARISON_CHART_OPTIONS = (yLabel, ySuggestedMin, ySuggestedMax) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { intersect: false, mode: 'index' },
+    plugins: {
+        legend: { display: false },
+        tooltip: { enabled: false },
+    },
+    scales: {
+        x: {
+            type: 'linear',
+            title: { display: false },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: {
+                color: '#666',
+                callback: (v) => formatChartTime(v),
+                maxTicksLimit: 6,
+            },
+        },
+        y: {
+            title: { display: true, text: yLabel, color: '#888', font: { size: 10 } },
+            grid: { color: 'rgba(255,255,255,0.08)' },
+            ticks: { color: '#888' },
+            suggestedMin: ySuggestedMin,
+            suggestedMax: ySuggestedMax,
+        },
+    },
+});
+
+function formatChartTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function initSpeedChart() {
+    const speedCtx = document.getElementById('speed-chart').getContext('2d');
+    speedChart = new Chart(speedCtx, {
         type: 'line',
-        data: {
-            labels: [],
-            datasets: [],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                intersect: false,
-                mode: 'index',
-            },
-            plugins: {
-                legend: {
-                    display: false,
-                },
-            },
-            scales: {
-                x: {
-                    display: false,
-                },
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Speed (kn)',
-                        color: '#888',
-                    },
-                    grid: {
-                        color: 'rgba(255,255,255,0.1)',
-                    },
-                    ticks: {
-                        color: '#888',
-                    },
-                },
-            },
-        },
+        data: { datasets: [] },
+        options: COMPARISON_CHART_OPTIONS('Speed (kn)', 0, 12),
     });
+
+    const heelCtx = document.getElementById('heel-chart').getContext('2d');
+    heelChart = new Chart(heelCtx, {
+        type: 'line',
+        data: { datasets: [] },
+        options: COMPARISON_CHART_OPTIONS('Heel (°)', -30, 30),
+    });
+
+    const windCtx = document.getElementById('wind-chart').getContext('2d');
+    windChart = new Chart(windCtx, {
+        type: 'line',
+        data: { datasets: [] },
+        options: COMPARISON_CHART_OPTIONS('AWS (kn)', 0, 25),
+    });
+}
+
+// Build a downsampled (time-seconds, value) series for one boat's sensor data.
+function buildSeries(samples, valueField, raceStartMs, maxPoints = 240) {
+    if (!samples?.length) return [];
+    const step = Math.max(1, Math.floor(samples.length / maxPoints));
+    const out = [];
+    for (let i = 0; i < samples.length; i += step) {
+        const s = samples[i];
+        if (s == null) continue;
+        const t = new Date(s.t).getTime();
+        const v = s[valueField];
+        if (v == null || Number.isNaN(v)) continue;
+        out.push({ x: (t - raceStartMs) / 1000, y: v });
+    }
+    return out;
 }
 
 function updateSpeedChart() {
     if (!raceData?.boats || !speedChart) return;
+    if (!currentRace) return;
+    const raceStartMs = new Date(currentRace.start_time).getTime();
 
-    const datasets = [];
+    const speedSets = [];
+    const heelSets = [];
+    const windSets = [];
+
     const togglesContainer = document.getElementById('speed-chart-toggles');
     togglesContainer.innerHTML = '';
 
     for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
         if (boatData.error || !boatData.sensors?.gps?.length) continue;
-
         const color = BOAT_COLORS[deviceId] || '#888888';
-        const gps = boatData.sensors.gps;
-
-        // Downsample for chart performance
-        const step = Math.max(1, Math.floor(gps.length / 200));
-        const data = [];
-
-        for (let i = 0; i < gps.length; i += step) {
-            data.push({
-                x: i,
-                y: gps[i].speed_kn || 0,
-            });
-        }
-
-        datasets.push({
+        const baseDataset = (data) => ({
             label: deviceId,
             data,
             borderColor: color,
             backgroundColor: color + '20',
-            borderWidth: 2,
+            borderWidth: 1.5,
             pointRadius: 0,
             tension: 0.2,
+            spanGaps: true,
         });
 
-        // Add toggle button
+        speedSets.push(baseDataset(buildSeries(boatData.sensors.gps, 'speed_kn', raceStartMs)));
+        heelSets.push(baseDataset(buildSeries(boatData.sensors.imu, 'heel', raceStartMs)));
+        windSets.push(baseDataset(buildSeries(boatData.sensors.wind, 'aws_kn', raceStartMs)));
+
+        // One shared toggle controls all three charts for this boat.
         const toggle = document.createElement('button');
         toggle.className = 'chart-toggle';
         toggle.style.borderColor = color;
         toggle.style.background = color;
         toggle.title = deviceId;
         toggle.addEventListener('click', () => {
-            const dataset = speedChart.data.datasets.find(d => d.label === deviceId);
-            if (dataset) {
-                dataset.hidden = !dataset.hidden;
-                toggle.classList.toggle('disabled', dataset.hidden);
-                speedChart.update();
+            const sNew = !speedChart.data.datasets.find(d => d.label === deviceId)?.hidden;
+            for (const ch of [speedChart, heelChart, windChart]) {
+                const ds = ch.data.datasets.find(d => d.label === deviceId);
+                if (ds) ds.hidden = sNew;
+                ch.update('none');
             }
+            toggle.classList.toggle('disabled', sNew);
         });
         togglesContainer.appendChild(toggle);
     }
 
-    speedChart.data.datasets = datasets;
+    speedChart.data.datasets = speedSets;
+    heelChart.data.datasets = heelSets;
+    windChart.data.datasets = windSets;
     speedChart.update();
+    heelChart.update();
+    windChart.update();
+}
+
+// Move the dashed play cursor on each chart without redrawing the data lines.
+function updatePlayCursor(seconds) {
+    playCursorSeconds = seconds;
+    for (const ch of [speedChart, heelChart, windChart]) {
+        if (ch) ch.draw();
+    }
 }
 
 // --- Playback ---
