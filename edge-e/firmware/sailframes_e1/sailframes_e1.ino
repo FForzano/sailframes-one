@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.03.03"
+#define FW_VERSION    "2026.05.03.04"
 
 // ArduinoOTA registers an mDNS multicast UDP listener. On ESP32 Arduino
 // Core 3.3.7 with NimBLE active for the wind sensor, the mDNS init at
@@ -417,6 +417,16 @@ TaskHandle_t diagTaskHandle = NULL;
 // task. When Core 1 hangs, the last value here pinpoints the stuck section.
 volatile const char* g_loopSection = "boot";
 volatile uint32_t    g_loopIter = 0;
+
+// True while Core 0 is mid-WiFi-work: WiFi scan, connect, upload cycle.
+// Core 1 must NOT touch the WiFi/LWIP stack (handleTelnet, telnetServer,
+// WiFi.* APIs other than fast-status reads) during this window — under
+// sustained Core 0 traffic, especially with weak signal, LWIP mutex
+// contention blocks Core 1 inside otherwise-cheap calls and hangs the
+// device (firmware 2026.05.03.03 fleet test pinpointed this with a diag
+// heartbeat: Core 1 was frozen inside handleTelnet for the entire
+// upload phase).
+volatile bool wifiBusy = false;
 
 // Upload state tracking
 unsigned long lastUploadCheck = 0;
@@ -4465,8 +4475,12 @@ void uploadTaskFunc(void* param) {
     if (shouldUpload) {
       lastUploadAttempt = now;
 
-      // BLE deinit NOT needed — uploads use plain HTTP (no TLS memory pressure).
-      // ESP32 can time-slice WiFi and BLE on the shared radio for basic HTTP PUTs.
+      // Mark WiFi as busy for the entire connect-+-upload window so Core 1
+      // skips any LWIP-touching code paths (handleTelnet, telnetServer
+      // calls). Without this guard, Core 1 deadlocks inside handleTelnet
+      // on LWIP mutex contention during heavy uploads (see 2026.05.03.03
+      // diag log: iter frozen at handleTelnet for entire upload phase).
+      wifiBusy = true;
 
       // Try to connect to WiFi if not connected
       if (!wifiConnected) {
@@ -4557,6 +4571,9 @@ void uploadTaskFunc(void* param) {
       stationaryStart = 0;
       // After WiFi failure, force backoff by updating lastUploadAttempt
       lastUploadAttempt = now;
+
+      // WiFi work for this trigger is done — let Core 1 service telnet again.
+      wifiBusy = false;
     }
 
     vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
@@ -4595,7 +4612,9 @@ void loop() {
   // the iPhone hotspot slot is freed, which was the goal — while the
   // radio stays in STA mode so BLE coexistence is undisturbed.
   g_loopSection = "wifi-state-sync";
-  if (wifiConnected && WiFi.status() != WL_CONNECTED) {
+  // Skip while Core 0 is mid-WiFi-work — these calls go through LWIP and
+  // deadlock under contention.
+  if (!wifiBusy && wifiConnected && WiFi.status() != WL_CONNECTED) {
     Serial.printf("[WIFI] Lost connection (status=%d) — clearing stale flag\n", WiFi.status());
     Serial.flush();
     g_loopSection = "wifi-state-sync.telnet-stop";
@@ -4610,7 +4629,7 @@ void loop() {
   }
 
   g_loopSection = "wifi-teardown-check";
-  if (wifiTeardownRequested && !uploading && !triggerUpload && wifiConnected) {
+  if (wifiTeardownRequested && !uploading && !triggerUpload && !wifiBusy && wifiConnected) {
     Serial.println("[WIFI] Honoring teardown request (Core 1)");
     Serial.flush();
     g_loopSection = "teardown.telnet-stop";
@@ -4628,7 +4647,10 @@ void loop() {
 
   // Handle OTA updates (highest priority) — gated behind ENABLE_ARDUINO_OTA
   // because mDNS init + NimBLE active crashes the ESP32 (see top of file).
-  if (wifiConnected) {
+  // Telnet is also skipped while wifiBusy: handleTelnet's WiFiServer/WiFiClient
+  // calls share LWIP locks with Core 0's HTTP uploads and deadlock under
+  // sustained contention (firmware 2026.05.03.03 hang).
+  if (wifiConnected && !wifiBusy) {
 #if ENABLE_ARDUINO_OTA
     ArduinoOTA.handle();
     if (otaInProgress) return;  // Don't do anything else during OTA
