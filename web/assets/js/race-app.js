@@ -25,7 +25,7 @@ const BOAT_COLORS = {
 
 // Fleet configuration - COURAGEOUS J80 Spring Racing Series 2026
 const FLEET_BOATS = ['Wizard', 'Fins', 'Doc Buck', 'Katu', 'Bliss & Ella', 'Amigo'];
-const FLEET_TEAMS = ['Vela Veloce', 'Seadogs', 'Mystic Mutiny', 'Rooster Alumni Club'];
+const FLEET_TEAMS = ['Vela Veloce', 'Seadogs', 'Mystic Mutiny', 'Rooster Alumni Club', 'Anchor Management', 'Team 6'];
 
 // State
 let regattas = [];
