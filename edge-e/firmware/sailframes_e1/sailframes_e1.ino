@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.03.02"
+#define FW_VERSION    "2026.05.03.03"
 
 // ArduinoOTA registers an mDNS multicast UDP listener. On ESP32 Arduino
 // Core 3.3.7 with NimBLE active for the wind sensor, the mDNS init at
@@ -411,6 +411,12 @@ volatile bool triggerUpload = false;
 volatile bool wifiTeardownRequested = false;
 SemaphoreHandle_t sdMutex = NULL;
 TaskHandle_t uploadTaskHandle = NULL;
+TaskHandle_t diagTaskHandle = NULL;
+
+// Where Core 1's main loop currently is. Set by the loop, read by the diag
+// task. When Core 1 hangs, the last value here pinpoints the stuck section.
+volatile const char* g_loopSection = "boot";
+volatile uint32_t    g_loopIter = 0;
 
 // Upload state tracking
 unsigned long lastUploadCheck = 0;
@@ -1156,6 +1162,19 @@ void setup() {
   } else {
     Serial.println("[WDT] loopTask subscribed");
   }
+
+  // Diagnostic heartbeat task. Runs independently of loopTask so it keeps
+  // printing even when Core 1 hangs. The g_loopSection it prints is the
+  // last section Core 1 entered before stalling.
+  xTaskCreatePinnedToCore(
+    diagnosticsTask,    // Function
+    "diagTask",         // Name
+    4096,               // Stack
+    NULL,               // Params
+    1,                  // Priority
+    &diagTaskHandle,    // Handle
+    0                   // Core 0 (Core 1 is the one we're watching)
+  );
 
   Serial.println("[SETUP] Complete - WiFi/telnet available, GPS acquiring in background");
   Serial.println("[SETUP] Press and hold button >2s to shutdown");
@@ -4331,6 +4350,27 @@ void countPendingUploads() {
 // ============================================================
 // UPLOAD TASK (RUNS ON CORE 0)
 // ============================================================
+// Independent FreeRTOS task that prints Core 1's last-known section every 5s.
+// If loopTask hangs, this task keeps running and the last printed [DIAG] line
+// names the section Core 1 was inside. Replaces guesswork with evidence.
+void diagnosticsTask(void* param) {
+  esp_task_wdt_add(NULL);
+  Serial.println("[DIAG] task started");
+  uint32_t lastIter = 0;
+  while (true) {
+    esp_task_wdt_reset();
+    unsigned long now = millis();
+    uint32_t iter = g_loopIter;
+    long delta = (long)(iter - lastIter);
+    Serial.printf("[DIAG] uptime=%lus heap=%u sect=%s iter=%lu (+%ld)\n",
+                  now / 1000, ESP.getFreeHeap(),
+                  (const char*)g_loopSection,
+                  (unsigned long)iter, delta);
+    lastIter = iter;
+    vTaskDelay(pdMS_TO_TICKS(5000));
+  }
+}
+
 void uploadTaskFunc(void* param) {
   Serial.println("[UPLOAD] Task started on Core 0");
 
@@ -4530,6 +4570,8 @@ void loop() {
   esp_task_wdt_reset();  // feed wdt — without this a stuck loop iteration
                          // panics in 120s with a backtrace pointing at the
                          // call that hung (firmware 2026.05.03.01 hard hang)
+  g_loopIter++;
+  g_loopSection = "top";
   unsigned long now = millis();
 
   // ----------------------------------------------------------
@@ -4552,22 +4594,30 @@ void loop() {
   // 2026.05.02.03. WiFi.disconnect(false, false) just leaves the AP —
   // the iPhone hotspot slot is freed, which was the goal — while the
   // radio stays in STA mode so BLE coexistence is undisturbed.
+  g_loopSection = "wifi-state-sync";
   if (wifiConnected && WiFi.status() != WL_CONNECTED) {
     Serial.printf("[WIFI] Lost connection (status=%d) — clearing stale flag\n", WiFi.status());
     Serial.flush();
+    g_loopSection = "wifi-state-sync.telnet-stop";
     if (telnetClient && telnetClient.connected()) telnetClient.stop();
+    g_loopSection = "wifi-state-sync.server-end";
     telnetServer.end();
+    g_loopSection = "wifi-state-sync.wifi-disconnect";
     WiFi.disconnect(false, false);
     connectedSSID[0] = '\0';
     wifiConnected = false;
     wifiTeardownRequested = false;  // Already torn down
   }
 
+  g_loopSection = "wifi-teardown-check";
   if (wifiTeardownRequested && !uploading && !triggerUpload && wifiConnected) {
     Serial.println("[WIFI] Honoring teardown request (Core 1)");
     Serial.flush();
+    g_loopSection = "teardown.telnet-stop";
     if (telnetClient && telnetClient.connected()) telnetClient.stop();
+    g_loopSection = "teardown.server-end";
     telnetServer.end();
+    g_loopSection = "teardown.wifi-disconnect";
     WiFi.disconnect(false, false);
     connectedSSID[0] = '\0';
     wifiConnected = false;
@@ -4583,44 +4633,48 @@ void loop() {
     ArduinoOTA.handle();
     if (otaInProgress) return;  // Don't do anything else during OTA
 #endif
-
-    // Handle telnet connections
+    g_loopSection = "telnet";
     handleTelnet();
   }
 
-  // Check for serial commands
+  g_loopSection = "serial-cmd";
   handleSerialCommand();
 
+  g_loopSection = "gps";
   readGPS();
 
-  // Update GPS speed-triggered recording state machine
+  g_loopSection = "rec-state";
   updateRecordingState();
 
   // Sensor reads are I2C on Core 1, upload runs on Core 0 — no conflict.
   // SD logging (logIMU/logPressure) is guarded by `logging` which is always
   // false during upload (task checks !logging before starting).
   if (now - lastIMU >= IMU_INTERVAL_MS) {
+    g_loopSection = "imu";
     readIMU();
-    if (logging) logIMU();
+    if (logging) { g_loopSection = "imu.log"; logIMU(); }
     lastIMU = now;
   }
 
   // Pressure sensor (0.1 Hz - weather trends only, not gust detection)
   static unsigned long lastPres = 0;
   if (presOK && now - lastPres >= PRES_INTERVAL_MS) {
+    g_loopSection = "pres";
     readPressure();
-    if (logging) logPressure();
+    if (logging) { g_loopSection = "pres.log"; logPressure(); }
     lastPres = now;
   }
 
   // Reset pressure min/max every 10 seconds for fresh gust window
   static unsigned long lastPresReset = 0;
   if (presOK && now - lastPresReset >= 10000) {
+    g_loopSection = "pres-reset";
     resetPressureMinMax();
     lastPresReset = now;
   }
 
   if (logging && gps.newGGA) {
+    g_loopSection = "nav.log";
     logNav();
     gps.newGGA = false;
   }
@@ -4628,11 +4682,12 @@ void loop() {
 #if ENABLE_WIND
   // Handle wind sensor
   if (config.wind_enabled) {
-    // Check connection and reconnect if needed
+    g_loopSection = "wind-check";
     checkWindConnection();
 
     // Log wind data at configured interval
     if (logging && now - lastWind >= WIND_INTERVAL_MS) {
+      g_loopSection = "wind.log";
       logWind();
       lastWind = now;
     }
@@ -4640,9 +4695,8 @@ void loop() {
 #endif
 
   if (now - lastDisp >= DISPLAY_UPDATE_MS) {
-    // Always show live sensor data — upload progress shown in status line (UP 3/10)
+    g_loopSection = "display";
     updateDisplay();
-    // LED toggle removed - LED_PIN is now TFT backlight, don't blink it!
     lastDisp = now;
   }
 
@@ -4663,10 +4717,12 @@ void loop() {
   // Battery monitoring (every 10 seconds)
   static unsigned long lastBattCheck = 0;
   if (now - lastBattCheck >= 10000) {
+    g_loopSection = "battery";
     updateBattery();
     handleLowBattery();  // Will warn and halt if critical
     lastBattCheck = now;
   }
+  g_loopSection = "loop-end";
 
   // RTCM3 debug output (every 30 seconds) - helps diagnose PPK data logging
   static unsigned long lastRtcmDebug = 0;
