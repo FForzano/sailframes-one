@@ -98,7 +98,19 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.02.04"
+#define FW_VERSION    "2026.05.03.01"
+
+// ArduinoOTA registers an mDNS multicast UDP listener. On ESP32 Arduino
+// Core 3.3.7 with NimBLE active for the wind sensor, the mDNS init at
+// WiFi-up time crosses into the BLE/WiFi shared-radio coexistence path
+// and panics with "spinlock_release ... core_owner_id == lock->owner"
+// (firmware 2026.05.02.04 fleet test). The user does not currently use
+// ArduinoOTA — fleet firmware is flashed via USB, and Phase 2 OTA will
+// pull binaries via Update.h on a manifest GET (no passive listener).
+// Disable until we either (a) move off NimBLE, (b) add a deinit-before-
+// connect dance that's known to be safe on 3.3.7, or (c) replace
+// ArduinoOTA with a manifest-pull update that doesn't touch mDNS.
+#define ENABLE_ARDUINO_OTA  0
 
 // SSID where large RTCM3 PPK files are allowed to upload. On any other
 // network (e.g. iPhone hotspot) RTCM3 files are skipped — they're too big
@@ -1782,6 +1794,7 @@ void loadConfig() {
 // OTA + TELNET SETUP
 // ============================================================
 void setupOTA() {
+#if ENABLE_ARDUINO_OTA
   ArduinoOTA.setHostname(config.boat_id);  // Use boat ID as hostname
   ArduinoOTA.setPassword("sailframes");     // OTA password
 
@@ -1862,6 +1875,9 @@ void setupOTA() {
 
   ArduinoOTA.begin();
   Serial.println("[OTA] Ready");
+#else
+  Serial.println("[OTA] ArduinoOTA disabled in firmware (see ENABLE_ARDUINO_OTA)");
+#endif
 }
 
 void startTelnetServer() {
@@ -4502,10 +4518,13 @@ void loop() {
     Serial.flush();
   }
 
-  // Handle OTA updates (highest priority)
+  // Handle OTA updates (highest priority) — gated behind ENABLE_ARDUINO_OTA
+  // because mDNS init + NimBLE active crashes the ESP32 (see top of file).
   if (wifiConnected) {
+#if ENABLE_ARDUINO_OTA
     ArduinoOTA.handle();
     if (otaInProgress) return;  // Don't do anything else during OTA
+#endif
 
     // Handle telnet connections
     handleTelnet();
