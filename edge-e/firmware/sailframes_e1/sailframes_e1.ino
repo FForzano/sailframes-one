@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.03.05"
+#define FW_VERSION    "2026.05.03.06"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -333,7 +333,8 @@ volatile bool sdWriting = false;  // Flag to skip display updates during SD writ
 unsigned long lastDisplayUpdate = 0;
 const unsigned long DISPLAY_UPDATE_INTERVAL = 200;  // Only update display every 200ms
 bool uploading = false;
-int pendingUploads = 0;  // Count of sessions not yet fully uploaded
+int pendingUploads = 0;  // N: sessions with non-RTCM3 files still to upload
+int pendingRTCM = 0;     // R: sessions with RTCM3 (PPK) files still to upload
 bool wifiConnected = false;
 bool d2LayoutDrawn = false;  // Display layout flag - reset to redraw full screen
 bool otaInProgress = false;
@@ -2542,8 +2543,17 @@ void updateDisplayD2() {
 
     if (uploading && uploadTotal > 0) {
       snprintf(right, sizeof(right), "%s%s %d/%d", windInd, wifiInd, uploadCount, uploadTotal);
-    } else if (pendingUploads > 0) {
-      snprintf(right, sizeof(right), "%s%s ^%d", windInd, wifiInd, pendingUploads);
+    } else if (pendingUploads > 0 || pendingRTCM > 0) {
+      // N = sessions with non-RTCM3 files pending, R = sessions with RTCM3 pending
+      char counts[24];
+      if (pendingUploads > 0 && pendingRTCM > 0) {
+        snprintf(counts, sizeof(counts), "N%d R%d", pendingUploads, pendingRTCM);
+      } else if (pendingUploads > 0) {
+        snprintf(counts, sizeof(counts), "N%d", pendingUploads);
+      } else {
+        snprintf(counts, sizeof(counts), "R%d", pendingRTCM);
+      }
+      snprintf(right, sizeof(right), "%s%s %s", windInd, wifiInd, counts);
     } else {
       snprintf(right, sizeof(right), "%s%s", windInd, wifiInd);
     }
@@ -2779,12 +2789,19 @@ void updateDisplayD3() {
     tft.drawString(line, 3, BOT_BAR + 7, 2);
 
     // Right side: upload status + WiFi
-    char right[20];
+    char right[24];
     const char* wifiInd = wifiConnected ? getWifiIndicator() : "";
     if (uploading && uploadTotal > 0) {
       snprintf(right, sizeof(right), "%d/%d %s", uploadCount, uploadTotal, wifiInd);
-    } else if (pendingUploads > 0) {
-      snprintf(right, sizeof(right), "^%d %s", pendingUploads, wifiInd);
+    } else if (pendingUploads > 0 || pendingRTCM > 0) {
+      // N = sessions with non-RTCM3 pending, R = sessions with RTCM3 pending
+      if (pendingUploads > 0 && pendingRTCM > 0) {
+        snprintf(right, sizeof(right), "N%d R%d %s", pendingUploads, pendingRTCM, wifiInd);
+      } else if (pendingUploads > 0) {
+        snprintf(right, sizeof(right), "N%d %s", pendingUploads, wifiInd);
+      } else {
+        snprintf(right, sizeof(right), "R%d %s", pendingRTCM, wifiInd);
+      }
     } else {
       snprintf(right, sizeof(right), "%s", wifiInd);
     }
@@ -4354,43 +4371,50 @@ void countPendingUploads() {
     return;  // SD busy, try again later
   }
 
-  int count = 0;
+  int navCount = 0;   // N: sessions with non-RTCM3 files still pending
+  int rtcmCount = 0;  // R: sessions with RTCM3 files still pending
   File root = SD.open("/sf");
   if (!root) {
     xSemaphoreGive(sdMutex);
     pendingUploads = 0;
+    pendingRTCM = 0;
     return;
   }
 
-  // Count session folders that have at least one file without .uploaded marker
+  // Walk each session, classifying unuploaded files into nav vs RTCM3.
+  // A session can contribute to N, R, both, or neither.
   File session = root.openNextFile();
   while (session) {
     yield();  // Prevent watchdog timeout
     if (session.isDirectory()) {
       String sessName = session.name();
-      // Skip if session name starts with "." (hidden)
       if (!sessName.startsWith(".")) {
-        // Display count is "sessions with non-RTCM3 unuploaded files".
-        // RTCM3 PPK files are uploaded later at home and shouldn't keep
-        // a session listed as pending after a sail.
-        bool hasUnuploaded = false;
+        bool hasNavPending = false;
+        bool hasRtcmPending = false;
         File f = session.openNextFile();
         while (f) {
-          if (!hasUnuploaded) {
-            String fname = f.name();
-            if (!fname.endsWith(".uploaded") &&
-                !fname.startsWith(".") &&
-                !fname.endsWith(".rtcm3")) {
-              String markerPath = String("/sf/") + sessName + "/" + fname + ".uploaded";
-              if (!SD.exists(markerPath.c_str())) {
-                hasUnuploaded = true;
+          // Short-circuit once we know both
+          if (hasNavPending && hasRtcmPending) {
+            f.close();
+            f = session.openNextFile();
+            continue;
+          }
+          String fname = f.name();
+          if (!fname.endsWith(".uploaded") && !fname.startsWith(".")) {
+            String markerPath = String("/sf/") + sessName + "/" + fname + ".uploaded";
+            if (!SD.exists(markerPath.c_str())) {
+              if (fname.endsWith(".rtcm3")) {
+                hasRtcmPending = true;
+              } else {
+                hasNavPending = true;
               }
             }
           }
           f.close();
           f = session.openNextFile();
         }
-        if (hasUnuploaded) count++;
+        if (hasNavPending) navCount++;
+        if (hasRtcmPending) rtcmCount++;
       }
     }
     session.close();
@@ -4398,7 +4422,8 @@ void countPendingUploads() {
   }
   root.close();
   xSemaphoreGive(sdMutex);
-  pendingUploads = count;
+  pendingUploads = navCount;
+  pendingRTCM = rtcmCount;
 }
 
 // ============================================================
@@ -4442,7 +4467,7 @@ void uploadTaskFunc(void* param) {
 
   // Count pending uploads immediately on boot (don't wait 30 seconds)
   countPendingUploads();
-  Serial.printf("[UPLOAD] Initial pending count: %d\n", pendingUploads);
+  Serial.printf("[UPLOAD] Initial pending: N=%d R=%d\n", pendingUploads, pendingRTCM);
 
   while (true) {
     esp_task_wdt_reset();
@@ -4462,9 +4487,9 @@ void uploadTaskFunc(void* param) {
 
       // Force recount now that logging stopped (count was skipped during recording)
       countPendingUploads();
-      Serial.printf("[UPLOAD] Recording stopped, %d sessions pending\n", pendingUploads);
+      Serial.printf("[UPLOAD] Recording stopped: N=%d R=%d pending\n", pendingUploads, pendingRTCM);
 
-      if (pendingUploads == 0) {
+      if (pendingUploads == 0 && pendingRTCM == 0) {
         Serial.println("[UPLOAD] Nothing to upload");
       } else if (uploadRetryCount >= MAX_UPLOAD_RETRIES && now - lastUploadAttempt < UPLOAD_RETRY_DELAY_MS) {
         Serial.println("[UPLOAD] Recording stopped but WiFi backing off — will retry later");
@@ -4479,8 +4504,11 @@ void uploadTaskFunc(void* param) {
       if (config.wifi_count == 0 || !strlen(config.upload_url)) {
         // No WiFi configured, skip
       }
-      // Skip if no pending files (don't connect WiFi for nothing)
-      else if (pendingUploads == 0) {
+      // Skip if no pending files (don't connect WiFi for nothing).
+      // RTCM3-only sessions also count — they need to upload eventually
+      // when on Home-IOT. The upload code itself filters by SSID so a
+      // hotspot connect with only RTCM3 pending is a no-op.
+      else if (pendingUploads == 0 && pendingRTCM == 0) {
         // Nothing to upload — don't connect WiFi
       }
       // Only upload when stationary (speed < 0.5 kt) or no GPS fix
@@ -4508,7 +4536,8 @@ void uploadTaskFunc(void* param) {
               }
             } else {
               shouldUpload = true;
-              Serial.printf("[UPLOAD] Triggered: periodic check (%d pending)\n", pendingUploads);
+              Serial.printf("[UPLOAD] Triggered: periodic check (N=%d R=%d)\n",
+                            pendingUploads, pendingRTCM);
             }
           }
         }
