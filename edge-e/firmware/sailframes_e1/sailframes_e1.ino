@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.03.01"
+#define FW_VERSION    "2026.05.03.02"
 
 // ArduinoOTA registers an mDNS multicast UDP listener. On ESP32 Arduino
 // Core 3.3.7 with NimBLE active for the wind sensor, the mDNS init at
@@ -730,8 +730,30 @@ void initWindSensor() {
 }
 
 // Check wind connection and reconnect if needed
+// Stop any in-flight BLE operations before WiFi work begins. ESP32 has a
+// single shared radio for BLE and WiFi; under sustained WiFi traffic
+// (large uploads, e.g. 400KB+ RTCM3 PUTs) NimBLE's host task can stall
+// without timing out, hanging whichever core is blocked inside
+// NimBLEScan::start()/getResults(). Symptoms: hard hang, no panic, no
+// reboot — display and serial freeze (firmware 2026.05.03.01 fleet test).
+void pauseBLEForWiFi() {
+  NimBLEScan* pScanLocal = NimBLEDevice::getScan();
+  if (pScanLocal && pScanLocal->isScanning()) {
+    Serial.println("[BLE] Stopping active scan before WiFi work");
+    pScanLocal->stop();
+  }
+  if (pWindClient && pWindClient->isConnected()) {
+    Serial.println("[BLE] Disconnecting wind client before WiFi work");
+    pWindClient->disconnect();
+  }
+}
+
 void checkWindConnection() {
   if (!config.wind_enabled) return;
+
+  // Don't run BLE work while WiFi is in use — shared radio. New scans
+  // started here under WiFi load are the documented hang trigger.
+  if (wifiConnected || uploading || triggerUpload) return;
 
   unsigned long now = millis();
 
@@ -1122,6 +1144,18 @@ void setup() {
     &uploadTaskHandle,  // Handle
     0                   // Core 0
   );
+
+  // Subscribe the Arduino main loop task (Core 1) to the watchdog. The upload
+  // task subscribes itself in its first iteration. Without this the wdt is
+  // configured but watching nothing, so a Core 1 hang stays silent (firmware
+  // 2026.05.03.01 hard hang). With this, a 120s stall produces a panic +
+  // backtrace and reboots the device.
+  esp_err_t wdt_err = esp_task_wdt_add(NULL);
+  if (wdt_err != ESP_OK) {
+    Serial.printf("[WDT] Failed to subscribe loopTask: %d\n", wdt_err);
+  } else {
+    Serial.println("[WDT] loopTask subscribed");
+  }
 
   Serial.println("[SETUP] Complete - WiFi/telnet available, GPS acquiring in background");
   Serial.println("[SETUP] Press and hold button >2s to shutdown");
@@ -3256,12 +3290,14 @@ void uploadDirectory(const char* dirname) {
           }
 
           // Feed watchdog before upload
+          esp_task_wdt_reset();
           yield();
           delay(100);
 
           if (uploadFile(filepath)) {
             markUploaded(filepath);
           }
+          esp_task_wdt_reset();  // and after — single PUT can be 8s+
         }
 
         // Longer pause between uploads to prevent crashes
@@ -3291,6 +3327,14 @@ bool connectWiFi() {
     Serial.println("[WIFI] No networks configured");
     return false;
   }
+
+#if ENABLE_WIND
+  // Pause BLE before any WiFi operation — shared radio. The first WiFi
+  // call below is WiFi.disconnect(true) which reconfigures the radio;
+  // doing that with a NimBLE scan in flight corrupts NimBLE state and
+  // hangs Core 1 the next time it touches BLE.
+  pauseBLEForWiFi();
+#endif
 
   // Scan for networks first
   Serial.println("[WIFI] Scanning...");
@@ -4289,6 +4333,16 @@ void countPendingUploads() {
 // ============================================================
 void uploadTaskFunc(void* param) {
   Serial.println("[UPLOAD] Task started on Core 0");
+
+  // Subscribe to the task watchdog so a hang here produces a backtrace
+  // instead of a silent freeze. Reset at the top of every iteration.
+  esp_err_t wdt_err = esp_task_wdt_add(NULL);
+  if (wdt_err != ESP_OK) {
+    Serial.printf("[WDT] Failed to subscribe uploadTask: %d\n", wdt_err);
+  } else {
+    Serial.println("[WDT] uploadTask subscribed");
+  }
+
   unsigned long stationaryStart = 0;  // track how long boat has been still
   unsigned long lastPendingCount = 0;  // Last time we counted pending uploads
 
@@ -4297,6 +4351,7 @@ void uploadTaskFunc(void* param) {
   Serial.printf("[UPLOAD] Initial pending count: %d\n", pendingUploads);
 
   while (true) {
+    esp_task_wdt_reset();
     unsigned long now = millis();
     bool shouldUpload = false;
 
@@ -4472,6 +4527,9 @@ void uploadTaskFunc(void* param) {
 // MAIN LOOP
 // ============================================================
 void loop() {
+  esp_task_wdt_reset();  // feed wdt — without this a stuck loop iteration
+                         // panics in 120s with a backtrace pointing at the
+                         // call that hung (firmware 2026.05.03.01 hard hang)
   unsigned long now = millis();
 
   // ----------------------------------------------------------
