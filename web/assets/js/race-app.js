@@ -232,6 +232,106 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
     return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+// Bearing from A to B, degrees clockwise from north (0..360).
+function bearingDegrees(lat1, lon1, lat2, lon2) {
+    const f1 = lat1 * Math.PI / 180, f2 = lat2 * Math.PI / 180;
+    const dLam = (lon2 - lon1) * Math.PI / 180;
+    const y = Math.sin(dLam) * Math.cos(f2);
+    const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dLam);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+// --- Course-aware progress metrics (Tier 2) ---
+const MARK_ROUNDING_RADIUS_M = 35;  // meters, generous for J/80 mark roundings
+
+function buildMarksById(race) {
+    const out = {};
+    for (const m of (race?.marks || [])) {
+        if (m.mark_id) out[m.mark_id] = m;
+    }
+    return out;
+}
+
+function startMidpoint(race) {
+    const sl = race?.start_line;
+    if (sl && sl.pin_lat != null && sl.boat_lat != null) {
+        return {
+            lat: (sl.pin_lat + sl.boat_lat) / 2,
+            lon: (sl.pin_lon + sl.boat_lon) / 2,
+        };
+    }
+    return null;
+}
+
+// Walk each boat's track once and record the first time it passed within
+// MARK_ROUNDING_RADIUS_M of the next-in-sequence mark. Marks must be
+// rounded in course order — overshoots aren't credited until the chain
+// catches up. Result stored on layer.roundingTimes (epoch ms per leg).
+function precomputeRoundingsForLayer(layer, courseSeq, marksById) {
+    if (!courseSeq?.length || !layer?.data?.length) {
+        layer.roundingTimes = null;
+        return;
+    }
+    const times = new Array(courseSeq.length);
+    let idx = 0;
+    for (let i = 0; i < layer.data.length && idx < courseSeq.length; i++) {
+        const p = layer.data[i];
+        if (!p.lat || !p.lon) continue;
+        const m = marksById[courseSeq[idx]];
+        if (!m) { idx++; i--; continue; }  // skip dangling reference
+        const d = haversineMeters(p.lat, p.lon, m.lat, m.lon);
+        if (d < MARK_ROUNDING_RADIUS_M) {
+            times[idx] = new Date(p.t).getTime();
+            idx++;
+        }
+    }
+    layer.roundingTimes = times;
+}
+
+function precomputeAllRoundings() {
+    if (!currentRace) return;
+    const marksById = buildMarksById(currentRace);
+    const courseSeq = currentRace.course || [];
+    for (const layer of Object.values(boatLayers)) {
+        precomputeRoundingsForLayer(layer, courseSeq, marksById);
+    }
+}
+
+function legsCompletedAt(layer, targetTimeMs) {
+    if (!layer?.roundingTimes) return 0;
+    let count = 0;
+    for (const t of layer.roundingTimes) {
+        if (t !== undefined && t <= targetTimeMs) count++;
+        else break;
+    }
+    return count;
+}
+
+// Along-course meters from start to current playback time. Sums leg
+// lengths for completed legs and adds projected progress along the
+// active leg (legLength - distToTarget, clamped to [0, legLength]).
+function progressMetersAt(point, courseSeq, marksById, legsCompleted, startAnchor) {
+    if (!courseSeq?.length || !point) return 0;
+    let prev = startAnchor;
+    if (!prev) return 0;
+    let cum = 0;
+    for (let i = 0; i < legsCompleted; i++) {
+        const m = marksById[courseSeq[i]];
+        if (!m) break;
+        cum += haversineMeters(prev.lat, prev.lon, m.lat, m.lon);
+        prev = m;
+    }
+    if (legsCompleted < courseSeq.length && prev) {
+        const target = marksById[courseSeq[legsCompleted]];
+        if (target) {
+            const legLen = haversineMeters(prev.lat, prev.lon, target.lat, target.lon);
+            const distToT = haversineMeters(point.lat, point.lon, target.lat, target.lon);
+            cum += Math.max(0, Math.min(legLen, legLen - distToT));
+        }
+    }
+    return cum;
+}
+
 function addBoatTrack(deviceId, gpsData, boat) {
     const color = BOAT_COLORS[deviceId] || '#888888';
 
@@ -420,6 +520,22 @@ function renderLeaderboard() {
         const color = BOAT_COLORS[item.deviceId] || '#888888';
         const posClass = pos <= 3 ? `p${pos}` : '';
 
+        // Bottom-line stats: VMG (when course defined) and gap (or LEAD).
+        const subParts = [];
+        if (item.vmg !== null && item.vmg !== undefined) {
+            const sign = item.vmg >= 0 ? '+' : '';
+            subParts.push(`VMG ${sign}${item.vmg.toFixed(1)}`);
+        }
+        if (item.gap === null || item.gap === undefined) {
+            // leader
+            subParts.push(positions.length > 1 ? 'LEAD' : '—');
+        } else {
+            const gap = item.gap;
+            subParts.push(gap >= 1000
+                ? `−${(gap / 1000).toFixed(2)} km`
+                : `−${gap.toFixed(0)} m`);
+        }
+
         return `
             <div class="leaderboard-item">
                 <div class="leaderboard-position ${posClass}">${pos}</div>
@@ -430,7 +546,7 @@ function renderLeaderboard() {
                 </div>
                 <div class="leaderboard-stats">
                     <div class="leaderboard-speed">${item.speed.toFixed(1)} kn</div>
-                    <div class="leaderboard-delta">${item.delta}</div>
+                    <div class="leaderboard-delta">${subParts.join(' · ')}</div>
                 </div>
             </div>
         `;
@@ -442,21 +558,51 @@ function calculatePositions() {
 
     const positions = [];
 
+    const courseSeq = currentRace?.course || [];
+    const courseDefined = courseSeq.length > 0;
+    const marksById = buildMarksById(currentRace);
+    const startAnchor = startMidpoint(currentRace);
+    const startTimeMs = currentRace ? new Date(currentRace.start_time).getTime() : 0;
+    const targetTimeMs = startTimeMs + (playCursorSeconds * 1000);
+
     for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
         if (boatData.error || !boatData.sensors?.gps?.length) continue;
 
         const layer = boatLayers[deviceId];
         const boat = boatData.boat;
 
-        // Use the playback-time point cached by updateBoatPositions().
-        // Falls back to the last point if playback hasn't set it yet.
         const gps = boatData.sensors.gps;
         const idx = layer?.currentIdx ?? (gps.length - 1);
         const point = layer?.current || gps[gps.length - 1];
 
-        // Cumulative distance traveled at the current playback time, in meters.
-        const distM = (layer?.cumDist && layer.cumDist[idx] !== undefined)
+        // Distance-only fallback for races without a defined course.
+        const cumDistM = (layer?.cumDist && layer.cumDist[idx] !== undefined)
             ? layer.cumDist[idx] : 0;
+
+        // Course-aware metrics (only when a course sequence is defined)
+        let legsCompleted = 0;
+        let progressM = cumDistM;
+        let vmg = null;
+        let distToNext = null;
+        let nextMarkName = null;
+        if (courseDefined && layer && point && point.lat && point.lon) {
+            legsCompleted = legsCompletedAt(layer, targetTimeMs);
+            progressM = progressMetersAt(point, courseSeq, marksById, legsCompleted,
+                                         startAnchor || { lat: gps[0].lat, lon: gps[0].lon });
+            if (legsCompleted < courseSeq.length) {
+                const target = marksById[courseSeq[legsCompleted]];
+                if (target) {
+                    nextMarkName = target.name || target.mark_type || `Mark ${legsCompleted + 1}`;
+                    distToNext = haversineMeters(point.lat, point.lon, target.lat, target.lon);
+                    const brg = bearingDegrees(point.lat, point.lon, target.lat, target.lon);
+                    const sog = point.speed_kn || 0;
+                    const cog = point.course || 0;
+                    // Signed angle (-180..180) from heading to mark bearing.
+                    const angleDiff = ((brg - cog + 540) % 360) - 180;
+                    vmg = sog * Math.cos(angleDiff * Math.PI / 180);
+                }
+            }
+        }
 
         // Display team name if available, else boat name, else device ID
         const displayName = boat?.team_name || boat?.boat_name || deviceId;
@@ -468,26 +614,37 @@ function calculatePositions() {
             subtitle,
             speed: point?.speed_kn || 0,
             heading: point?.course || 0,
-            distM,
-            delta: '',
+            cumDistM,
+            progressM,
+            legsCompleted,
+            distToNext,
+            nextMarkName,
+            vmg,
+            gap: null,  // filled in below
         });
     }
 
-    // Rank by cumulative distance traveled (more = farther along the course).
-    // For a one-design fleet on the same start, this is a fair proxy for race
-    // position until course-defined distance-to-mark is wired up.
-    positions.sort((a, b) => b.distM - a.distM);
+    // Rank: course-aware uses (legsCompleted DESC, distToNext ASC); fallback
+    // is cumulative distance traveled.
+    if (courseDefined) {
+        positions.sort((a, b) => {
+            if (b.legsCompleted !== a.legsCompleted) return b.legsCompleted - a.legsCompleted;
+            const da = a.distToNext ?? Infinity;
+            const db = b.distToNext ?? Infinity;
+            return da - db;
+        });
+    } else {
+        positions.sort((a, b) => b.cumDistM - a.cumDistM);
+    }
 
-    // Delta is meters behind the leader (or speed for the leader).
+    // Gap: along-course meters behind leader (course defined) or behind in
+    // raw distance traveled (fallback). Leader keeps gap=null and the
+    // renderer turns that into "LEAD".
     if (positions.length > 0) {
         const leader = positions[0];
-        positions[0].delta = `${leader.speed.toFixed(1)} kn`;
+        const baseField = courseDefined ? 'progressM' : 'cumDistM';
         for (let i = 1; i < positions.length; i++) {
-            const gap = leader.distM - positions[i].distM;
-            const gapStr = gap >= 1000
-                ? `-${(gap / 1000).toFixed(2)} km`
-                : `-${gap.toFixed(0)} m`;
-            positions[i].delta = gapStr;
+            positions[i].gap = leader[baseField] - positions[i][baseField];
         }
     }
 
@@ -631,7 +788,12 @@ function updateSpeedChart() {
         toggle.className = 'chart-toggle';
         toggle.style.borderColor = color;
         toggle.style.background = color;
-        toggle.title = deviceId;
+        // Hover label = team / boat name instead of device id.
+        const team = boatData.boat?.team_name;
+        const boatName = boatData.boat?.boat_name;
+        toggle.title = team && boatName
+            ? `${team} — ${boatName}`
+            : (team || boatName || deviceId);
         toggle.addEventListener('click', () => {
             const sNew = !speedChart.data.datasets.find(d => d.label === deviceId)?.hidden;
             for (const ch of [speedChart, heelChart, windChart]) {
@@ -927,6 +1089,10 @@ async function loadRaceData(raceId) {
 
         // Render course (marks + start/finish lines) if present
         renderCourseViewLayer(currentRace);
+
+        // Pre-compute course progress (mark roundings + leg lengths) per
+        // boat. Cheap to do once, drives the leaderboard ranking and VMG.
+        precomputeAllRoundings();
 
         // Render legend and leaderboard
         renderBoatLegend();
