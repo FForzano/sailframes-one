@@ -190,8 +190,9 @@ flash_with_prompt() {
     echo "About to flash:"
     echo "  Version: $VERSION"
     echo "  Port:    $port"
-    read -r -p "Proceed? [y/N] " ans
-    [[ "$ans" =~ ^[yY] ]] || { echo "Skipped."; return 0; }
+    read -r -p "Proceed? [Y/n] " ans
+    # Empty answer (just Enter) = yes. Only "n"/"N" cancels.
+    [[ -z "$ans" || "$ans" =~ ^[yY] ]] || { echo "Skipped."; return 0; }
   fi
   flash_one "$port"
 }
