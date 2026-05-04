@@ -57,13 +57,14 @@ BOSTON_BUOYS = {
         "data": ["wind", "waves", "air_temp", "water_temp"],
         "color": "#ffad1f",
     },
-    # NWS Airport station - uses weather.gov API
+    # FAA / NWS airport stations — fetched via aviationweather.gov for live
+    # data and Iowa State Mesonet ASOS archive for history (decades back).
     "KBOS": {
         "name": "Logan Airport",
         "lat": 42.36,
         "lon": -71.01,
         "type": "airport",
-        "source": "nws",
+        "source": "metar",
         "data": ["wind", "pressure", "air_temp"],
         "color": "#06b6d4",
     },
@@ -407,6 +408,221 @@ def fetch_nws_data_for_timerange(station_id: str, start_ts: float, end_ts: float
     return filtered
 
 
+# --------------------------------------------------------------------------
+# METAR sources for airport stations (KBOS / KBED / KMQE / etc.)
+#
+# api.weather.gov works but only retains ~7 days. Two better sources:
+#   - aviationweather.gov (FAA) for the last ~168 hours, JSON, fast,
+#     captures sub-hourly SPECI reports between scheduled METARs.
+#   - Iowa State University Mesonet ASOS archive for historical depth
+#     (decades back), CSV via CGI, no auth, no rate limit.
+#
+# fetch_metar_data_for_timerange() is a tiered router: try the freshest
+# source first, fall back to deeper history, and finally to api.weather.gov
+# as a last resort. Result schema matches fetch_buoy_data() so the rest of
+# the pipeline doesn't change.
+# --------------------------------------------------------------------------
+
+def fetch_aviationweather_metar(station_id: str, hours: int) -> list:
+    """Fetch recent METARs from FAA aviationweather.gov. Up to ~168 hours."""
+    hours = max(1, min(int(hours), 168))
+    cache_key = f"avwx_{station_id}_{hours}h"
+    if cache_key in _cache:
+        cached_time, cached_data = _cache[cache_key]
+        if datetime.utcnow().timestamp() - cached_time < CACHE_TTL_SECONDS:
+            return cached_data
+
+    url = (
+        f"https://aviationweather.gov/api/data/metar"
+        f"?ids={station_id}&format=json&hours={hours}&taf=false"
+    )
+    try:
+        req = Request(url, headers={"User-Agent": "SailFrames/1.0"})
+        with urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"aviationweather fetch failed for {station_id}: {e}")
+        _cache[cache_key] = (datetime.utcnow().timestamp(), [])
+        return []
+
+    data = []
+    for obs in payload or []:
+        try:
+            ts_unix = int(obs.get("obsTime", 0))
+            if not ts_unix:
+                continue
+            ts = datetime.utcfromtimestamp(ts_unix)
+            point = {
+                "timestamp": ts.isoformat() + "Z",
+                "unix_ts": ts_unix,
+            }
+            wdir = obs.get("wdir")
+            if wdir is not None and wdir != "VRB":
+                try:
+                    point["wind_dir"] = float(wdir)
+                except (ValueError, TypeError):
+                    pass
+            wspd = obs.get("wspd")
+            if wspd is not None:
+                try:
+                    point["wind_speed_kts"] = round(float(wspd), 1)
+                except (ValueError, TypeError):
+                    pass
+            wgst = obs.get("wgst")
+            if wgst is not None:
+                try:
+                    point["wind_gust_kts"] = round(float(wgst), 1)
+                except (ValueError, TypeError):
+                    pass
+            temp = obs.get("temp")
+            if temp is not None:
+                try:
+                    point["air_temp_c"] = float(temp)
+                except (ValueError, TypeError):
+                    pass
+            altim = obs.get("altim")  # already hPa per AviationWeather schema
+            if altim is not None:
+                try:
+                    point["pressure_hpa"] = float(altim)
+                except (ValueError, TypeError):
+                    pass
+            if "wind_dir" in point or "wind_speed_kts" in point:
+                data.append(point)
+        except Exception:
+            continue
+
+    data.sort(key=lambda x: x["unix_ts"])
+    _cache[cache_key] = (datetime.utcnow().timestamp(), data)
+    return data
+
+
+def fetch_iowa_state_asos(station_id: str, start_ts: float, end_ts: float) -> list:
+    """Fetch historical METARs from Iowa State Mesonet ASOS archive.
+    Cache key is rounded to UTC date so two reloads of the same race
+    share the same fetch."""
+    start_dt = datetime.utcfromtimestamp(start_ts) - timedelta(hours=1)
+    end_dt = datetime.utcfromtimestamp(end_ts) + timedelta(hours=1)
+    cache_key = f"iastate_{station_id}_{start_dt.date()}_{end_dt.date()}"
+    if cache_key in _cache:
+        cached_time, cached_data = _cache[cache_key]
+        # 1-hour cache for archive data — it doesn't change frequently
+        if datetime.utcnow().timestamp() - cached_time < 3600:
+            return cached_data
+
+    params = {
+        "station": station_id,
+        "data": "drct,sknt,gust,tmpf,alti",
+        "year1": start_dt.year, "month1": start_dt.month, "day1": start_dt.day,
+        "hour1": start_dt.hour, "minute1": start_dt.minute,
+        "year2": end_dt.year, "month2": end_dt.month, "day2": end_dt.day,
+        "hour2": end_dt.hour, "minute2": end_dt.minute,
+        "tz": "Etc/UTC",
+        "format": "onlycomma",
+        "latlon": "no",
+        "missing": "null",
+        "trace": "null",
+        "direct": "no",
+        "report_type": "3,4",
+    }
+    url = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py?" + urlencode(params)
+    try:
+        req = Request(url, headers={"User-Agent": "SailFrames/1.0"})
+        with urlopen(req, timeout=20) as response:
+            text = response.read().decode("utf-8")
+    except Exception as e:
+        logger.warning(f"Iowa State ASOS fetch failed for {station_id}: {e}")
+        _cache[cache_key] = (datetime.utcnow().timestamp(), [])
+        return []
+
+    lines = text.strip().split("\n")
+    if len(lines) < 2:
+        _cache[cache_key] = (datetime.utcnow().timestamp(), [])
+        return []
+    header = [h.strip() for h in lines[0].split(",")]
+    try:
+        idx_valid = header.index("valid")
+        idx_drct = header.index("drct")
+        idx_sknt = header.index("sknt")
+    except ValueError:
+        _cache[cache_key] = (datetime.utcnow().timestamp(), [])
+        return []
+    idx_gust = header.index("gust") if "gust" in header else None
+    idx_tmpf = header.index("tmpf") if "tmpf" in header else None
+    idx_alti = header.index("alti") if "alti" in header else None
+
+    def _f(parts, i):
+        if i is None or i >= len(parts):
+            return None
+        s = parts[i].strip()
+        if not s or s.lower() == "null" or s.lower() == "m":
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    data = []
+    for line in lines[1:]:
+        parts = line.split(",")
+        if len(parts) < len(header):
+            continue
+        try:
+            ts = datetime.strptime(parts[idx_valid].strip(), "%Y-%m-%d %H:%M")
+            point = {
+                "timestamp": ts.isoformat() + "Z",
+                "unix_ts": int(ts.timestamp()),
+            }
+            v = _f(parts, idx_drct)
+            if v is not None: point["wind_dir"] = round(v, 0)
+            v = _f(parts, idx_sknt)
+            if v is not None: point["wind_speed_kts"] = round(v, 1)
+            v = _f(parts, idx_gust)
+            if v is not None: point["wind_gust_kts"] = round(v, 1)
+            v = _f(parts, idx_tmpf)
+            if v is not None: point["air_temp_c"] = round((v - 32) * 5 / 9, 1)
+            v = _f(parts, idx_alti)
+            if v is not None: point["pressure_hpa"] = round(v * 33.8639, 1)  # inHg → hPa
+            if "wind_dir" in point or "wind_speed_kts" in point:
+                data.append(point)
+        except (ValueError, IndexError):
+            continue
+
+    data.sort(key=lambda x: x["unix_ts"])
+    _cache[cache_key] = (datetime.utcnow().timestamp(), data)
+    return data
+
+
+def fetch_metar_data_for_timerange(station_id: str, start_ts: float, end_ts: float) -> list:
+    """Tiered METAR fetch:
+       1. aviationweather.gov for windows ending within the last 7 days
+       2. Iowa State Mesonet ASOS archive for older windows or as fallback
+       3. api.weather.gov as last resort if both above fail."""
+    now = datetime.utcnow().timestamp()
+    age_hours_end = (now - end_ts) / 3600
+    age_hours_start = (now - start_ts) / 3600
+
+    # Tier 1: aviationweather.gov (fresh, fast)
+    if age_hours_start <= 168:
+        hours_back = max(1, int(age_hours_start) + 2)
+        all_data = fetch_aviationweather_metar(station_id, hours_back)
+        filtered = [d for d in all_data if start_ts <= d["unix_ts"] <= end_ts]
+        if filtered:
+            return filtered
+
+    # Tier 2: Iowa State Mesonet (deep archive)
+    all_data = fetch_iowa_state_asos(station_id, start_ts, end_ts)
+    filtered = [d for d in all_data if start_ts <= d["unix_ts"] <= end_ts]
+    if filtered:
+        return filtered
+
+    # Tier 3: api.weather.gov (last resort)
+    if age_hours_start <= 168:
+        all_data = fetch_nws_station_data(station_id, max(1, int(age_hours_start) + 1))
+        return [d for d in all_data if start_ts <= d["unix_ts"] <= end_ts]
+
+    return []
+
+
 def fetch_synoptic_stations(start_ts: float, end_ts: float) -> dict:
     """Query Synoptic Mesonet for all stations with wind sensors in the
     Boston Harbor bbox over the requested window. Returns a dict shaped
@@ -536,7 +752,10 @@ def get_all_buoys_data(start_ts: float, end_ts: float) -> dict:
         source = meta.get("source", "ndbc")
 
         try:
-            if source == "nws":
+            if source == "metar":
+                data = fetch_metar_data_for_timerange(station_id, start_ts, end_ts)
+            elif source == "nws":
+                # legacy fallback if any station still uses the old source
                 data = fetch_nws_data_for_timerange(station_id, start_ts, end_ts)
             else:
                 data = fetch_buoy_data_for_timerange(station_id, start_ts, end_ts)
