@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.03.07"
+#define FW_VERSION    "2026.05.03.08"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -863,12 +863,41 @@ void resetPressureMinMax() {
 // ============================================================
 // SETUP
 // ============================================================
+// Convert esp_reset_reason_t to a short label so a reboot log line is
+// readable without grepping ESP-IDF headers.
+static const char* resetReasonStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:    return "POWERON";
+    case ESP_RST_EXT:        return "EXT";
+    case ESP_RST_SW:         return "SW";
+    case ESP_RST_PANIC:      return "PANIC";
+    case ESP_RST_INT_WDT:    return "INT_WDT";
+    case ESP_RST_TASK_WDT:   return "TASK_WDT";
+    case ESP_RST_WDT:        return "WDT";
+    case ESP_RST_DEEPSLEEP:  return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:   return "BROWNOUT";
+    case ESP_RST_SDIO:       return "SDIO";
+    default:                 return "UNKNOWN";
+  }
+}
+
 void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(500);
+
+  // Capture WHY we last rebooted before any other init runs. The fleet
+  // had a simultaneous-reboot event on 2026-05-03 with no serial captured;
+  // this prints the cause at the top of the next boot log AND appends it
+  // to /boot.log on SD so we can read it later if no USB was connected.
+  esp_reset_reason_t resetReason = esp_reset_reason();
+
   Serial.println("\n=================================");
   Serial.printf("  SailFrames E1 %s — PPK Logger\n", FW_VERSION);
   Serial.println("  Hardware Power Switch Edition");
+  Serial.printf("  Reset reason: %s (%d)\n", resetReasonStr(resetReason), (int)resetReason);
+  Serial.printf("  Free heap: %u, min ever: %u\n",
+                ESP.getFreeHeap(),
+                (unsigned)esp_get_minimum_free_heap_size());
   Serial.println("=================================");
 
   // Create SD mutex for dual-core safety
@@ -998,6 +1027,19 @@ void setup() {
         cardType == CARD_SDHC ? "SDHC" : "UNKNOWN");
       loadConfig();
       loadIMUCalibration();
+
+      // Append a boot record so we can reconstruct reset history later
+      // even without a USB cable attached at the moment of failure.
+      File bootLog = SD.open("/boot.log", FILE_APPEND);
+      if (bootLog) {
+        bootLog.printf("boot fw=%s reset=%s heap=%u min_heap=%u\n",
+                       FW_VERSION,
+                       resetReasonStr(esp_reset_reason()),
+                       ESP.getFreeHeap(),
+                       (unsigned)esp_get_minimum_free_heap_size());
+        bootLog.close();
+        Serial.println("[SD] Boot record appended to /boot.log");
+      }
     }
   } else {
     Serial.println("[SD] === SD CARD FAILED ===");
@@ -1152,11 +1194,14 @@ void setup() {
   recState = REC_IDLE;
   Serial.println("[REC] Auto-recording enabled - waiting for GPS speed trigger");
 
-  // Increase watchdog timeout for upload task on Core 0.
-  // HTTP operations (DNS, TCP connect, file PUT) block for 5-30+ seconds.
-  // Default 5s timeout is too short. Set to 120s to cover large file uploads.
+  // Watchdog timeout: 300s (5 min). HTTP PUTs of 600KB+ RTCM3 files at
+  // marginal signal can stretch past 120s in a single sendRequest() —
+  // we don't get to call esp_task_wdt_reset() inside HTTPClient. The
+  // 2026-05-03 fleet simultaneous-reboot event is consistent with the
+  // wdt firing on a slow PUT across multiple devices when signal briefly
+  // degraded. 300s gives ~3.6 KB/s for a 1 MB file before tripping.
   esp_task_wdt_config_t wdt_config = {
-    .timeout_ms = 120000,
+    .timeout_ms = 300000,
     .idle_core_mask = 0,       // Don't monitor IDLE tasks on any core
     .trigger_panic = true
   };
@@ -4666,7 +4711,7 @@ void uploadTaskFunc(void* param) {
 // ============================================================
 void loop() {
   esp_task_wdt_reset();  // feed wdt — without this a stuck loop iteration
-                         // panics in 120s with a backtrace pointing at the
+                         // panics in 300s with a backtrace pointing at the
                          // call that hung (firmware 2026.05.03.01 hard hang)
   g_loopIter++;
   g_loopSection = "top";
