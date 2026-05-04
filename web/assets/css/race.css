@@ -1356,20 +1356,26 @@ body.course-editing .boat-legend {
         box-shadow: inset 0 -2px 0 #22d3ee;
     }
 
-    /* Main grid: single column, full viewport. Header (56) + tabs (40) +
-       footer timeline (60) = 156px subtracted. */
+    /* Switch from CSS grid to flex column so the visible panel can claim
+       flex:1 height. Without this, the grid row collapses to content
+       height and Leaflet has no canvas to fill (resulting in the blank
+       map seen on iPhone after the first deploy). 100dvh handles iOS
+       Safari's dynamic toolbar correctly; 100vh fallback for older browsers. */
     .race-dashboard .race-main {
-        grid-template-columns: 1fr !important;
+        display: flex !important;
+        flex-direction: column;
         height: calc(100vh - 56px - 40px - 60px);
+        height: calc(100dvh - 56px - 40px - 60px);
         gap: 0;
         padding: 0;
     }
 
-    /* Show one panel at a time based on body[data-mobile-tab] */
     .race-dashboard .map-panel,
     .race-dashboard .analytics-panel,
     .race-dashboard .race-panel {
         display: none;
+        flex: 1 1 0;
+        min-height: 0;
     }
     body[data-mobile-tab="map"]       .race-dashboard .map-panel       { display: flex; }
     body[data-mobile-tab="standings"] .race-dashboard .race-panel      { display: flex; }

@@ -209,6 +209,14 @@ async function init() {
     // Mobile UX (only active when viewport ≤ 900 px — see race.css media query)
     setupMobileNav();
 
+    // Ensure Leaflet has correct dimensions after initial CSS layout settles
+    // (on mobile the map panel height depends on flex:1 inside .race-main,
+    // which isn't necessarily resolved when initMap() runs).
+    setTimeout(() => { if (map) map.invalidateSize(); }, 250);
+    window.addEventListener('resize', () => {
+        if (map) map.invalidateSize();
+    });
+
     // Auto-load the most recent race with boat data
     await loadLatestRaceWithData();
 
