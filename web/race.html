@@ -24,13 +24,14 @@
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=9">
-    <link rel="stylesheet" href="./assets/css/race.css?v=13">
+    <link rel="stylesheet" href="./assets/css/race.css?v=14">
     <script src="./config.js"></script>
 </head>
 <body class="race-dashboard">
     <header class="header">
+        <button id="mobile-menu-btn" class="mobile-only-btn" aria-label="Menu">☰</button>
         <a href="./" class="logo-link"><h1 class="logo">SailFrames</h1></a>
-        <div class="race-controls">
+        <div class="race-controls" id="race-controls">
             <select id="regatta-select" title="Regatta Series">
                 <option value="">Select Regatta...</option>
             </select>
@@ -50,6 +51,13 @@
         <a href="./sessions.html" class="nav-link">Sessions</a>
         <a href="./session.html" class="nav-link">Timeline</a>
     </header>
+
+    <!-- Mobile-only tabs (hidden via CSS on desktop). One panel visible at a time. -->
+    <nav class="mobile-tabs" id="mobile-tabs" aria-label="Mobile view tabs">
+        <button data-mtab="map" class="active">Map</button>
+        <button data-mtab="standings">Standings</button>
+        <button data-mtab="charts">Charts</button>
+    </nav>
 
     <main class="main race-main">
         <!-- Left panel: Multi-boat Map -->
@@ -241,6 +249,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=15"></script>
+    <script type="module" src="./assets/js/race-app.js?v=16"></script>
 </body>
 </html>

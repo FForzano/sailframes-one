@@ -206,6 +206,9 @@ async function init() {
     const manBtn = document.getElementById('btn-maneuvers');
     if (manBtn) manBtn.addEventListener('click', openManeuverModal);
 
+    // Mobile UX (only active when viewport ≤ 900 px — see race.css media query)
+    setupMobileNav();
+
     // Auto-load the most recent race with boat data
     await loadLatestRaceWithData();
 
@@ -1327,6 +1330,65 @@ function updateSpeedChart() {
     speedChart.update();
     heelChart.update();
     windChart.update();
+}
+
+// --- Mobile UX (tabs + collapsible menu) ---
+//
+// Activated by CSS media query at <=900px width. JS only needs to:
+//   - flip the active tab (CSS handles which panel is visible)
+//   - close the slide-down menu on selection
+//   - tell Leaflet/Chart.js to re-measure when becoming visible
+//     (otherwise they render with the wrong dimensions because they
+//      were sized while their parent had display:none).
+function setupMobileNav() {
+    document.body.dataset.mobileTab = 'map';
+
+    // Tab switching
+    const tabs = document.getElementById('mobile-tabs');
+    if (tabs) {
+        for (const btn of tabs.querySelectorAll('button')) {
+            btn.addEventListener('click', () => {
+                const t = btn.dataset.mtab;
+                document.body.dataset.mobileTab = t;
+                for (const b of tabs.querySelectorAll('button')) {
+                    b.classList.toggle('active', b === btn);
+                }
+                // Force re-measure so Leaflet/Chart.js fill the now-visible panel
+                requestAnimationFrame(() => {
+                    if (t === 'map' && map) map.invalidateSize();
+                    if (t === 'charts') {
+                        for (const ch of [speedChart, heelChart, windChart]) {
+                            if (ch) ch.resize();
+                        }
+                    }
+                });
+            });
+        }
+    }
+
+    // Slide-down menu toggle
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    if (menuBtn) {
+        menuBtn.addEventListener('click', () => {
+            document.body.classList.toggle('mobile-menu-open');
+        });
+    }
+
+    // Auto-close the menu on any race-controls click (selectors / buttons),
+    // so picking a race or pressing Legs dismisses the overlay naturally.
+    const ctrls = document.getElementById('race-controls');
+    if (ctrls) {
+        ctrls.addEventListener('click', (e) => {
+            if (e.target.closest('button, select') && document.body.classList.contains('mobile-menu-open')) {
+                document.body.classList.remove('mobile-menu-open');
+            }
+        });
+        ctrls.addEventListener('change', () => {
+            if (document.body.classList.contains('mobile-menu-open')) {
+                document.body.classList.remove('mobile-menu-open');
+            }
+        });
+    }
 }
 
 // --- Per-boat detail drawer ---
