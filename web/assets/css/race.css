@@ -656,15 +656,33 @@ body.course-editing .boat-legend {
 .drawer-value.drawer-strong { font-size: 1.1rem; color: #22d3ee; font-weight: 600; }
 .drawer-sub { font-size: 0.7rem; opacity: 0.6; }
 
-/* Wind-source segmented picker (Castle Is / Logan / 16NM) */
+/* Wind-source segmented picker (Castle Is / Logan / 16NM) — sits in the
+   top toolbar next to Edit Course / Legs / Maneuvers, with room to breathe. */
 .wind-source-picker {
     display: flex;
     align-items: center;
-    margin-left: auto;
     border: 1px solid var(--border);
     border-radius: 4px;
     overflow: hidden;
-    height: 28px;
+    height: 32px;
+}
+
+.wind-source-picker.toolbar-wind-picker {
+    margin-left: 0.5rem;
+}
+
+.wind-source-picker::before {
+    content: 'WIND';
+    padding: 0 0.5rem;
+    font-size: 0.65rem;
+    font-family: monospace;
+    color: var(--text-secondary);
+    border-right: 1px solid var(--border);
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255,255,255,0.02);
+    letter-spacing: 0.08em;
 }
 
 .wind-source-picker button {
@@ -672,11 +690,12 @@ body.course-editing .boat-legend {
     color: var(--text-secondary);
     border: none;
     border-right: 1px solid var(--border);
-    padding: 0 0.5rem;
-    font-size: 0.7rem;
+    padding: 0 0.6rem;
+    font-size: 0.75rem;
     font-family: monospace;
     cursor: pointer;
     height: 100%;
+    white-space: nowrap;
 }
 
 .wind-source-picker button:last-child { border-right: none; }
@@ -685,8 +704,6 @@ body.course-editing .boat-legend {
     background: rgba(34, 211, 238, 0.18);
     color: #22d3ee;
 }
-
-.wind-source-picker + .wind-badge { margin-left: 0.5rem; }
 
 /* Layline toggle Leaflet control */
 .map-toggle-control a {

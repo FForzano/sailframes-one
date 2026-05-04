@@ -24,7 +24,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=9">
-    <link rel="stylesheet" href="./assets/css/race.css?v=12">
+    <link rel="stylesheet" href="./assets/css/race.css?v=13">
     <script src="./config.js"></script>
 </head>
 <body class="race-dashboard">
@@ -45,6 +45,7 @@
             <button id="btn-edit-course" class="btn-secondary" title="Edit course on map" disabled>Edit Course</button>
             <button id="btn-leg-summary" class="btn-secondary" title="Leg-by-leg per-boat summary">Legs</button>
             <button id="btn-maneuvers" class="btn-secondary" title="Tacks &amp; gybes comparison">Maneuvers</button>
+            <div class="wind-source-picker toolbar-wind-picker" id="wind-source-picker" style="display:none"></div>
         </div>
         <a href="./sessions.html" class="nav-link">Sessions</a>
         <a href="./session.html" class="nav-link">Timeline</a>
@@ -114,7 +115,6 @@
         <section class="panel race-panel" id="race-panel">
             <div class="panel-header">
                 <h2>Leaderboard</h2>
-                <div class="wind-source-picker" id="wind-source-picker" style="display:none"></div>
                 <div class="wind-badge" id="wind-badge" title="True wind direction / speed (NOAA)" style="display:none">
                     <span class="wind-dir" id="wind-dir">---°</span>
                     <span class="wind-speed" id="wind-speed">-- kn</span>
