@@ -1377,9 +1377,13 @@ body.course-editing .boat-legend {
         flex: 1 1 0;
         min-height: 0;
     }
-    body[data-mobile-tab="map"]       .race-dashboard .map-panel       { display: flex; }
-    body[data-mobile-tab="standings"] .race-dashboard .race-panel      { display: flex; }
-    body[data-mobile-tab="charts"]    .race-dashboard .analytics-panel { display: flex; }
+    /* `.race-dashboard` is ON <body> (not a descendant of it), so the
+       selector must combine the two on body. Earlier this was written with
+       a descendant combinator and matched nothing — leaving all three
+       panels hidden simultaneously regardless of which tab was active. */
+    body.race-dashboard[data-mobile-tab="map"]       .map-panel       { display: flex; }
+    body.race-dashboard[data-mobile-tab="standings"] .race-panel      { display: flex; }
+    body.race-dashboard[data-mobile-tab="charts"]    .analytics-panel { display: flex; }
 
     /* When map is on screen, take the full area */
     .race-dashboard .map-panel {
