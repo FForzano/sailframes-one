@@ -2606,6 +2606,17 @@ const MARK_TYPE_COLORS = {
     custom: '#ffffff',
 };
 const MARK_TYPES = ['windward', 'leeward', 'gate_port', 'gate_stbd', 'offset', 'custom'];
+
+// Human-readable label per mark type. Shown in the editor dropdown so it
+// reads as plain English rather than internal jargon.
+const MARK_TYPE_LABELS = {
+    windward:   'Windward (top mark)',
+    leeward:    'Leeward (bottom mark)',
+    gate_port:  'Leeward gate · port (left)',
+    gate_stbd:  'Leeward gate · stbd (right)',
+    offset:     'Offset (small mark below windward)',
+    custom:     'Custom',
+};
 const LINE_COLORS = { start_line: '#22d3ee', finish_line: '#f4212e' };
 
 function markTypeColor(type) {
@@ -2907,7 +2918,9 @@ function renderLineRow(kind, label) {
 }
 
 function renderMarkRow(mark) {
-    const opts = MARK_TYPES.map(t => `<option value="${t}" ${t === mark.mark_type ? 'selected' : ''}>${t}</option>`).join('');
+    const opts = MARK_TYPES.map(t =>
+        `<option value="${t}" ${t === mark.mark_type ? 'selected' : ''}>${MARK_TYPE_LABELS[t] || t}</option>`
+    ).join('');
     const color = markTypeColor(mark.mark_type);
     return `
         <div class="mark-row" data-mark-id="${mark.mark_id}">
