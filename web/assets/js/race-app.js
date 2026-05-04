@@ -56,7 +56,10 @@ let weatherWindSamples = [];       // sorted [{tMs, twd, tws}] from primary sour
 let weatherWindSource = null;      // "Castle Island" / "Logan" / null
 let raceAvgTWD = null;             // average TWD across the race window, for laylines
 let laylineLayer = null;           // Leaflet layer group holding rendered laylines
-let windMarker = null;             // Leaflet marker rendering current TWD/TWS arrow
+let windMarker = null;             // legacy single-marker (kept for compatibility)
+let windMarkers = {};              // stationId → Leaflet marker (multi-station rendering)
+let windStationStats = {};         // stationId → { meanTWD, stdTWD, minTWS, maxTWS, avgTWS, sampleCount }
+let _windDropdownOutsideListener = null;  // ref-tracked so re-renders don't leak handlers
 // Preferred-first ordering for the auto-pick. Synoptic SYN_* stations
 // are added dynamically below if/when they appear in the API response.
 const PRIMARY_WIND_STATIONS = ['CSIM3', 'KBOS', '44013'];
@@ -353,6 +356,11 @@ function clearBoatLayers() {
         map.removeLayer(windMarker);
         windMarker = null;
     }
+    for (const sid of Object.keys(windMarkers)) {
+        if (windMarkers[sid]) map.removeLayer(windMarkers[sid]);
+    }
+    windMarkers = {};
+    windStationStats = {};
 }
 
 // Project a point (lat, lon, bearingDegrees, distMeters) to a destination
@@ -600,43 +608,159 @@ function shortStationLabel(stationId, fullName) {
     return n.length > 14 ? n.slice(0, 13) + '…' : n;
 }
 
-// Wind-source segmented picker. Built dynamically from whatever stations
-// the buoys API returned with usable wind samples. Preferred order:
-// CSIM3 / KBOS / 44013 first (familiar), then everything else alpha.
-// Synoptic Mesonet stations come back as "SYN_*" station IDs and are
-// surfaced here automatically once they appear in raceBuoyData.
+// Compute mean/std/min/max wind direction and speed across the race
+// window for one station. TWD uses vector mean (handles 0/360 wrap).
+function computeWindStats(buoy, raceStartMs, raceEndMs) {
+    if (!buoy?.data_points?.length) return null;
+    // ±30 min buffer so short race windows still show stats.
+    const startMs = raceStartMs - 30 * 60 * 1000;
+    const endMs = raceEndMs + 30 * 60 * 1000;
+    const inWindow = [];
+    for (const d of buoy.data_points) {
+        if (d.wind_dir == null || d.wind_speed_kts == null) continue;
+        const t = d.timestamp ? new Date(d.timestamp).getTime() : (d.unix_ts * 1000);
+        if (!Number.isFinite(t) || t < startMs || t > endMs) continue;
+        inWindow.push(d);
+    }
+    if (!inWindow.length) return null;
+    let sx = 0, sy = 0;
+    let minTWS = Infinity, maxTWS = -Infinity, sumTWS = 0;
+    for (const d of inWindow) {
+        sx += Math.sin(d.wind_dir * Math.PI / 180);
+        sy += Math.cos(d.wind_dir * Math.PI / 180);
+        const s = d.wind_speed_kts;
+        if (s < minTWS) minTWS = s;
+        if (s > maxTWS) maxTWS = s;
+        sumTWS += s;
+    }
+    const meanTWD = (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
+    const r = Math.sqrt(sx * sx + sy * sy) / inWindow.length;
+    // Circular std (Mardia/Jupp formula). Clamp r to avoid log(0).
+    const stdTWD = Math.sqrt(-2 * Math.log(Math.max(r, 1e-6))) * 180 / Math.PI;
+    return {
+        sampleCount: inWindow.length,
+        meanTWD, stdTWD,
+        minTWS, maxTWS,
+        avgTWS: sumTWS / inWindow.length,
+    };
+}
+
+function computeAllWindStats() {
+    windStationStats = {};
+    if (!currentRace) return;
+    const raceStartMs = new Date(currentRace.start_time).getTime();
+    const raceEndMs   = new Date(currentRace.end_time).getTime();
+    for (const [sid, buoy] of Object.entries(raceBuoyData)) {
+        const s = computeWindStats(buoy, raceStartMs, raceEndMs);
+        if (s) windStationStats[sid] = s;
+    }
+}
+
+function fmtStationStats(stats) {
+    const tws = stats.minTWS.toFixed(0) === stats.maxTWS.toFixed(0)
+        ? `${stats.minTWS.toFixed(0)} kn`
+        : `${stats.minTWS.toFixed(0)}–${stats.maxTWS.toFixed(0)} kn`;
+    return `${Math.round(stats.meanTWD).toString().padStart(3, '0')}°±${Math.round(stats.stdTWD)}°  ${tws}`;
+}
+
+// Wind-source dropdown. Triggered by a single button showing the
+// currently selected station + its summary; click to expand the menu
+// listing every station with usable wind data, each row showing the
+// mean wind direction (with circular std-dev) and speed range during
+// the race window.
 function renderWindSourcePicker() {
     const host = document.getElementById('wind-source-picker');
     if (!host) return;
 
-    const usable = Object.entries(raceBuoyData)
-        .filter(([sid, b]) => b?.data_points?.some(d =>
-            d.wind_dir != null && d.wind_speed_kts != null
-        ))
-        .map(([sid, b]) => ({ id: sid, name: b.name || sid }));
+    computeAllWindStats();
+
+    const stations = Object.entries(raceBuoyData)
+        .filter(([sid, _b]) => windStationStats[sid])
+        .map(([sid, b]) => ({
+            id: sid,
+            name: b.name || sid,
+            color: b.color || '#888',
+            stats: windStationStats[sid],
+        }));
 
     const order = (sid) => {
         const i = PRIMARY_WIND_STATIONS.indexOf(sid);
         return i >= 0 ? i : 100;
     };
-    usable.sort((a, b) => {
+    stations.sort((a, b) => {
         const o = order(a.id) - order(b.id);
-        return o !== 0 ? o : a.name.localeCompare(b.name);
+        if (o !== 0) return o;
+        // Then by sample count desc, then by name
+        const c = b.stats.sampleCount - a.stats.sampleCount;
+        return c !== 0 ? c : a.name.localeCompare(b.name);
     });
 
-    if (usable.length <= 1) {
+    if (stations.length === 0) {
         host.style.display = 'none';
         return;
     }
     host.style.display = 'flex';
-    host.innerHTML = usable.map(c => {
-        const label = shortStationLabel(c.id, c.name);
-        const active = c.id === selectedWindStationId ? 'active' : '';
-        return `<button data-station="${c.id}" class="${active}"
-                 title="Use ${c.name} as wind source">${label}</button>`;
-    }).join('');
-    for (const btn of host.querySelectorAll('button')) {
-        btn.addEventListener('click', () => setWindStation(btn.dataset.station));
+
+    // Make sure selectedWindStationId is set to a station that exists
+    if (!stations.find(s => s.id === selectedWindStationId)) {
+        selectedWindStationId = stations[0].id;
+        rebuildWindFromSelected();
+    }
+    const selected = stations.find(s => s.id === selectedWindStationId) || stations[0];
+
+    host.innerHTML = `
+      <button class="wind-dropdown-trigger" id="wind-dropdown-trigger" aria-haspopup="listbox" aria-expanded="false">
+        <span class="wind-dropdown-prefix">WIND</span>
+        <span class="wind-dropdown-current">
+          <span class="wind-dropdown-current-name">${shortStationLabel(selected.id, selected.name)}</span>
+          <span class="wind-dropdown-current-stats">${fmtStationStats(selected.stats)}</span>
+        </span>
+        <span class="wind-dropdown-arrow" aria-hidden="true">▾</span>
+      </button>
+      <div class="wind-dropdown-menu" id="wind-dropdown-menu" role="listbox" hidden>
+        ${stations.map(s => `
+          <button class="wind-dropdown-option ${s.id === selectedWindStationId ? 'active' : ''}"
+                  data-station="${s.id}" role="option"
+                  aria-selected="${s.id === selectedWindStationId}">
+            <span class="wind-option-dot" style="background:${s.color}"></span>
+            <span class="wind-option-name">${shortStationLabel(s.id, s.name)}</span>
+            <span class="wind-option-stats">${fmtStationStats(s.stats)}</span>
+            <span class="wind-option-count">${s.stats.sampleCount}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+
+    const trigger = host.querySelector('#wind-dropdown-trigger');
+    const menu = host.querySelector('#wind-dropdown-menu');
+
+    function close() {
+        menu.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+    }
+    function toggle(e) {
+        if (e) { e.stopPropagation(); e.preventDefault(); }
+        const willOpen = menu.hidden;
+        menu.hidden = !willOpen;
+        trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    }
+
+    trigger.addEventListener('click', toggle);
+
+    // Click outside to close. Detach the previous render's listener so
+    // we don't leak handlers across picker rebuilds.
+    if (_windDropdownOutsideListener) {
+        document.removeEventListener('click', _windDropdownOutsideListener);
+    }
+    _windDropdownOutsideListener = (e) => { if (!host.contains(e.target)) close(); };
+    document.addEventListener('click', _windDropdownOutsideListener);
+
+    for (const opt of menu.querySelectorAll('.wind-dropdown-option')) {
+        opt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            close();
+            setWindStation(opt.dataset.station);
+        });
     }
 }
 
@@ -826,69 +950,106 @@ function updateWindBadge(targetTimeMs) {
             badge.style.display = 'none';
         }
     }
-    updateWindMarker(sample);
+    updateAllWindMarkers(targetTimeMs);
 }
 
-// Wind rose marker on the map at the source-station position. SVG arrow
-// rotates with TWD (showing direction wind is blowing TO).
-function ensureWindMarker() {
-    if (windMarker) return;
-    if (!map) return;
-    // Pick the station whose data we're using.
-    const stationId = (() => {
-        for (const sid of PRIMARY_WIND_STATIONS) {
-            if (raceBuoyData[sid]?.has_data) return sid;
+// Find the wind sample at a given time for ONE specific station (closest
+// data point). Used to drive the multi-station map rose markers.
+function stationWindAt(stationId, timeMs) {
+    const buoy = raceBuoyData[stationId];
+    if (!buoy?.data_points?.length) return null;
+    let best = null, bestDiff = Infinity;
+    for (const dp of buoy.data_points) {
+        if (dp.wind_dir == null || dp.wind_speed_kts == null) continue;
+        const t = dp.timestamp ? new Date(dp.timestamp).getTime() : (dp.unix_ts * 1000);
+        if (!Number.isFinite(t)) continue;
+        const diff = Math.abs(t - timeMs);
+        if (diff < bestDiff) {
+            bestDiff = diff;
+            best = { tMs: t, twd: dp.wind_dir, tws: dp.wind_speed_kts };
         }
-        return null;
-    })();
-    if (!stationId) return;
-    const stn = raceBuoyData[stationId];
-    if (stn.lat == null || stn.lon == null) return;
-    windMarker = L.marker([stn.lat, stn.lon], {
-        icon: createWindRoseIcon(0, 0, stn.name || stationId),
-        zIndexOffset: -100,  // behind boats
-        interactive: true,
-    });
-    windMarker.bindTooltip(`Wind source: ${stn.name || stationId}`, { sticky: true });
-    windMarker.addTo(map);
+    }
+    // Reject samples too far from the requested time (>2h, prevents
+    // showing wildly stale data from buffer regions).
+    return bestDiff < 7200_000 ? best : null;
 }
 
-function createWindRoseIcon(twd, tws, label) {
-    const blowTo = (twd + 180) % 360;  // direction wind moves to
+function createWindRoseIcon(twd, tws, opts = {}) {
+    const isSel = !!opts.selected;
+    const sz = isSel ? 56 : 36;
+    const arrow = isSel ? 44 : 30;
+    const fontTws = isSel ? '0.85rem' : '0.65rem';
+    const fontTwd = isSel ? '0.65rem' : '0.55rem';
+    const color = isSel ? '#22d3ee' : (opts.color || '#9ca3af');
+    const stroke = isSel ? 3 : 2;
+    const opacity = isSel ? 1 : 0.78;
+    const blowTo = (twd + 180) % 360;
     const tspeed = (tws ?? 0).toFixed(0);
+    const tdir = (twd ?? 0).toFixed(0).padStart(3, '0');
     const html = `
-        <div class="wind-rose">
-            <div class="wind-rose-arrow" style="transform: rotate(${blowTo}deg);">
-                <svg width="48" height="48" viewBox="0 0 48 48">
-                    <line x1="24" y1="40" x2="24" y2="10" stroke="#22d3ee" stroke-width="3" stroke-linecap="round"/>
-                    <polygon points="24,4 17,16 31,16" fill="#22d3ee"/>
+        <div class="wind-rose ${isSel ? 'is-selected' : 'is-secondary'}" style="opacity:${opacity}">
+            <div class="wind-rose-arrow" style="transform: rotate(${blowTo}deg); width:${arrow}px; height:${arrow}px">
+                <svg width="${arrow}" height="${arrow}" viewBox="0 0 48 48">
+                    <line x1="24" y1="40" x2="24" y2="10" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round"/>
+                    <polygon points="24,4 17,16 31,16" fill="${color}"/>
                 </svg>
             </div>
-            <div class="wind-rose-label">
-                <div class="wind-rose-tws">${tspeed} kn</div>
-                <div class="wind-rose-twd">${(twd ?? 0).toFixed(0).padStart(3,'0')}°</div>
+            <div class="wind-rose-label" style="color:${color}">
+                <div class="wind-rose-tws" style="font-size:${fontTws}">${tspeed} kn</div>
+                <div class="wind-rose-twd" style="font-size:${fontTwd}">${tdir}°</div>
             </div>
         </div>
     `;
     return L.divIcon({
         html, className: 'wind-rose-marker',
-        iconSize: [80, 80],
-        iconAnchor: [24, 24],
+        iconSize: [sz + 36, sz],
+        iconAnchor: [arrow / 2, arrow / 2],
     });
 }
 
-function updateWindMarker(sample) {
-    if (!sample) {
-        if (windMarker) { map.removeLayer(windMarker); windMarker = null; }
-        return;
+// Render or update markers for EVERY station with wind data. Selected
+// station gets the cyan/large treatment; others render small + muted.
+// Each marker rotates and updates with the playback cursor.
+function updateAllWindMarkers(targetTimeMs) {
+    if (!map) return;
+    const present = new Set();
+    for (const [sid, buoy] of Object.entries(raceBuoyData)) {
+        if (!windStationStats[sid]) continue;
+        if (buoy.lat == null || buoy.lon == null) continue;
+        present.add(sid);
+        const sample = stationWindAt(sid, targetTimeMs);
+        // Fall back to mean stats if no sample close enough
+        const twd = sample?.twd ?? windStationStats[sid].meanTWD;
+        const tws = sample?.tws ?? windStationStats[sid].avgTWS;
+        const isSelected = sid === selectedWindStationId;
+        const icon = createWindRoseIcon(twd, tws, {
+            selected: isSelected,
+            color: buoy.color || '#9ca3af',
+        });
+        if (windMarkers[sid]) {
+            windMarkers[sid].setIcon(icon);
+        } else {
+            const m = L.marker([buoy.lat, buoy.lon], {
+                icon,
+                zIndexOffset: isSelected ? -50 : -150,
+                interactive: true,
+            });
+            m.bindTooltip(buoy.name || sid, { sticky: true });
+            m.on('click', () => setWindStation(sid));
+            m.addTo(map);
+            windMarkers[sid] = m;
+        }
+        windMarkers[sid].setTooltipContent(
+            `${buoy.name || sid}: ${twd.toFixed(0)}° / ${tws.toFixed(1)} kn`
+        );
     }
-    ensureWindMarker();
-    if (!windMarker) return;
-    const stationName = weatherWindSource || 'NOAA';
-    windMarker.setIcon(createWindRoseIcon(sample.twd, sample.tws, stationName));
-    windMarker.setTooltipContent(
-        `${stationName}: ${sample.twd.toFixed(0)}° / ${sample.tws.toFixed(1)} kn`
-    );
+    // Remove any markers for stations no longer present
+    for (const sid of Object.keys(windMarkers)) {
+        if (!present.has(sid)) {
+            map.removeLayer(windMarkers[sid]);
+            delete windMarkers[sid];
+        }
+    }
 }
 
 function fitMapToBounds() {

@@ -656,14 +656,14 @@ body.course-editing .boat-legend {
 .drawer-value.drawer-strong { font-size: 1.1rem; color: #22d3ee; font-weight: 600; }
 .drawer-sub { font-size: 0.7rem; opacity: 0.6; }
 
-/* Wind-source segmented picker (Castle Is / Logan / 16NM) — sits in the
-   top toolbar next to Edit Course / Legs / Maneuvers, with room to breathe. */
+/* Wind-source dropdown (replaces segmented control). Single trigger button
+   shows the currently selected station + summary; click to expand a menu
+   listing every station with usable wind data, each row showing mean wind
+   direction (with circular std-dev) and speed range during the race. */
 .wind-source-picker {
+    position: relative;
     display: flex;
-    align-items: center;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    overflow: hidden;
+    align-items: stretch;
     height: 32px;
 }
 
@@ -671,38 +671,110 @@ body.course-editing .boat-legend {
     margin-left: 0.5rem;
 }
 
-.wind-source-picker::before {
-    content: 'WIND';
-    padding: 0 0.5rem;
-    font-size: 0.65rem;
-    font-family: monospace;
-    color: var(--text-secondary);
-    border-right: 1px solid var(--border);
-    height: 100%;
+.wind-dropdown-trigger {
     display: inline-flex;
     align-items: center;
-    background: rgba(255,255,255,0.02);
-    letter-spacing: 0.08em;
-}
-
-.wind-source-picker button {
+    gap: 0.4rem;
     background: transparent;
-    color: var(--text-secondary);
-    border: none;
-    border-right: 1px solid var(--border);
-    padding: 0 0.6rem;
-    font-size: 0.75rem;
-    font-family: monospace;
-    cursor: pointer;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 0.5rem;
     height: 100%;
-    white-space: nowrap;
+    cursor: pointer;
+    font-family: monospace;
+    color: var(--text-primary);
+    transition: border-color 0.15s, background 0.15s;
 }
 
-.wind-source-picker button:last-child { border-right: none; }
-.wind-source-picker button:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
-.wind-source-picker button.active {
-    background: rgba(34, 211, 238, 0.18);
-    color: #22d3ee;
+.wind-dropdown-trigger:hover { border-color: rgba(34,211,238,0.5); background: rgba(255,255,255,0.03); }
+.wind-dropdown-trigger[aria-expanded="true"] { border-color: #22d3ee; background: rgba(34,211,238,0.08); }
+
+.wind-dropdown-prefix {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    padding-right: 0.5rem;
+    border-right: 1px solid var(--border);
+}
+
+.wind-dropdown-current {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.1;
+    gap: 1px;
+    min-width: 110px;
+}
+
+.wind-dropdown-current-name { font-size: 0.78rem; color: #22d3ee; font-weight: 600; }
+.wind-dropdown-current-stats { font-size: 0.62rem; color: var(--text-secondary); }
+
+.wind-dropdown-arrow { font-size: 0.7rem; color: var(--text-secondary); margin-left: 0.2rem; }
+
+.wind-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 320px;
+    max-width: 92vw;
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 1300;
+    padding: 4px 0;
+}
+
+.wind-dropdown-menu[hidden] { display: none; }
+
+.wind-dropdown-option {
+    display: grid;
+    grid-template-columns: 14px 1fr auto auto;
+    align-items: center;
+    gap: 0.5rem;
+    background: transparent;
+    border: none;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    font-family: monospace;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.wind-dropdown-option:last-child { border-bottom: none; }
+.wind-dropdown-option:hover { background: rgba(255,255,255,0.04); }
+
+.wind-dropdown-option.active {
+    background: rgba(34,211,238,0.10);
+    box-shadow: inset 2px 0 0 #22d3ee;
+}
+
+.wind-option-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.15);
+}
+
+.wind-option-name { font-size: 0.85rem; }
+.wind-option-stats { font-size: 0.72rem; color: var(--text-secondary); }
+.wind-option-count { font-size: 0.65rem; color: var(--text-secondary); opacity: 0.7; min-width: 22px; text-align: right; }
+
+@media (max-width: 700px) {
+    .wind-dropdown-menu { right: auto; left: 0; min-width: 280px; }
+    .wind-dropdown-current { min-width: 80px; }
+    .wind-dropdown-current-name { font-size: 0.7rem; }
+    .wind-dropdown-current-stats { font-size: 0.55rem; }
+}
+
+/* Secondary (unselected) wind rose markers on the map: smaller, muted */
+.wind-rose-marker .wind-rose.is-secondary {
+    /* opacity inline; stays out of the way of boats but still visible */
+    pointer-events: auto;
 }
 
 /* Layline toggle Leaflet control */
