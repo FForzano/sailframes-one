@@ -48,15 +48,11 @@ BOSTON_BUOYS = {
         "data": ["wind", "air_temp"],
         "color": "#17bf63",
     },
-    "44029": {
-        "name": "Mass Bay A01",
-        "lat": 42.523,
-        "lon": -70.566,
-        "type": "offshore",
-        "source": "ndbc",
-        "data": ["wind", "waves", "air_temp", "water_temp"],
-        "color": "#ffad1f",
-    },
+    # Mass Bay A01 removed — too far north (42.52° vs harbor's 42.34°)
+    # to be representative of Boston Harbor wind. Re-add if you start
+    # racing in northern Mass Bay. Synoptic Mesonet (once activated) will
+    # pick up better intermediate stations automatically.
+    # "44029": { "name": "Mass Bay A01", ... },
     # FAA / NWS airport stations — fetched via aviationweather.gov for live
     # data and Iowa State Mesonet ASOS archive for history (decades back).
     "KBOS": {
@@ -286,16 +282,23 @@ def fetch_buoy_data(station_id: str, hours_back: int = 24) -> list:
 
 
 def fetch_buoy_data_for_timerange(station_id: str, start_ts: float, end_ts: float) -> list:
-    """Fetch buoy data for a specific time range."""
+    """Fetch buoy data for a specific time range, with a ±30-min filter
+    buffer. Short race windows (5-15 min) only contain 1-2 NDBC samples
+    without buffering, which makes the wind chart look near-empty.
+    Buffering lets the dashboard interpolate cleanly across the race."""
+    NDBC_BUFFER_S = 1800  # ±30 min
+    eff_start = start_ts - NDBC_BUFFER_S
+    eff_end = end_ts + NDBC_BUFFER_S
+
     buffer_hours = 2
-    start_dt = datetime.utcfromtimestamp(start_ts) - timedelta(hours=buffer_hours)
+    start_dt = datetime.utcfromtimestamp(eff_start) - timedelta(hours=buffer_hours)
 
     hours_back = int((datetime.utcnow() - start_dt).total_seconds() / 3600) + 1
     hours_back = min(hours_back, 45 * 24)  # Max 45 days
 
     all_data = fetch_buoy_data(station_id, hours_back)
 
-    filtered = [d for d in all_data if start_ts <= d["unix_ts"] <= end_ts]
+    filtered = [d for d in all_data if eff_start <= d["unix_ts"] <= eff_end]
 
     return filtered
 
@@ -596,29 +599,39 @@ def fetch_metar_data_for_timerange(station_id: str, start_ts: float, end_ts: flo
     """Tiered METAR fetch:
        1. aviationweather.gov for windows ending within the last 7 days
        2. Iowa State Mesonet ASOS archive for older windows or as fallback
-       3. api.weather.gov as last resort if both above fail."""
+       3. api.weather.gov as last resort if both above fail.
+
+       METAR observations are hourly (at xx:54 typically). Short race
+       windows (5-30 min) frequently contain ZERO METAR cycles, which
+       makes the station look like it has no data. We buffer the filter
+       by ±1h so the surrounding METARs are returned, letting the
+       dashboard interpolate wind to the playback cursor and keeping the
+       station in the wind-source picker."""
+    METAR_BUFFER_S = 3600  # ±1 hour
+    eff_start = start_ts - METAR_BUFFER_S
+    eff_end = end_ts + METAR_BUFFER_S
+
     now = datetime.utcnow().timestamp()
-    age_hours_end = (now - end_ts) / 3600
-    age_hours_start = (now - start_ts) / 3600
+    age_hours_start = (now - eff_start) / 3600
 
     # Tier 1: aviationweather.gov (fresh, fast)
     if age_hours_start <= 168:
-        hours_back = max(1, int(age_hours_start) + 2)
+        hours_back = max(2, int(age_hours_start) + 2)
         all_data = fetch_aviationweather_metar(station_id, hours_back)
-        filtered = [d for d in all_data if start_ts <= d["unix_ts"] <= end_ts]
+        filtered = [d for d in all_data if eff_start <= d["unix_ts"] <= eff_end]
         if filtered:
             return filtered
 
     # Tier 2: Iowa State Mesonet (deep archive)
-    all_data = fetch_iowa_state_asos(station_id, start_ts, end_ts)
-    filtered = [d for d in all_data if start_ts <= d["unix_ts"] <= end_ts]
+    all_data = fetch_iowa_state_asos(station_id, eff_start, eff_end)
+    filtered = [d for d in all_data if eff_start <= d["unix_ts"] <= eff_end]
     if filtered:
         return filtered
 
     # Tier 3: api.weather.gov (last resort)
     if age_hours_start <= 168:
-        all_data = fetch_nws_station_data(station_id, max(1, int(age_hours_start) + 1))
-        return [d for d in all_data if start_ts <= d["unix_ts"] <= end_ts]
+        all_data = fetch_nws_station_data(station_id, max(2, int(age_hours_start) + 1))
+        return [d for d in all_data if eff_start <= d["unix_ts"] <= eff_end]
 
     return []
 
