@@ -58,6 +58,14 @@ let raceAvgTWD = null;             // average TWD across the race window, for la
 let laylineLayer = null;           // Leaflet layer group holding rendered laylines
 let windMarker = null;             // Leaflet marker rendering current TWD/TWS arrow
 const PRIMARY_WIND_STATIONS = ['CSIM3', 'KBOS', '44013'];  // try in order
+let selectedWindStationId = null;  // user-selected wind source (null = auto-pick)
+
+// User-controlled visibility toggles. Defaults are ON so the dashboard
+// shows everything on first load; per-user overrides persist through
+// a race session but reset when the page reloads (intentional — no
+// cross-session state).
+let laylinesVisible = true;
+let polarOverlayVisible = true;
 
 // J/80 typical upwind tack angle (degrees off true wind). Used for laylines.
 const J80_UPWIND_TACK_ANGLE = 42;
@@ -150,6 +158,7 @@ async function init() {
 
     // Initialize map
     initMap();
+    addLaylinesMapControl();
 
     // Initialize chart
     initSpeedChart();
@@ -163,10 +172,39 @@ async function init() {
     // Drawer close
     const drawerClose = document.getElementById('drawer-close');
     if (drawerClose) drawerClose.addEventListener('click', closeBoatDrawer);
-    // Esc key closes the drawer
+    // Esc key closes the drawer / open modals
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && drawerDeviceId) closeBoatDrawer();
+        if (e.key === 'Escape') {
+            if (drawerDeviceId) closeBoatDrawer();
+            for (const id of ['leg-modal', 'maneuver-modal']) {
+                const m = document.getElementById(id);
+                if (m && m.style.display !== 'none') m.style.display = 'none';
+            }
+        }
     });
+
+    // Modal close buttons
+    for (const el of document.querySelectorAll('[data-close-modal]')) {
+        el.addEventListener('click', () => {
+            const id = el.getAttribute('data-close-modal');
+            const m = document.getElementById(id);
+            if (m) m.style.display = 'none';
+        });
+    }
+
+    // Polar overlay toggle
+    const polTog = document.getElementById('polar-overlay-toggle');
+    if (polTog) polTog.addEventListener('click', () => {
+        polarOverlayVisible = !polarOverlayVisible;
+        polTog.classList.toggle('active', polarOverlayVisible);
+        updateSpeedChart();
+    });
+
+    // Legs / Maneuvers modals
+    const legBtn = document.getElementById('btn-leg-summary');
+    if (legBtn) legBtn.addEventListener('click', openLegModal);
+    const manBtn = document.getElementById('btn-maneuvers');
+    if (manBtn) manBtn.addEventListener('click', openManeuverModal);
 
     // Auto-load the most recent race with boat data
     await loadLatestRaceWithData();
@@ -324,8 +362,28 @@ function destinationPoint(lat, lon, bearingDeg, distM) {
 // is in the upper half-plane relative to the wind (mark bearing within
 // ±90° of TWD as seen from the start), it counts. Length is scaled to be
 // visible across a typical Boston Harbor course (~3 km).
+function addLaylinesMapControl() {
+    if (!map) return;
+    const ctl = L.control({ position: 'topright' });
+    ctl.onAdd = function () {
+        const div = L.DomUtil.create('div', 'leaflet-bar map-toggle-control');
+        div.innerHTML = `<a href="#" id="layline-toggle" class="${laylinesVisible ? 'active' : ''}" title="Show/hide laylines">⌃ Laylines</a>`;
+        L.DomEvent.disableClickPropagation(div);
+        const a = div.querySelector('#layline-toggle');
+        a.addEventListener('click', (e) => {
+            e.preventDefault();
+            laylinesVisible = !laylinesVisible;
+            a.classList.toggle('active', laylinesVisible);
+            renderLaylines();
+        });
+        return div;
+    };
+    ctl.addTo(map);
+}
+
 function renderLaylines() {
     if (laylineLayer) { map.removeLayer(laylineLayer); laylineLayer = null; }
+    if (!laylinesVisible) return;
     if (raceAvgTWD == null || !currentRace?.course?.length) return;
     const marksById = buildMarksById(currentRace);
     const startAnchor = startMidpoint(currentRace);
@@ -448,6 +506,7 @@ async function loadRaceWindData(startTime, endTime) {
     weatherWindSource = null;
     raceAvgTWD = null;
     raceBuoyData = {};
+    selectedWindStationId = null;
     if (!startTime || !endTime) return;
     try {
         const startTs = new Date(startTime).getTime() / 1000;
@@ -459,38 +518,87 @@ async function loadRaceWindData(startTime, endTime) {
         }
         const data = await resp.json();
         raceBuoyData = data.buoys || {};
-
-        // Pick the first station from PRIMARY_WIND_STATIONS that has wind samples.
+        // Auto-pick the first station with usable samples (Castle Island first).
         for (const sid of PRIMARY_WIND_STATIONS) {
-            const buoy = raceBuoyData[sid];
-            if (!buoy?.data_points?.length) continue;
-            const samples = [];
-            for (const dp of buoy.data_points) {
-                if (dp.wind_dir == null || dp.wind_speed_kts == null) continue;
-                const tMs = (dp.timestamp ? new Date(dp.timestamp).getTime() : (dp.ts * 1000));
-                if (!Number.isFinite(tMs)) continue;
-                samples.push({ tMs, twd: dp.wind_dir, tws: dp.wind_speed_kts });
+            if (raceBuoyData[sid]?.data_points?.some(d => d.wind_dir != null && d.wind_speed_kts != null)) {
+                selectedWindStationId = sid;
+                break;
             }
-            if (samples.length === 0) continue;
-            samples.sort((a, b) => a.tMs - b.tMs);
-            weatherWindSamples = samples;
-            weatherWindSource = buoy.name || sid;
-            // Average TWD via vector mean (so 359° and 1° average to 0°, not 180°).
-            let sx = 0, sy = 0;
-            for (const s of samples) {
-                sx += Math.sin(s.twd * Math.PI / 180);
-                sy += Math.cos(s.twd * Math.PI / 180);
-            }
-            raceAvgTWD = (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
-            console.log(`[Wind] using ${weatherWindSource}, ${samples.length} samples, avg TWD ${raceAvgTWD.toFixed(0)}°`);
-            break;
         }
-        if (!weatherWindSamples.length) {
-            console.warn('[Wind] no usable wind samples from any primary station');
-        }
+        rebuildWindFromSelected();
+        renderWindSourcePicker();
     } catch (e) {
         console.error('[Wind] load failed', e);
     }
+}
+
+// Rebuild weatherWindSamples/raceAvgTWD/weatherWindSource from the
+// currently selected station. Cheap; safe to call whenever the user
+// flips between Castle Island and Logan.
+function rebuildWindFromSelected() {
+    weatherWindSamples = [];
+    weatherWindSource = null;
+    raceAvgTWD = null;
+    if (!selectedWindStationId) return;
+    const buoy = raceBuoyData[selectedWindStationId];
+    if (!buoy?.data_points?.length) return;
+    const samples = [];
+    for (const dp of buoy.data_points) {
+        if (dp.wind_dir == null || dp.wind_speed_kts == null) continue;
+        const tMs = (dp.timestamp ? new Date(dp.timestamp).getTime() : (dp.ts * 1000));
+        if (!Number.isFinite(tMs)) continue;
+        samples.push({ tMs, twd: dp.wind_dir, tws: dp.wind_speed_kts });
+    }
+    if (!samples.length) return;
+    samples.sort((a, b) => a.tMs - b.tMs);
+    weatherWindSamples = samples;
+    weatherWindSource = buoy.name || selectedWindStationId;
+    let sx = 0, sy = 0;
+    for (const s of samples) {
+        sx += Math.sin(s.twd * Math.PI / 180);
+        sy += Math.cos(s.twd * Math.PI / 180);
+    }
+    raceAvgTWD = (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
+    console.log(`[Wind] using ${weatherWindSource}, ${samples.length} samples, avg TWD ${raceAvgTWD.toFixed(0)}°`);
+}
+
+// Wind-source segmented picker (Castle Is / Logan / 44013) next to badge.
+function renderWindSourcePicker() {
+    const host = document.getElementById('wind-source-picker');
+    if (!host) return;
+    const choices = [
+        { id: 'CSIM3', label: 'Castle Is' },
+        { id: 'KBOS',  label: 'Logan' },
+        { id: '44013', label: '16NM' },
+    ].filter(c => raceBuoyData[c.id]?.data_points?.length);
+    if (choices.length <= 1) {
+        host.style.display = 'none';
+        return;
+    }
+    host.style.display = 'flex';
+    host.innerHTML = choices.map(c =>
+        `<button data-station="${c.id}" class="${c.id === selectedWindStationId ? 'active' : ''}"
+                 title="Use ${c.label} as wind source">${c.label}</button>`
+    ).join('');
+    for (const btn of host.querySelectorAll('button')) {
+        btn.addEventListener('click', () => setWindStation(btn.dataset.station));
+    }
+}
+
+function setWindStation(stationId) {
+    if (stationId === selectedWindStationId) return;
+    if (!raceBuoyData[stationId]?.data_points?.length) return;
+    selectedWindStationId = stationId;
+    rebuildWindFromSelected();
+    renderWindSourcePicker();
+    renderLaylines();
+    if (currentRace) {
+        const targetMs = new Date(currentRace.start_time).getTime() + (playCursorSeconds * 1000);
+        updateWindBadge(targetMs);
+    }
+    updateSpeedChart();           // rebuilds polar overlays under new wind
+    renderLeaderboard();          // TWA/%pol depend on wind
+    updateBoatDrawer();
 }
 
 // Linear interp of TWD/TWS at a given time. TWD interpolated as a vector
@@ -1121,6 +1229,42 @@ function updateSpeedChart() {
         });
 
         speedSets.push(baseDataset(buildSeries(boatData.sensors.gps, 'speed_kn', raceStartMs)));
+
+        // Polar target overlay (dashed, same color, lower opacity). Computed
+        // per GPS sample using NOAA wind at that timestamp; downsampled to
+        // ~240 points to match the speed line.
+        if (polarOverlayVisible && weatherWindSamples.length) {
+            const gpsArr = boatData.sensors.gps;
+            const step = Math.max(1, Math.floor(gpsArr.length / 240));
+            const polarPts = [];
+            for (let i = 0; i < gpsArr.length; i += step) {
+                const p = gpsArr[i];
+                if (!p?.t) continue;
+                const t = new Date(p.t).getTime();
+                const w = windAt(t);
+                if (!w) continue;
+                const cog = p.course || 0;
+                const twa = ((w.twd - cog + 540) % 360) - 180;
+                const target = polarTargetSpeed(twa, w.tws);
+                if (target != null && target > 0) {
+                    polarPts.push({ x: (t - raceStartMs) / 1000, y: target });
+                }
+            }
+            if (polarPts.length) {
+                speedSets.push({
+                    label: deviceId + ':polar',
+                    data: polarPts,
+                    borderColor: color + '88',  // 50% alpha
+                    backgroundColor: 'transparent',
+                    borderWidth: 1,
+                    borderDash: [4, 3],
+                    pointRadius: 0,
+                    tension: 0.2,
+                    spanGaps: false,
+                });
+            }
+        }
+
         heelSets.push(baseDataset(buildSeries(boatData.sensors.imu, 'heel', raceStartMs)));
         // Wind chart: not per-boat. Filled from NOAA below; per-boat dataset
         // here is just a placeholder so the toggle dot still affects this
@@ -1332,6 +1476,274 @@ function updateBoatDrawer() {
         </div>
         ${nextMarkBlock}
     `;
+}
+
+// --- Leg summary ---
+
+function computeLegSummary() {
+    if (!currentRace || !raceData?.boats) return [];
+    const courseSeq = currentRace.course || [];
+    if (!courseSeq.length) return [];
+    const startTimeMs = new Date(currentRace.start_time).getTime();
+    const rows = [];
+
+    for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
+        const layer = boatLayers[deviceId];
+        if (!layer?.data?.length || !layer.roundingTimes) continue;
+        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+
+        // Boundaries for completed legs only.
+        const bounds = [startTimeMs];
+        for (const t of layer.roundingTimes) {
+            if (t !== undefined) bounds.push(t); else break;
+        }
+        if (bounds.length < 2) continue;
+
+        for (let leg = 0; leg < bounds.length - 1; leg++) {
+            const tStart = bounds[leg], tEnd = bounds[leg + 1];
+            const samples = layer.data.filter(p => {
+                const t = new Date(p.t).getTime();
+                return t >= tStart && t < tEnd && p.lat && p.lon;
+            });
+            if (samples.length < 2) continue;
+
+            const sumSog = samples.reduce((s, p) => s + (p.speed_kn || 0), 0);
+            const avgSog = sumSog / samples.length;
+
+            let polSum = 0, polN = 0;
+            for (const p of samples) {
+                const t = new Date(p.t).getTime();
+                const w = windAt(t);
+                if (!w) continue;
+                const twa = ((w.twd - (p.course || 0) + 540) % 360) - 180;
+                const pp = polarPercent(p.speed_kn || 0, twa, w.tws);
+                if (pp != null) { polSum += pp; polN++; }
+            }
+            const avgPol = polN > 0 ? polSum / polN : null;
+
+            let dist = 0;
+            for (let i = 1; i < samples.length; i++) {
+                dist += haversineMeters(samples[i-1].lat, samples[i-1].lon, samples[i].lat, samples[i].lon);
+            }
+
+            rows.push({
+                deviceId, team,
+                leg: leg + 1,
+                durationSec: (tEnd - tStart) / 1000,
+                avgSog, avgPolPct: avgPol, distM: dist,
+            });
+        }
+    }
+    return rows;
+}
+
+function fmtMMSS(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '—';
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function openLegModal() {
+    const body = document.getElementById('leg-modal-body');
+    if (!body) return;
+    const rows = computeLegSummary();
+    if (!rows.length) {
+        body.innerHTML = '<div class="modal-empty">No leg data — race needs a defined course with mark roundings.</div>';
+    } else {
+        // Group by leg, then sort within each leg by duration ASC
+        const byLeg = {};
+        for (const r of rows) (byLeg[r.leg] = byLeg[r.leg] || []).push(r);
+        const legs = Object.keys(byLeg).map(Number).sort((a, b) => a - b);
+
+        let html = '';
+        for (const leg of legs) {
+            const group = byLeg[leg].sort((a, b) => a.durationSec - b.durationSec);
+            const fastest = group[0]?.durationSec || 0;
+            html += `<h3 class="leg-section-title">Leg ${leg}</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr><th>#</th><th>Team</th><th>Time</th><th>Δ leader</th><th>Avg SOG</th><th>Avg %pol</th><th>Distance</th></tr>
+                    </thead><tbody>`;
+            group.forEach((r, i) => {
+                const delta = r.durationSec - fastest;
+                html += `<tr class="${i === 0 ? 'leg-leader' : ''}">
+                    <td>${i + 1}</td>
+                    <td><span class="lb-color" style="background:${BOAT_COLORS[r.deviceId] || '#888'}"></span>${r.team}</td>
+                    <td>${fmtMMSS(r.durationSec)}</td>
+                    <td>${i === 0 ? '—' : '+' + fmtMMSS(delta)}</td>
+                    <td>${r.avgSog.toFixed(1)} kn</td>
+                    <td>${r.avgPolPct != null ? r.avgPolPct.toFixed(0) + '%' : '—'}</td>
+                    <td>${(r.distM / 1000).toFixed(2)} km</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+        }
+        body.innerHTML = html;
+    }
+    document.getElementById('leg-modal').style.display = 'flex';
+}
+
+// --- Maneuver detection (tacks & gybes) ---
+//
+// Heuristic, but tuned for J/80 racing on flat-ish water:
+//   1. Walk each boat's GPS track. At every sample, compute the heading
+//      change relative to ~10s earlier.
+//   2. When |Δheading| > 60° within a 30s window AND speed in that
+//      window dipped below 70% of the pre-window average, classify it
+//      as a maneuver.
+//   3. Use NOAA TWD at the entry to classify tack vs gybe by absolute
+//      TWA before the maneuver (<90° upwind = tack, >90° downwind = gybe).
+
+function detectManeuversForLayer(layer) {
+    const out = [];
+    const data = layer.data;
+    if (!data || data.length < 30) return out;
+
+    const tMs = data.map(p => new Date(p.t).getTime());
+    const speeds = data.map(p => p.speed_kn || 0);
+    const cogs = data.map(p => p.course || 0);
+
+    let i = 10;
+    while (i < data.length - 30) {
+        const before = speeds.slice(i - 10, i);
+        const avgBefore = before.reduce((s, v) => s + v, 0) / before.length;
+        if (avgBefore < 2) { i++; continue; }
+
+        let maxDh = 0, endIdx = i;
+        for (let j = i + 1; j < Math.min(data.length, i + 30); j++) {
+            const dh = Math.abs(((cogs[j] - cogs[i] + 540) % 360) - 180);
+            if (dh > maxDh) { maxDh = dh; endIdx = j; }
+        }
+        if (maxDh < 60) { i++; continue; }
+
+        // Speed dip inside [i, endIdx]
+        let minSpd = Infinity;
+        for (let j = i; j <= endIdx; j++) if (speeds[j] < minSpd) minSpd = speeds[j];
+        if (minSpd > avgBefore * 0.7) { i++; continue; }
+
+        const after = speeds.slice(endIdx, Math.min(data.length, endIdx + 10));
+        const avgAfter = after.reduce((s, v) => s + v, 0) / Math.max(1, after.length);
+
+        const wEntry = windAt(tMs[i]);
+        let type = 'rounding', twaBefore = null, twaAfter = null;
+        if (wEntry) {
+            const a = ((wEntry.twd - cogs[i] + 540) % 360) - 180;
+            const b = ((wEntry.twd - cogs[endIdx] + 540) % 360) - 180;
+            twaBefore = a; twaAfter = b;
+            if (Math.abs(a) < 90 && Math.abs(b) < 90) type = 'tack';
+            else if (Math.abs(a) > 90 && Math.abs(b) > 90) type = 'gybe';
+            else type = 'rounding';
+        }
+
+        out.push({
+            tStart: tMs[i], tEnd: tMs[endIdx],
+            durationSec: (tMs[endIdx] - tMs[i]) / 1000,
+            speedBefore: avgBefore, speedAfter: avgAfter, speedMin: minSpd,
+            loss: Math.max(0, avgBefore - avgAfter),
+            headingChange: maxDh,
+            twaBefore, twaAfter, type,
+        });
+        i = endIdx + 10;  // skip past this maneuver
+    }
+    return out;
+}
+
+function openManeuverModal() {
+    const body = document.getElementById('maneuver-modal-body');
+    if (!body) return;
+    if (!raceData?.boats) {
+        body.innerHTML = '<div class="modal-empty">No race data loaded.</div>';
+        document.getElementById('maneuver-modal').style.display = 'flex';
+        return;
+    }
+
+    // Aggregate by team × type (tack / gybe)
+    const summary = [];
+    const allManeuvers = [];
+    for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
+        const layer = boatLayers[deviceId];
+        if (!layer?.data?.length) continue;
+        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+        const ms = detectManeuversForLayer(layer);
+        for (const m of ms) allManeuvers.push({ deviceId, team, ...m });
+
+        const tacks = ms.filter(m => m.type === 'tack');
+        const gybes = ms.filter(m => m.type === 'gybe');
+        summary.push({
+            deviceId, team,
+            tacksCount: tacks.length,
+            tacksAvgLoss: tacks.length ? tacks.reduce((s, m) => s + m.loss, 0) / tacks.length : null,
+            tacksAvgDur:  tacks.length ? tacks.reduce((s, m) => s + m.durationSec, 0) / tacks.length : null,
+            gybesCount: gybes.length,
+            gybesAvgLoss: gybes.length ? gybes.reduce((s, m) => s + m.loss, 0) / gybes.length : null,
+            gybesAvgDur:  gybes.length ? gybes.reduce((s, m) => s + m.durationSec, 0) / gybes.length : null,
+        });
+    }
+
+    if (!summary.length) {
+        body.innerHTML = '<div class="modal-empty">No boat data.</div>';
+        document.getElementById('maneuver-modal').style.display = 'flex';
+        return;
+    }
+
+    summary.sort((a, b) => (a.tacksAvgLoss ?? 99) - (b.tacksAvgLoss ?? 99));
+
+    let html = `<h3 class="maneuver-section-title">Per-team summary (sorted by tack loss)</h3>
+        <table class="data-table">
+            <thead>
+                <tr><th>Team</th>
+                    <th>Tacks</th><th>Avg loss</th><th>Avg dur</th>
+                    <th>Gybes</th><th>Avg loss</th><th>Avg dur</th></tr>
+            </thead><tbody>`;
+    for (const s of summary) {
+        html += `<tr>
+            <td><span class="lb-color" style="background:${BOAT_COLORS[s.deviceId] || '#888'}"></span>${s.team}</td>
+            <td>${s.tacksCount}</td>
+            <td>${s.tacksAvgLoss != null ? s.tacksAvgLoss.toFixed(2) + ' kn' : '—'}</td>
+            <td>${s.tacksAvgDur != null ? s.tacksAvgDur.toFixed(1) + ' s' : '—'}</td>
+            <td>${s.gybesCount}</td>
+            <td>${s.gybesAvgLoss != null ? s.gybesAvgLoss.toFixed(2) + ' kn' : '—'}</td>
+            <td>${s.gybesAvgDur != null ? s.gybesAvgDur.toFixed(1) + ' s' : '—'}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+
+    // Per-maneuver detail
+    allManeuvers.sort((a, b) => a.tStart - b.tStart);
+    if (allManeuvers.length) {
+        html += `<h3 class="maneuver-section-title" style="margin-top:1.5rem">Every maneuver, in order</h3>
+            <table class="data-table">
+                <thead>
+                    <tr><th>Time</th><th>Team</th><th>Type</th>
+                        <th>Δ heading</th><th>TWA in → out</th>
+                        <th>SOG before</th><th>min</th><th>after</th>
+                        <th>Loss</th><th>Duration</th></tr>
+                </thead><tbody>`;
+        const raceStart = new Date(currentRace.start_time).getTime();
+        for (const m of allManeuvers) {
+            const elapsed = (m.tStart - raceStart) / 1000;
+            const twaIn = m.twaBefore == null ? '—' : `${m.twaBefore < 0 ? 'P' : 'S'}${Math.abs(m.twaBefore).toFixed(0)}°`;
+            const twaOut = m.twaAfter == null ? '—' : `${m.twaAfter < 0 ? 'P' : 'S'}${Math.abs(m.twaAfter).toFixed(0)}°`;
+            const typeClass = m.type === 'tack' ? 'mtype-tack' : (m.type === 'gybe' ? 'mtype-gybe' : 'mtype-other');
+            html += `<tr>
+                <td>${fmtMMSS(elapsed)}</td>
+                <td><span class="lb-color" style="background:${BOAT_COLORS[m.deviceId] || '#888'}"></span>${m.team}</td>
+                <td><span class="${typeClass}">${m.type}</span></td>
+                <td>${m.headingChange.toFixed(0)}°</td>
+                <td>${twaIn} → ${twaOut}</td>
+                <td>${m.speedBefore.toFixed(1)}</td>
+                <td>${m.speedMin.toFixed(1)}</td>
+                <td>${m.speedAfter.toFixed(1)}</td>
+                <td>${m.loss.toFixed(2)} kn</td>
+                <td>${m.durationSec.toFixed(1)} s</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+
+    body.innerHTML = html;
+    document.getElementById('maneuver-modal').style.display = 'flex';
 }
 
 // Move the dashed play cursor on each chart without redrawing the data lines.

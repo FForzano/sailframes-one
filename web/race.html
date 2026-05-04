@@ -24,7 +24,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=9">
-    <link rel="stylesheet" href="./assets/css/race.css?v=11">
+    <link rel="stylesheet" href="./assets/css/race.css?v=12">
     <script src="./config.js"></script>
 </head>
 <body class="race-dashboard">
@@ -43,6 +43,8 @@
             <button id="btn-new-race" class="btn-primary" title="Create new race">+ New Race</button>
             <button id="btn-edit-race" class="btn-secondary" title="Edit race" disabled>Edit</button>
             <button id="btn-edit-course" class="btn-secondary" title="Edit course on map" disabled>Edit Course</button>
+            <button id="btn-leg-summary" class="btn-secondary" title="Leg-by-leg per-boat summary">Legs</button>
+            <button id="btn-maneuvers" class="btn-secondary" title="Tacks &amp; gybes comparison">Maneuvers</button>
         </div>
         <a href="./sessions.html" class="nav-link">Sessions</a>
         <a href="./session.html" class="nav-link">Timeline</a>
@@ -83,6 +85,8 @@
                 <div class="chart-header">
                     <h3>Speed (kn)</h3>
                     <div class="chart-toggles" id="speed-chart-toggles"></div>
+                    <button class="chart-overlay-toggle active" id="polar-overlay-toggle"
+                            title="Show/hide J/80 polar target overlay">▱ pol</button>
                 </div>
                 <div class="chart-container chart-container-stacked">
                     <canvas id="speed-chart"></canvas>
@@ -110,6 +114,7 @@
         <section class="panel race-panel" id="race-panel">
             <div class="panel-header">
                 <h2>Leaderboard</h2>
+                <div class="wind-source-picker" id="wind-source-picker" style="display:none"></div>
                 <div class="wind-badge" id="wind-badge" title="True wind direction / speed (NOAA)" style="display:none">
                     <span class="wind-dir" id="wind-dir">---°</span>
                     <span class="wind-speed" id="wind-speed">-- kn</span>
@@ -121,6 +126,30 @@
             </div>
         </section>
     </main>
+
+    <!-- Leg-by-leg summary modal -->
+    <div class="modal" id="leg-modal" style="display: none;">
+        <div class="modal-backdrop" data-close-modal="leg-modal"></div>
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>Leg summary</h2>
+                <button class="modal-close" data-close-modal="leg-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="leg-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Maneuvers (tacks/gybes) comparison modal -->
+    <div class="modal" id="maneuver-modal" style="display: none;">
+        <div class="modal-backdrop" data-close-modal="maneuver-modal"></div>
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>Maneuver comparison · tacks & gybes</h2>
+                <button class="modal-close" data-close-modal="maneuver-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="maneuver-modal-body"></div>
+        </div>
+    </div>
 
     <!-- Per-boat detail drawer (slides in from the right) -->
     <aside class="boat-drawer" id="boat-drawer">
@@ -212,6 +241,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=13"></script>
+    <script type="module" src="./assets/js/race-app.js?v=14"></script>
 </body>
 </html>

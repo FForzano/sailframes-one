@@ -656,6 +656,133 @@ body.course-editing .boat-legend {
 .drawer-value.drawer-strong { font-size: 1.1rem; color: #22d3ee; font-weight: 600; }
 .drawer-sub { font-size: 0.7rem; opacity: 0.6; }
 
+/* Wind-source segmented picker (Castle Is / Logan / 16NM) */
+.wind-source-picker {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    height: 28px;
+}
+
+.wind-source-picker button {
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-right: 1px solid var(--border);
+    padding: 0 0.5rem;
+    font-size: 0.7rem;
+    font-family: monospace;
+    cursor: pointer;
+    height: 100%;
+}
+
+.wind-source-picker button:last-child { border-right: none; }
+.wind-source-picker button:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
+.wind-source-picker button.active {
+    background: rgba(34, 211, 238, 0.18);
+    color: #22d3ee;
+}
+
+.wind-source-picker + .wind-badge { margin-left: 0.5rem; }
+
+/* Layline toggle Leaflet control */
+.map-toggle-control a {
+    display: block;
+    padding: 4px 10px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #cbd5e1;
+    text-decoration: none;
+    font-size: 0.75rem;
+    font-family: monospace;
+    cursor: pointer;
+}
+
+.map-toggle-control a:hover { background: rgba(15, 23, 42, 0.95); color: #fff; }
+.map-toggle-control a.active { color: #22d3ee; }
+
+/* Polar overlay toggle in chart header */
+.chart-overlay-toggle {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-secondary);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 0.65rem;
+    cursor: pointer;
+    margin-left: 0.4rem;
+    font-family: monospace;
+}
+
+.chart-overlay-toggle:hover { color: var(--text-primary); }
+.chart-overlay-toggle.active { border-color: #22d3ee; color: #22d3ee; }
+
+/* Wide modal (used for Legs, Maneuvers) */
+.modal-content.modal-wide {
+    max-width: 1100px;
+    width: 90vw;
+    max-height: 85vh;
+}
+
+.modal-content.modal-wide .modal-body {
+    overflow-y: auto;
+    max-height: calc(85vh - 80px);
+}
+
+.modal-empty {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+/* Generic data table used by Legs / Maneuvers modals */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+}
+
+.data-table th, .data-table td {
+    padding: 0.45rem 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.data-table th {
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.data-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+.data-table tr.leg-leader { background: rgba(34, 211, 238, 0.06); }
+.data-table tr.leg-leader td:first-child { color: #22d3ee; font-weight: 600; }
+
+.data-table .lb-color {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+}
+
+.leg-section-title, .maneuver-section-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin: 1rem 0 0.5rem;
+}
+
+.mtype-tack  { color: #22d3ee; font-weight: 600; }
+.mtype-gybe  { color: #f59e0b; font-weight: 600; }
+.mtype-other { color: var(--text-secondary); }
+
 /* Chart Section */
 .chart-section {
     border-top: 1px solid var(--border);
