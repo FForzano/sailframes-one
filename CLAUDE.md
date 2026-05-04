@@ -1158,7 +1158,9 @@ Competitive analysis is maintained separately.
   - Playback controls (0.5x-8x speed), timeline scrubbing
   - Race editor modal with boat assignments and drag-and-drop finish order
   - Auto-match sessions by time overlap with race window
-  - Fixed E1 WiFi upload on battery (reduced TX power from 19.5dBm to 15dBm)
+  - Fixed E1 WiFi upload on battery (reduced TX power from 19.5dBm to 15dBm,
+    later restored to 19.5dBm in 2026.05.03.09 — slow uploads at marginal
+    signal were the bigger problem)
 - April 19, 2026: Library version compatibility documentation
   - Documented tested library versions that work together
   - ESP32 board package 3.3.8 causes I2C and TFT failures — use 3.3.7

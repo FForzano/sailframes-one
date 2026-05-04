@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.03.08"
+#define FW_VERSION    "2026.05.03.09"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -3484,7 +3484,16 @@ bool connectWiFi() {
     WiFi.disconnect(true);
     delay(100);
     WiFi.mode(WIFI_STA);
-    WiFi.setTxPower(WIFI_POWER_15dBm);  // Lower power to reduce current draw on battery
+    // Max TX power. The .04 era reduced this to 15 dBm to save battery,
+    // but slow uploads at marginal signal are now the dominant operational
+    // problem (suspected cause of the 2026-05-03 simultaneous reboot:
+    // slow PUTs > previous 120s wdt budget). +4.5 dB of link margin
+    // halves typical upload time when at the edge of AP range. WiFi only
+    // runs during the post-sail upload window, so the average-current
+    // cost across a day is ~1-2% of LiPo capacity. Watch /boot.log for
+    // BROWNOUT entries — if low-SoC devices start tripping that, dial
+    // back to 17 dBm or add an SoC-conditional setting.
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
     WiFi.persistent(false);  // Don't save to flash
     WiFi.setAutoReconnect(false);
     WiFi.begin(config.wifi[i].ssid, config.wifi[i].pass);
