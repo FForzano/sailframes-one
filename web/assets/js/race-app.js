@@ -57,7 +57,9 @@ let weatherWindSource = null;      // "Castle Island" / "Logan" / null
 let raceAvgTWD = null;             // average TWD across the race window, for laylines
 let laylineLayer = null;           // Leaflet layer group holding rendered laylines
 let windMarker = null;             // Leaflet marker rendering current TWD/TWS arrow
-const PRIMARY_WIND_STATIONS = ['CSIM3', 'KBOS', '44013'];  // try in order
+// Preferred-first ordering for the auto-pick. Synoptic SYN_* stations
+// are added dynamically below if/when they appear in the API response.
+const PRIMARY_WIND_STATIONS = ['CSIM3', 'KBOS', '44013'];
 let selectedWindStationId = null;  // user-selected wind source (null = auto-pick)
 
 // User-controlled visibility toggles. Defaults are ON so the dashboard
@@ -529,11 +531,20 @@ async function loadRaceWindData(startTime, endTime) {
         }
         const data = await resp.json();
         raceBuoyData = data.buoys || {};
-        // Auto-pick the first station with usable samples (Castle Island first).
+        // Auto-pick the first station with usable samples. Try the NDBC
+        // primaries (Castle Island, Logan, 16NM) first; if none of them
+        // has data for this race window, fall back to any Synoptic
+        // station (SYN_*) that does.
+        const usableId = (sid) =>
+            raceBuoyData[sid]?.data_points?.some(d =>
+                d.wind_dir != null && d.wind_speed_kts != null
+            );
         for (const sid of PRIMARY_WIND_STATIONS) {
-            if (raceBuoyData[sid]?.data_points?.some(d => d.wind_dir != null && d.wind_speed_kts != null)) {
-                selectedWindStationId = sid;
-                break;
+            if (usableId(sid)) { selectedWindStationId = sid; break; }
+        }
+        if (!selectedWindStationId) {
+            for (const sid of Object.keys(raceBuoyData)) {
+                if (usableId(sid)) { selectedWindStationId = sid; break; }
             }
         }
         rebuildWindFromSelected();
@@ -574,23 +585,56 @@ function rebuildWindFromSelected() {
 }
 
 // Wind-source segmented picker (Castle Is / Logan / 44013) next to badge.
+function shortStationLabel(stationId, fullName) {
+    const overrides = {
+        'CSIM3': 'Castle Is',
+        'KBOS':  'Logan',
+        '44013': '16NM',
+        '44029': 'Mass Bay',
+    };
+    if (overrides[stationId]) return overrides[stationId];
+    if (!fullName) return stationId;
+    let n = fullName
+        .replace(/\b(Sailing Center|Sailing|Airport|Buoy|Station)\b/gi, '')
+        .replace(/\s+/g, ' ').trim();
+    return n.length > 14 ? n.slice(0, 13) + '…' : n;
+}
+
+// Wind-source segmented picker. Built dynamically from whatever stations
+// the buoys API returned with usable wind samples. Preferred order:
+// CSIM3 / KBOS / 44013 first (familiar), then everything else alpha.
+// Synoptic Mesonet stations come back as "SYN_*" station IDs and are
+// surfaced here automatically once they appear in raceBuoyData.
 function renderWindSourcePicker() {
     const host = document.getElementById('wind-source-picker');
     if (!host) return;
-    const choices = [
-        { id: 'CSIM3', label: 'Castle Is' },
-        { id: 'KBOS',  label: 'Logan' },
-        { id: '44013', label: '16NM' },
-    ].filter(c => raceBuoyData[c.id]?.data_points?.length);
-    if (choices.length <= 1) {
+
+    const usable = Object.entries(raceBuoyData)
+        .filter(([sid, b]) => b?.data_points?.some(d =>
+            d.wind_dir != null && d.wind_speed_kts != null
+        ))
+        .map(([sid, b]) => ({ id: sid, name: b.name || sid }));
+
+    const order = (sid) => {
+        const i = PRIMARY_WIND_STATIONS.indexOf(sid);
+        return i >= 0 ? i : 100;
+    };
+    usable.sort((a, b) => {
+        const o = order(a.id) - order(b.id);
+        return o !== 0 ? o : a.name.localeCompare(b.name);
+    });
+
+    if (usable.length <= 1) {
         host.style.display = 'none';
         return;
     }
     host.style.display = 'flex';
-    host.innerHTML = choices.map(c =>
-        `<button data-station="${c.id}" class="${c.id === selectedWindStationId ? 'active' : ''}"
-                 title="Use ${c.label} as wind source">${c.label}</button>`
-    ).join('');
+    host.innerHTML = usable.map(c => {
+        const label = shortStationLabel(c.id, c.name);
+        const active = c.id === selectedWindStationId ? 'active' : '';
+        return `<button data-station="${c.id}" class="${active}"
+                 title="Use ${c.name} as wind source">${label}</button>`;
+    }).join('');
     for (const btn of host.querySelectorAll('button')) {
         btn.addEventListener('click', () => setWindStation(btn.dataset.station));
     }

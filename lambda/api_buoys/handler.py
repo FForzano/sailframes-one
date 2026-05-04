@@ -1,6 +1,8 @@
 """
-SailFrames API - NOAA Weather Data
-Fetches real-time and historical data from NOAA NDBC buoys and NWS airport stations.
+SailFrames API - NOAA + Synoptic Weather Data
+Fetches real-time and historical wind from NOAA NDBC buoys, NWS airport
+stations (api.weather.gov), and Synoptic Mesonet (which aggregates 100+
+networks including WeatherFlow Tempest and personal weather stations).
 """
 
 import json
@@ -8,11 +10,22 @@ import os
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlencode
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Synoptic Data Mesonet config. Token is set via Lambda env var; never
+# committed. Bbox tight around Boston Harbor + Quincy Bay; widen if you
+# expand to other racing venues.
+SYNOPTIC_TOKEN = os.environ.get("SYNOPTIC_TOKEN")
+SYNOPTIC_BBOX = os.environ.get("SYNOPTIC_BBOX", "-71.10,42.27,-70.85,42.42")
+# Station name fragments we explicitly *prefer* (sailing centers, marine).
+# Used only to bump a station's color into the marine-source palette so
+# it stands out in the picker; doesn't affect inclusion.
+SYNOPTIC_MARINE_HINTS = ("courageous", "sailing", "harbor", "wharf", "deer island", "yacht")
 
 # Boston Harbor area NOAA NDBC buoys and C-MAN stations
 BOSTON_BUOYS = {
@@ -394,6 +407,127 @@ def fetch_nws_data_for_timerange(station_id: str, start_ts: float, end_ts: float
     return filtered
 
 
+def fetch_synoptic_stations(start_ts: float, end_ts: float) -> dict:
+    """Query Synoptic Mesonet for all stations with wind sensors in the
+    Boston Harbor bbox over the requested window. Returns a dict shaped
+    the same as get_all_buoys_data() so it can be merged in without
+    touching the response schema. Silently returns {} if the token is
+    missing or the API call fails — Synoptic is best-effort, NDBC + NWS
+    remain the load-bearing sources."""
+    if not SYNOPTIC_TOKEN:
+        return {}
+
+    cache_key = f"synoptic_{start_ts}_{end_ts}"
+    if cache_key in _cache:
+        cached_time, cached_data = _cache[cache_key]
+        if datetime.utcnow().timestamp() - cached_time < CACHE_TTL_SECONDS:
+            return cached_data
+
+    # Synoptic timeseries endpoint. units=english returns wind in knots,
+    # so we don't need m/s conversion.
+    params = {
+        "bbox": SYNOPTIC_BBOX,
+        "start": datetime.utcfromtimestamp(start_ts).strftime("%Y%m%d%H%M"),
+        "end": datetime.utcfromtimestamp(end_ts).strftime("%Y%m%d%H%M"),
+        "vars": "wind_speed,wind_direction,wind_gust",
+        "units": "english,speed|kts",
+        "token": SYNOPTIC_TOKEN,
+        "output": "json",
+    }
+    url = f"https://api.synopticdata.com/v2/stations/timeseries?{urlencode(params)}"
+
+    try:
+        req = Request(url, headers={"User-Agent": "SailFrames/1.0"})
+        with urlopen(req, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"Synoptic fetch failed: {e}")
+        _cache[cache_key] = (datetime.utcnow().timestamp(), {})
+        return {}
+
+    summary = payload.get("SUMMARY", {})
+    if summary.get("RESPONSE_CODE") not in (1, "1"):
+        logger.warning(f"Synoptic non-OK response: {summary.get('RESPONSE_MESSAGE')}")
+        _cache[cache_key] = (datetime.utcnow().timestamp(), {})
+        return {}
+
+    result = {}
+    for station in payload.get("STATION", []):
+        sid = station.get("STID")
+        if not sid:
+            continue
+        prefix_id = f"SYN_{sid}"  # namespace to avoid collisions w/ NDBC ids
+
+        obs = station.get("OBSERVATIONS", {}) or {}
+        ts_list = obs.get("date_time", []) or []
+        speed_key = next((k for k in obs.keys() if k.startswith("wind_speed_")), None)
+        dir_key   = next((k for k in obs.keys() if k.startswith("wind_direction_")), None)
+        gust_key  = next((k for k in obs.keys() if k.startswith("wind_gust_")), None)
+        if not speed_key and not dir_key:
+            continue
+
+        speed_list = obs.get(speed_key, []) if speed_key else []
+        dir_list   = obs.get(dir_key, []) if dir_key else []
+        gust_list  = obs.get(gust_key, []) if gust_key else []
+
+        data_points = []
+        for i, ts_str in enumerate(ts_list):
+            try:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "").replace("+00:00", ""))
+                point = {
+                    "timestamp": ts.isoformat() + "Z",
+                    "unix_ts": int(ts.timestamp()),
+                }
+                if i < len(speed_list) and speed_list[i] is not None:
+                    point["wind_speed_kts"] = round(float(speed_list[i]), 1)
+                if i < len(dir_list) and dir_list[i] is not None:
+                    point["wind_dir"] = round(float(dir_list[i]), 0)
+                if i < len(gust_list) and gust_list[i] is not None:
+                    point["wind_gust_kts"] = round(float(gust_list[i]), 1)
+                if "wind_speed_kts" in point or "wind_dir" in point:
+                    data_points.append(point)
+            except (ValueError, TypeError):
+                continue
+
+        if not data_points:
+            continue
+
+        try:
+            lat = float(station.get("LATITUDE"))
+            lon = float(station.get("LONGITUDE"))
+        except (TypeError, ValueError):
+            continue
+
+        name = station.get("NAME") or sid
+        network = ""
+        mnet = station.get("MNET")
+        if isinstance(mnet, dict):
+            network = mnet.get("SHORTNAME", "") or mnet.get("LONGNAME", "")
+
+        # Mark marine/sailing-center stations in a distinct color so they
+        # stand out in the picker.
+        is_marine_hint = any(h in name.lower() for h in SYNOPTIC_MARINE_HINTS)
+        color = "#22d3ee" if is_marine_hint else "#a855f7"
+
+        result[prefix_id] = {
+            "station_id": prefix_id,
+            "name": name,
+            "lat": lat,
+            "lon": lon,
+            "type": "synoptic",
+            "source": "synoptic",
+            "network": network,
+            "color": color,
+            "data": ["wind"],
+            "data_points": data_points,
+            "has_data": True,
+        }
+
+    _cache[cache_key] = (datetime.utcnow().timestamp(), result)
+    logger.info(f"Synoptic returned {len(result)} stations with wind data")
+    return result
+
+
 def get_all_buoys_data(start_ts: float, end_ts: float) -> dict:
     """Fetch data from all Boston Harbor weather stations for a time range."""
     result = {}
@@ -416,6 +550,16 @@ def get_all_buoys_data(start_ts: float, end_ts: float) -> dict:
             "data_points": data,
             "has_data": len(data) > 0,
         }
+
+    # Merge in Synoptic Mesonet stations (WeatherFlow Tempest, PWS, etc.)
+    # IDs are namespaced "SYN_..." to avoid colliding with NDBC station IDs.
+    try:
+        synoptic_stations = fetch_synoptic_stations(start_ts, end_ts)
+        for sid, sdata in synoptic_stations.items():
+            if sid not in result:
+                result[sid] = sdata
+    except Exception as e:
+        logger.warning(f"Synoptic merge failed: {e}")
 
     return result
 
