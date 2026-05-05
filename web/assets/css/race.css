@@ -439,6 +439,17 @@ body.course-editing .boat-legend {
     border-radius: 2px;
 }
 
+/* Finished boats: muted background + tiny badge feel so the eye reads
+   "this row is locked". Stats stay legible — just colour-shifted to
+   signal that they're frozen at finish moment, not live. */
+.leaderboard-item.leaderboard-finished {
+    background: rgba(34, 211, 238, 0.06);
+}
+.leaderboard-finish-time {
+    color: #22d3ee;
+    font-variant-numeric: tabular-nums;
+}
+
 .leaderboard-boat-info {
     flex: 1;
 }

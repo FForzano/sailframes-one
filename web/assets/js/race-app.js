@@ -511,64 +511,78 @@ function addFollowLeaderMapControl() {
     ctl.addTo(map);
 }
 
-// Reframe the map around (leader's current position, mark they're
-// sailing to). Throttled so a slider scrub doesn't fire ten flyToBounds
-// per second. force=true bypasses the throttle (used on race load and
-// when the user re-enables follow).
+// Reframe the map so every active boat AND the next active mark fit
+// inside the viewport. The original "follow leader" version was too
+// aggressive — it tracked just the lead boat at zoom 17 and the back
+// of the fleet would slide off the bottom of the map. Now we build
+// bounds from every boat's current position plus the next-mark anchor
+// (the leader's next mark, since that's where the fleet is heading).
+//
+// Throttled (default 2.5 s between flies) so playback scrubbing doesn't
+// thrash the viewport, and the flight itself is slower (1.4 s) so the
+// motion reads as a glide, not a jump cut. Hysteresis: skip the fly
+// when the new bounds are already mostly contained in the current
+// viewport — avoids tiny corrections every tick.
 function applyLeaderFollow(force = false, targetTimeMsArg = null) {
     if (!followLeader && !force) return;
     if (!map || !currentRace) return;
     const now = Date.now();
-    if (!force && now - lastFollowPanMs < 700) return;
+    if (!force && now - lastFollowPanMs < 2500) return;
 
     const courseSeq = currentRace.course || [];
     const marksById = courseSeq.length ? buildMarksById(currentRace) : {};
     const targetTimeMs = targetTimeMsArg
         ?? new Date(currentRace.start_time).getTime() + (playCursorSeconds * 1000);
 
-    // Leader = boat with the most rounding events at this playback time.
-    // Ties broken by smallest distToNext (closer to the mark = ahead).
-    let leaderLayer = null;
+    // Collect every visible boat's current position AND figure out the
+    // leader's next-mark anchor in the same pass.
+    const corners = [];
     let leaderLegs = -1;
     let leaderDist = Infinity;
+    let leaderNextMark = null;
     for (const layer of Object.values(boatLayers)) {
-        if (!layer.current) continue;
+        if (!layer.visible || !layer.current) continue;
+        corners.push([layer.current.lat, layer.current.lon]);
         const legs = legsCompletedAt(layer, targetTimeMs);
-        const seqIdx = courseSeq.length ? legs % courseSeq.length : 0;
-        const nextMark = courseSeq.length ? marksById[courseSeq[seqIdx]] : null;
-        const d = nextMark
-            ? haversineMeters(layer.current.lat, layer.current.lon, nextMark.lat, nextMark.lon)
-            : Infinity;
-        if (legs > leaderLegs || (legs === leaderLegs && d < leaderDist)) {
-            leaderLegs = legs;
-            leaderDist = d;
-            leaderLayer = layer;
+        if (courseSeq.length) {
+            const seqIdx = legs % courseSeq.length;
+            const nextMark = marksById[courseSeq[seqIdx]];
+            const d = nextMark
+                ? haversineMeters(layer.current.lat, layer.current.lon, nextMark.lat, nextMark.lon)
+                : Infinity;
+            if (legs > leaderLegs || (legs === leaderLegs && d < leaderDist)) {
+                leaderLegs = legs;
+                leaderDist = d;
+                leaderNextMark = nextMark;
+            }
         }
     }
-    if (!leaderLayer?.current) return;
+    if (corners.length === 0) return;
 
-    // Bounds = leader position + the mark they're going to. If race is
-    // finished (no next mark), include the finish line if defined; else
-    // just center on the leader.
-    const corners = [[leaderLayer.current.lat, leaderLayer.current.lon]];
+    // Anchor the upcoming mark (or finish line) so the camera leads the
+    // fleet rather than centering exactly on them.
     const totalLegs = currentRace._totalLegs ?? courseSeq.length;
-    if (courseSeq.length && leaderLegs < totalLegs) {
-        const seqIdx = leaderLegs % courseSeq.length;
-        const nextMark = marksById[courseSeq[seqIdx]];
-        if (nextMark) corners.push([nextMark.lat, nextMark.lon]);
+    if (courseSeq.length && leaderLegs < totalLegs && leaderNextMark) {
+        corners.push([leaderNextMark.lat, leaderNextMark.lon]);
     } else if (currentRace.finish_line?.pin_lat != null) {
         const fl = currentRace.finish_line;
         corners.push([fl.pin_lat, fl.pin_lon]);
         corners.push([fl.boat_lat, fl.boat_lon]);
     }
 
+    const newBounds = L.latLngBounds(corners);
+    // Hysteresis: if the new bounds already sit inside the current view
+    // (with the same padding), skip — no need to fly. Avoids twitchy
+    // re-centering when the fleet hasn't moved much.
+    if (!force && map.getBounds().pad(-0.05).contains(newBounds)) return;
+
     lastFollowPanMs = now;
-    if (corners.length >= 2) {
-        const bounds = L.latLngBounds(corners);
-        map.flyToBounds(bounds, { padding: [80, 80], maxZoom: 17, duration: 0.5 });
-    } else {
-        map.flyTo(corners[0], 17, { duration: 0.5 });
-    }
+    map.flyToBounds(newBounds, {
+        padding: [100, 100],
+        maxZoom: 16,
+        duration: 1.4,        // smooth glide, not a snap
+        easeLinearity: 0.25,
+    });
 }
 
 // Trail window options shown in the SHOW > Trail dropdown. 30s exists
@@ -1843,31 +1857,48 @@ function renderLeaderboard() {
         const color = colorFor(item.deviceId);
         const posClass = pos <= 3 ? `p${pos}` : '';
         const activeClass = item.deviceId === drawerActive ? ' active' : '';
+        const finClass = item.finished ? ' leaderboard-finished' : '';
 
-        // Bottom-line stats: VMG · TWA · %pol · gap (or LEAD).
+        // Bottom-line stats. Finished boats show `FIN ✓` plus the time gap
+        // to the winner ("+0:25") instead of live VMG/TWA/%pol/distance —
+        // those numbers are meaningless once a boat has crossed.
         const subParts = [];
-        if (item.vmg !== null && item.vmg !== undefined) {
-            const sign = item.vmg >= 0 ? '+' : '';
-            subParts.push(`VMG ${sign}${item.vmg.toFixed(1)}`);
-        }
-        if (item.twa !== null && item.twa !== undefined) {
-            const tack = item.twa < 0 ? 'P' : 'S';
-            subParts.push(`${tack} ${Math.abs(item.twa).toFixed(0)}°`);
-        }
-        if (item.polarPct !== null && item.polarPct !== undefined) {
-            subParts.push(`${item.polarPct.toFixed(0)}%pol`);
-        }
-        if (item.gap === null || item.gap === undefined) {
-            subParts.push(positions.length > 1 ? 'LEAD' : '—');
+        if (item.finished) {
+            subParts.push('FIN ✓');
+            if (item.gapSec == null) {
+                subParts.push(positions.length > 1 ? 'WIN' : '—');
+            } else {
+                subParts.push(`+${fmtMMSS(item.gapSec)}`);
+            }
         } else {
-            const gap = item.gap;
-            subParts.push(gap >= 1000
-                ? `−${(gap / 1000).toFixed(2)} km`
-                : `−${gap.toFixed(0)} m`);
+            if (item.vmg !== null && item.vmg !== undefined) {
+                const sign = item.vmg >= 0 ? '+' : '';
+                subParts.push(`VMG ${sign}${item.vmg.toFixed(1)}`);
+            }
+            if (item.twa !== null && item.twa !== undefined) {
+                const tack = item.twa < 0 ? 'P' : 'S';
+                subParts.push(`${tack} ${Math.abs(item.twa).toFixed(0)}°`);
+            }
+            if (item.polarPct !== null && item.polarPct !== undefined) {
+                subParts.push(`${item.polarPct.toFixed(0)}%pol`);
+            }
+            if (item.gap === null || item.gap === undefined) {
+                subParts.push(positions.length > 1 ? 'LEAD' : '—');
+            } else {
+                const gap = item.gap;
+                subParts.push(gap >= 1000
+                    ? `−${(gap / 1000).toFixed(2)} km`
+                    : `−${gap.toFixed(0)} m`);
+            }
         }
+
+        // Speed cell: live SOG normally; total elapsed M:SS when finished.
+        const speedCell = item.finished && item.finishElapsedSec != null
+            ? `<div class="leaderboard-speed leaderboard-finish-time" title="Total race time">${fmtMMSS(item.finishElapsedSec)}</div>`
+            : `<div class="leaderboard-speed">${item.speed.toFixed(1)} kn</div>`;
 
         return `
-            <div class="leaderboard-item${activeClass}" data-device-id="${item.deviceId}">
+            <div class="leaderboard-item${activeClass}${finClass}" data-device-id="${item.deviceId}">
                 <div class="leaderboard-position ${posClass}">${pos}</div>
                 <div class="leaderboard-boat-color" style="background: ${color}"></div>
                 <div class="leaderboard-boat-info">
@@ -1875,7 +1906,7 @@ function renderLeaderboard() {
                     <div class="leaderboard-boat-subtitle">${item.subtitle}</div>
                 </div>
                 <div class="leaderboard-stats">
-                    <div class="leaderboard-speed">${item.speed.toFixed(1)} kn</div>
+                    ${speedCell}
                     <div class="leaderboard-delta">${subParts.join(' · ')}</div>
                 </div>
             </div>
@@ -1892,6 +1923,25 @@ function renderLeaderboard() {
     }
 }
 
+// Binary-search the GPS index whose timestamp is closest to (and not
+// after) targetMs, using the pre-parsed layer.times Float64Array. Used
+// to "freeze" the leaderboard at a boat's finish moment — once a boat
+// crosses the line, every subsequent leaderboard render reads the GPS
+// sample at the finish time, not the live-playback time, so speed /
+// COG / TWA / VMG / %pol all snap to the finish-state values.
+function gpsIdxAt(layer, targetMs) {
+    if (!layer?.times || !layer.times.length) return null;
+    const ts = layer.times;
+    if (targetMs <= ts[0]) return 0;
+    if (targetMs >= ts[ts.length - 1]) return ts.length - 1;
+    let lo = 0, hi = ts.length - 1;
+    while (lo + 1 < hi) {
+        const mid = (lo + hi) >> 1;
+        if (ts[mid] <= targetMs) lo = mid; else hi = mid;
+    }
+    return lo;
+}
+
 function calculatePositions() {
     if (!raceData?.boats) return [];
 
@@ -1903,7 +1953,6 @@ function calculatePositions() {
     const startAnchor = startMidpoint(currentRace);
     const startTimeMs = currentRace ? new Date(currentRace.start_time).getTime() : 0;
     const targetTimeMs = startTimeMs + (playCursorSeconds * 1000);
-    const windNow = windAt(targetTimeMs);
 
     for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
         if (boatData.error || !boatData.sensors?.gps?.length) continue;
@@ -1912,25 +1961,48 @@ function calculatePositions() {
         const boat = boatData.boat;
 
         const gps = boatData.sensors.gps;
-        const idx = layer?.currentIdx ?? (gps.length - 1);
-        const point = layer?.current || gps[gps.length - 1];
+
+        // Race-finish state. legsCompletedAt() filters by playback time,
+        // so a boat is "finished" only once the cursor passes its actual
+        // finish-line crossing.
+        const totalLegs = currentRace?._totalLegs ?? courseSeq.length;
+        const liveLegs = layer ? legsCompletedAt(layer, targetTimeMs) : 0;
+        const finished = courseDefined && totalLegs > 0 && liveLegs >= totalLegs;
+        const finishTimeMs = (finished && layer?.roundingTimes && layer.roundingTimes[totalLegs - 1] != null)
+            ? layer.roundingTimes[totalLegs - 1]
+            : null;
+
+        // Freeze: when finished, evaluate every per-boat metric at the
+        // finish-line moment instead of the playback cursor. The boat's
+        // ranking, speed, TWA, %pol, VMG all stop changing the instant
+        // it crosses. Map marker keeps moving (the boat physically
+        // continues sailing); the leaderboard does not.
+        const evalTimeMs = (finished && finishTimeMs != null) ? finishTimeMs : targetTimeMs;
+        let idx;
+        let point;
+        if (finished && finishTimeMs != null && layer?.times) {
+            idx = gpsIdxAt(layer, finishTimeMs) ?? (gps.length - 1);
+            point = layer.data?.[idx] || gps[idx] || gps[gps.length - 1];
+        } else {
+            idx = layer?.currentIdx ?? (gps.length - 1);
+            point = layer?.current || gps[gps.length - 1];
+        }
+        const windNow = windAt(evalTimeMs);
 
         // Distance-only fallback for races without a defined course.
         const cumDistM = (layer?.cumDist && layer.cumDist[idx] !== undefined)
             ? layer.cumDist[idx] : 0;
 
         // Course-aware metrics (only when a course sequence is defined)
-        let legsCompleted = 0;
+        let legsCompleted = liveLegs;
         let progressM = cumDistM;
         let vmg = null;
         let distToNext = null;
         let nextMarkName = null;
         if (courseDefined && layer && point && point.lat && point.lon) {
-            legsCompleted = legsCompletedAt(layer, targetTimeMs);
             progressM = progressMetersAt(point, courseSeq, marksById, legsCompleted,
                                          startAnchor || { lat: gps[0].lat, lon: gps[0].lon });
-            const totalLegsLB = currentRace?._totalLegs ?? courseSeq.length;
-            if (legsCompleted < totalLegsLB) {
+            if (legsCompleted < totalLegs) {
                 const target = marksById[courseSeq[legsCompleted % courseSeq.length]];
                 if (target) {
                     nextMarkName = target.name || target.mark_type || `Mark ${legsCompleted + 1}`;
@@ -1958,15 +2030,8 @@ function calculatePositions() {
             polarPct = polarPercent(point.speed_kn || 0, twa, windNow.tws);
         }
 
-        // Boats that have completed every event are "finished". The total
-        // event count is the fleet maximum from precomputeAllRoundings —
-        // not just `courseSeq.length`, because multi-lap detection lets
-        // roundingTimes exceed the course length and a finish-line
-        // crossing adds one more event.
-        const totalLegs = currentRace._totalLegs ?? courseSeq.length;
-        const finished = courseDefined && totalLegs > 0 && legsCompleted >= totalLegs;
-        const finishTimeMs = (finished && layer?.roundingTimes && layer.roundingTimes[totalLegs - 1] != null)
-            ? layer.roundingTimes[totalLegs - 1]
+        const finishElapsedSec = (finished && finishTimeMs != null)
+            ? (finishTimeMs - startTimeMs) / 1000
             : null;
 
         positions.push({
@@ -1985,7 +2050,9 @@ function calculatePositions() {
             polarPct,
             finished,
             finishTimeMs,
-            gap: null,  // filled in below
+            finishElapsedSec,
+            gapSec: null,    // filled in below for finished boats
+            gap: null,       // filled in below
         });
     }
 
@@ -2010,12 +2077,19 @@ function calculatePositions() {
 
     // Gap: along-course meters behind leader (course defined) or behind in
     // raw distance traveled (fallback). Leader keeps gap=null and the
-    // renderer turns that into "LEAD".
+    // renderer turns that into "LEAD". For finished boats we also fill
+    // gapSec relative to the winner's finish moment — that's the
+    // canonical sailing scoreboard delta ("+0:25 behind") that the
+    // distance gap can't express once both boats have crossed.
     if (positions.length > 0) {
         const leader = positions[0];
         const baseField = courseDefined ? 'progressM' : 'cumDistM';
+        const leaderFinishMs = leader.finished ? leader.finishTimeMs : null;
         for (let i = 1; i < positions.length; i++) {
             positions[i].gap = leader[baseField] - positions[i][baseField];
+            if (positions[i].finished && leaderFinishMs != null && positions[i].finishTimeMs != null) {
+                positions[i].gapSec = (positions[i].finishTimeMs - leaderFinishMs) / 1000;
+            }
         }
     }
 
