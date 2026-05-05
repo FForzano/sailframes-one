@@ -100,7 +100,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.05.07"
+#define FW_VERSION    "2026.05.05.08"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -431,6 +431,29 @@ TaskHandle_t diagTaskHandle = NULL;
 // task. When Core 1 hangs, the last value here pinpoints the stuck section.
 volatile const char* g_loopSection = "boot";
 volatile uint32_t    g_loopIter = 0;
+
+// --- Hang watchdogs (added in 2026.05.05.08) ---
+//
+// Diagnoses the 2026-05-05 16:10-EDT 3-of-6 fleet hang: auto-OTA called
+// from uploadTaskFunc spent forever inside HTTPClient on Home-IOT
+// reconnect. wifiBusy/uploading were left set, no reset reason was
+// logged, only manual power cycle recovered the device. These two
+// shared variables let diagnosticsTask convert any future stuck state
+// into a recoverable `reset=SW` instead of a silent brick.
+//
+// g_otaDeadlineMs = 0 means no OTA in flight. Otherwise it's the
+// absolute millis() value at which the diag task will force an
+// esp_restart() if performOTAUpdate() hasn't returned. 180 s is enough
+// for a clean 1.4 MB pull at ~10 KB/s on weak Home-IOT WiFi while
+// still bounding the worst case.
+//
+// g_loopWatchdog* tracks Core 1's main loop progress. If g_loopIter
+// hasn't moved for OVER_LOOP_HANG_MS the diag task forces a restart —
+// catches any future hang in any code path, not just OTA.
+volatile unsigned long g_otaDeadlineMs = 0;
+static const unsigned long OTA_MAX_MS         = 180UL * 1000UL;  // hard ceiling per OTA cycle
+static const unsigned long OTA_STALL_MS       =  20UL * 1000UL;  // abort if no bytes received for 20 s
+static const unsigned long LOOP_HANG_MS       =  90UL * 1000UL;  // Core 1 must tick at least every 90 s
 
 // boot.log session record is written once per power cycle, after the first
 // valid GPS time + date arrives. The diagnostics task then appends an
@@ -3736,12 +3759,21 @@ bool performOTAUpdate() {
   uploading = true;
   wifiBusy  = true;
 
+  // Arm the hang watchdog: diagnosticsTask will forcibly esp_restart()
+  // if we don't return within OTA_MAX_MS. Clears at every exit point
+  // below so a successful or cleanly-failing OTA never trips it.
+  g_otaDeadlineMs = millis() + OTA_MAX_MS;
+  appendBootLog("ota start");
+
   bool ok = performOTAUpdateBody();
 
   // On success the body calls ESP.restart() and never returns here;
-  // on any failure path we land here and must release the radio.
+  // on any failure path we land here and must release the radio AND
+  // disarm the watchdog (otherwise diag would restart us shortly).
+  g_otaDeadlineMs = 0;
   uploading = prevUploading;
   wifiBusy  = prevWifiBusy;
+  appendBootLog(ok ? "ota end ok" : "ota end fail");
   return ok;
 }
 
@@ -3755,7 +3787,12 @@ static bool performOTAUpdateBody() {
 
   WiFiClient mClient;
   HTTPClient mHttp;
-  mHttp.setTimeout(30000);
+  // Tighter than the previous 30 s — manifest is 200 bytes, so anything
+  // beyond ~10 s means we're stuck in DNS/TCP, not waiting for data.
+  // setConnectTimeout bounds the connect phase (HTTPClient honors it
+  // separately from setTimeout which only covers receive).
+  mHttp.setConnectTimeout(8000);
+  mHttp.setTimeout(10000);
   mHttp.setReuse(false);
   mHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
@@ -3799,7 +3836,12 @@ static bool performOTAUpdateBody() {
 
   WiFiClient bClient;
   HTTPClient bHttp;
-  bHttp.setTimeout(300000);
+  // 300 s was much too generous and let HTTPClient's recv block for
+  // five minutes on a stalled stream. The stall watchdog inside the
+  // download loop now bounds true stalls at OTA_STALL_MS; this only
+  // sets the per-call recv ceiling.
+  bHttp.setConnectTimeout(8000);
+  bHttp.setTimeout(20000);
   bHttp.setReuse(false);
   bHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
@@ -3834,9 +3876,21 @@ static bool performOTAUpdateBody() {
   uint8_t buf[4096];  // matches ESP32 flash sector size — Update.write batches per sector
   size_t total = 0;
   unsigned long lastLog = millis();
+  unsigned long lastByteMs = millis();   // stall watchdog
 
   esp_task_wdt_reset();
   while (total < (size_t)size && (bHttp.connected() || stream->available())) {
+    // Hard ceiling — gives up regardless of socket state. The diag
+    // task would also catch this, but bailing here lets us clean up
+    // (Update.abort, free SHA ctx) before the restart instead of
+    // leaving the partition in a half-written state.
+    if (g_otaDeadlineMs && (long)(millis() - g_otaDeadlineMs) > 0) {
+      Serial.println("[OTA] Hard deadline hit — aborting download");
+      Update.abort();
+      mbedtls_sha256_free(&shaCtx);
+      bHttp.end();
+      return false;
+    }
     size_t avail = stream->available();
     if (avail) {
       size_t toRead = avail > sizeof(buf) ? sizeof(buf) : avail;
@@ -3853,6 +3907,7 @@ static bool performOTAUpdateBody() {
         return false;
       }
       total += n;
+      lastByteMs = millis();
       if (millis() - lastLog > 2000) {
         Serial.printf("[OTA] %u / %ld bytes (%.0f%%)\n",
                       (unsigned)total, size, 100.0 * total / size);
@@ -3860,6 +3915,22 @@ static bool performOTAUpdateBody() {
         esp_task_wdt_reset();
       }
     } else {
+      // No bytes ready. CRITICAL: the previous version called
+      // delay(5) here without resetting the wdt and without bounding
+      // how long a stall could last. With bHttp.connected() returning
+      // true (TCP keep-alive) but the server stopped sending, the
+      // loop would spin forever, never feed the wdt (esp_task_wdt_reset
+      // was inside `if (avail)`), and the upload task would be wedged
+      // — which is exactly what happened to E2/E4/E5 at 16:10 EDT.
+      esp_task_wdt_reset();
+      if (millis() - lastByteMs > OTA_STALL_MS) {
+        Serial.printf("[OTA] Stall: no bytes for %lu ms — aborting\n",
+                      (unsigned long)(millis() - lastByteMs));
+        Update.abort();
+        mbedtls_sha256_free(&shaCtx);
+        bHttp.end();
+        return false;
+      }
       delay(5);
     }
     yield();
@@ -4811,6 +4882,12 @@ void diagnosticsTask(void* param) {
   esp_task_wdt_add(NULL);
   Serial.println("[DIAG] task started");
   uint32_t lastIter = 0;
+  // Core 1 loop watchdog state: we let g_loopIter run for one diag tick
+  // before we start the timer, so a fresh boot's first slow setup() pass
+  // doesn't trip the watchdog.
+  uint32_t loopWdLastIter = 0;
+  unsigned long loopWdLastChangeMs = millis();
+
   while (true) {
     esp_task_wdt_reset();
     unsigned long now = millis();
@@ -4821,6 +4898,46 @@ void diagnosticsTask(void* param) {
                   (const char*)g_loopSection,
                   (unsigned long)iter, delta);
     lastIter = iter;
+
+    // ---------- OTA hard deadline ----------
+    // performOTAUpdate arms g_otaDeadlineMs at start and clears it at
+    // every exit. If we see a non-zero deadline that's already past,
+    // OTA is wedged (the 2026-05-05 16:10-EDT 3-of-6 hang signature).
+    // Force a restart so the device doesn't sit indefinitely with
+    // wifiBusy/uploading flags stuck.
+    if (g_otaDeadlineMs && (long)(now - g_otaDeadlineMs) > 0) {
+      char line[96];
+      snprintf(line, sizeof(line),
+               "ota watchdog: deadline exceeded at sect=%s — restart",
+               (const char*)g_loopSection);
+      appendBootLog(line);
+      Serial.println(line);
+      Serial.flush();
+      delay(50);
+      esp_restart();
+    }
+
+    // ---------- Core 1 loop watchdog ----------
+    // If g_loopIter hasn't moved in LOOP_HANG_MS, Core 1 is wedged
+    // somewhere. Log the last-known section and force restart so the
+    // hang becomes a recoverable `reset=SW` next boot instead of a
+    // permanent black-screen brick. Skipped while OTA is intentionally
+    // running — flash writes can pause Core 1 for many seconds.
+    if (iter != loopWdLastIter) {
+      loopWdLastIter = iter;
+      loopWdLastChangeMs = now;
+    } else if (g_otaDeadlineMs == 0 && now - loopWdLastChangeMs > LOOP_HANG_MS) {
+      char line[128];
+      snprintf(line, sizeof(line),
+               "loop watchdog: Core 1 stuck at sect=%s for %lums — restart",
+               (const char*)g_loopSection,
+               (unsigned long)(now - loopWdLastChangeMs));
+      appendBootLog(line);
+      Serial.println(line);
+      Serial.flush();
+      delay(50);
+      esp_restart();
+    }
 
     // Every 5 minutes, append an "alive" line to /boot.log with wall-clock
     // + battery + heap. The last such line before the next boot is the

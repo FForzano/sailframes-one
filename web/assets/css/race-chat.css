@@ -1,0 +1,117 @@
+.sf-chat-root {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9999;
+  font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+.sf-chat-toggle {
+  background: #1f2d3d;
+  color: #fff;
+  border: 0;
+  border-radius: 24px;
+  padding: 10px 16px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+.sf-chat-toggle:hover { background: #2c3e50; }
+
+.sf-chat-panel {
+  position: absolute;
+  right: 0;
+  bottom: 56px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  height: 540px;
+  max-height: calc(100vh - 96px);
+  background: #fff;
+  border: 1px solid #d0d6dc;
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sf-chat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5eaef;
+  background: #f7f9fb;
+}
+.sf-chat-header strong { flex: 0 0 auto; }
+.sf-chat-asas { flex: 1; display: flex; gap: 6px; align-items: center;
+  font-size: 12px; color: #51606d; }
+.sf-chat-asas select { font-size: 12px; padding: 2px 4px; }
+.sf-chat-close {
+  background: transparent;
+  border: 0;
+  font-size: 18px;
+  cursor: pointer;
+  color: #51606d;
+}
+
+.sf-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sf-chat-msg {
+  padding: 8px 10px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-width: 92%;
+}
+.sf-chat-msg-user {
+  background: #1f2d3d;
+  color: #fff;
+  align-self: flex-end;
+  border-bottom-right-radius: 2px;
+}
+.sf-chat-msg-assistant {
+  background: #eef2f5;
+  color: #1f2d3d;
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+}
+
+.sf-chat-input-row {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid #e5eaef;
+}
+.sf-chat-input {
+  flex: 1;
+  border: 1px solid #c9d2da;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.sf-chat-input:focus { outline: 2px solid #4a90e2; outline-offset: -1px; }
+.sf-chat-send {
+  background: #4a90e2;
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 14px;
+  cursor: pointer;
+}
+.sf-chat-send:hover { background: #3b7fcb; }
+
+.sf-chat-foot {
+  font-size: 11px;
+  color: #8696a3;
+  text-align: center;
+  padding: 6px 8px;
+  border-top: 1px solid #f0f3f6;
+}
