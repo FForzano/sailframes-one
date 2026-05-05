@@ -2,6 +2,8 @@
   font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif;
 }
 
+.sf-chat-panel[hidden] { display: none !important; }
+
 .sf-chat-panel {
   position: fixed;
   right: 16px;
