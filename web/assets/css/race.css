@@ -1663,17 +1663,21 @@ body.course-editing .boat-legend {
 }
 .charts-overlay[hidden] { display: none; }
 .charts-overlay-backdrop {
+    /* Transparent — exists only as a click-to-close target. The panel
+       itself carries the user-controlled fade now. */
     position: absolute;
     inset: 0;
-    background: rgba(15, 23, 42, 0.72);
-    backdrop-filter: blur(2px);
+    background: transparent;
     pointer-events: auto;
 }
 .charts-overlay-panel {
     position: relative;
     flex: 1 1 auto;
     margin: 1rem;
-    background: var(--bg-secondary);
+    /* Background alpha is driven by the PANEL FADE slider in JS — see
+       setupChartsOverlay > applyPanelFade. The default below is just a
+       safety fallback if JS hasn't run yet. */
+    background: rgba(15, 23, 42, 0.7);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0.5rem;

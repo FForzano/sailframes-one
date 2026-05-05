@@ -624,23 +624,26 @@ function setupChartsOverlay() {
         if (e.key === 'Escape' && !overlay.hidden) close();
     });
 
-    // Backdrop opacity slider — drags the alpha on the .charts-overlay-backdrop
-    // background so racers can fade more or less of the map through. The
-    // chosen value persists across page loads via localStorage so it
-    // doesn't have to be reset every race.
-    const slider = document.getElementById('charts-bg-opacity');
-    const valEl  = document.getElementById('charts-bg-opacity-val');
-    const backdrop = overlay.querySelector('.charts-overlay-backdrop');
-    function applyOpacity(pct) {
-        if (backdrop) backdrop.style.background = `rgba(15, 23, 42, ${(pct / 100).toFixed(2)})`;
+    // Panel-fade slider — drags the alpha on the chart panel itself so
+    // the map behind shows through. The backdrop stays fully transparent
+    // (it's only there as a click-to-close target). At 0% the panel is
+    // fully opaque (no map bleed); at 100% the panel is fully
+    // transparent (map fully visible, charts ghost over it). Persisted
+    // across page loads via localStorage.
+    const slider = document.getElementById('charts-panel-fade');
+    const valEl  = document.getElementById('charts-panel-fade-val');
+    const panel  = overlay.querySelector('.charts-overlay-panel');
+    function applyPanelFade(pct) {
+        const alpha = Math.max(0, Math.min(1, 1 - pct / 100));
+        if (panel) panel.style.background = `rgba(15, 23, 42, ${alpha.toFixed(2)})`;
         if (valEl) valEl.textContent = `${pct}%`;
-        try { localStorage.setItem('sf-charts-bg-opacity', String(pct)); } catch {}
+        try { localStorage.setItem('sf-charts-panel-fade', String(pct)); } catch {}
     }
     if (slider) {
-        const saved = parseInt(localStorage.getItem('sf-charts-bg-opacity') || '72', 10);
+        const saved = parseInt(localStorage.getItem('sf-charts-panel-fade') || '30', 10);
         slider.value = String(saved);
-        applyOpacity(saved);
-        slider.addEventListener('input', (e) => applyOpacity(parseInt(e.target.value, 10)));
+        applyPanelFade(saved);
+        slider.addEventListener('input', (e) => applyPanelFade(parseInt(e.target.value, 10)));
     }
 }
 
