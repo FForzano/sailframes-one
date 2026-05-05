@@ -854,6 +854,38 @@ body.course-editing .boat-legend {
     background: rgba(34, 211, 238, 0.12);
 }
 
+/* Marker overlays toggle: stack of checkboxes for trail/speed/heel/TWA. */
+.marker-overlays-control {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    background: rgba(15, 23, 42, 0.85);
+    padding: 4px 8px;
+    gap: 2px;
+}
+.marker-overlays-control .trail-window-label {
+    padding: 2px 0;
+    font-size: 0.6rem;
+    color: #64748b;
+    letter-spacing: 0.08em;
+    border-bottom: 1px solid rgba(100, 116, 139, 0.25);
+    margin-bottom: 2px;
+}
+.marker-overlays-control label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.7rem;
+    font-family: monospace;
+    color: #cbd5e1;
+    cursor: pointer;
+    padding: 1px 0;
+}
+.marker-overlays-control input[type="checkbox"] {
+    accent-color: #22d3ee;
+    margin: 0;
+}
+
 /* Polar overlay toggle in chart header */
 .chart-overlay-toggle {
     background: transparent;

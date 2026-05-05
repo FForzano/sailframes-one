@@ -103,6 +103,26 @@ let activeLeg = 0;
 // tick from windAt(targetTime) so the laylines pivot when the wind shifts.
 // null = haven't sampled yet → renderLaylines falls back to raceAvgTWD.
 let lastLaylineTWD = null;
+
+// Per-marker overlay toggles, controlled by the top-right Leaflet legend.
+// Each item adds (or removes) one piece of information from every boat's
+// map cursor / track in real time. Defaults match the most-used readout.
+//   trail — the colored polyline behind the boat (still trimmed by the
+//           top-right trail-window picker for duration)
+//   speed — current SOG in knots, beside the arrow
+//   heel  — heel angle from the IMU, with Sd/Pt prefix
+//   twa   — true wind angle (signed; P/S prefix). Per-boat — derived from
+//           NOAA TWD and the boat's COG, so it works for every boat
+//           regardless of whether they have an onboard wind sensor. This
+//           is the most actionable wind metric on a boat marker: AWA is
+//           nice but only one boat in the fleet has the Calypso, and TWD
+//           is fleet-global (already on the wind picker).
+let markerOverlays = {
+    trail: true,
+    speed: true,
+    heel:  true,
+    twa:   true,
+};
 let polarOverlayVisible = true;
 
 // J/80 typical upwind tack angle (degrees off true wind). Used for laylines.
@@ -198,6 +218,7 @@ async function init() {
     initMap();
     addLaylinesMapControl();
     addTrailWindowMapControl();
+    addMarkerOverlaysMapControl();
     addMapWindPicker();
     setupChartsOverlay();
 
@@ -364,8 +385,10 @@ function initMap() {
         }),
     };
 
-    // Add default layer (NOAA Charts)
-    baseLayers['NOAA Charts'].addTo(map);
+    // ESRI Ocean is the default — best legibility under colored boat
+    // tracks at typical Boston Harbor zoom levels (NOAA charts and
+    // OpenSeaMap stay available in the layers control).
+    baseLayers['ESRI Ocean'].addTo(map);
 
     // Add layer control
     L.control.layers(baseLayers, overlayLayers, {
@@ -486,6 +509,55 @@ function addTrailWindowMapControl() {
     ctl.addTo(map);
 }
 
+// Top-right legend: per-marker overlay toggles. Each row drives whether
+// a particular piece of info is rendered on the boat cursor (and, for
+// the trail row, whether the polyline trail is drawn at all). State
+// lives in the global `markerOverlays`. Persisted to localStorage so the
+// user's choices stick across races.
+function addMarkerOverlaysMapControl() {
+    if (!map) return;
+    // Hydrate from prior session if present.
+    try {
+        const saved = JSON.parse(localStorage.getItem('sf-marker-overlays') || 'null');
+        if (saved && typeof saved === 'object') {
+            for (const k of Object.keys(markerOverlays)) {
+                if (typeof saved[k] === 'boolean') markerOverlays[k] = saved[k];
+            }
+        }
+    } catch {}
+    const items = [
+        { key: 'trail', label: 'Trail' },
+        { key: 'speed', label: 'Speed' },
+        { key: 'heel',  label: 'Heel' },
+        { key: 'twa',   label: 'TWA' },
+    ];
+    const ctl = L.control({ position: 'topright' });
+    ctl.onAdd = function () {
+        const div = L.DomUtil.create('div', 'leaflet-bar map-toggle-control marker-overlays-control');
+        div.title = 'Boat-cursor overlays — toggle each piece of info';
+        div.innerHTML = `<span class="trail-window-label">SHOW</span>` +
+            items.map(it =>
+                `<label><input type="checkbox" data-key="${it.key}" ${markerOverlays[it.key] ? 'checked' : ''}> ${it.label}</label>`
+            ).join('');
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        div.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener('change', () => {
+                markerOverlays[cb.dataset.key] = cb.checked;
+                try { localStorage.setItem('sf-marker-overlays', JSON.stringify(markerOverlays)); } catch {}
+                // Trail toggle affects polyline visibility; others only the
+                // marker label. updateBoatPositions repaints both at the
+                // current playback time.
+                if (currentRace) {
+                    updateBoatPositions(playCursorSeconds);
+                }
+            });
+        });
+        return div;
+    };
+    ctl.addTo(map);
+}
+
 // Top-left wind widget on the map: a rotating arrow + TWD/TWS readout
 // with the station dropdown directly below. Replaces the old leaderboard
 // wind badge AND the toolbar wind picker — there's now one wind control
@@ -584,6 +656,13 @@ function refreshAllTrails() {
 
 function applyTrailWindow(layer) {
     if (!layer || !layer.track || !layer.coords || !layer.times) return;
+    // The SHOW > Trail toggle hides the polyline entirely. Empty latlngs
+    // keeps the layer registered (so toggleBoatVisibility still works)
+    // but draws nothing.
+    if (!markerOverlays.trail) {
+        layer.track.setLatLngs([]);
+        return;
+    }
     const n = layer.coords.length;
     if (n === 0) return;
     const endIdx = Math.min(n - 1, layer.currentIdx ?? (n - 1));
@@ -621,16 +700,23 @@ function renderLaylines() {
     // bearing-from-START — fragile when the course has the same mark id
     // appearing twice or when intermediate marks confuse the index walk.
     const courseSeq = currentRace.course;
-    if (activeLeg >= courseSeq.length) return;  // race finished
+    // Race-wide event count includes multi-lap roundings + finish-line
+    // crossing; it's the right ceiling for "race over, stop drawing".
+    const totalLegs = currentRace._totalLegs ?? courseSeq.length;
+    if (totalLegs > 0 && activeLeg >= totalLegs) return;  // race finished
+    // Walk the course modulo so multi-lap races (e.g. 2-lap W-L defined
+    // as course=[W,L]) still find the next upwind beat on lap 2.
+    const scanLimit = courseSeq.length * MAX_LAPS_TO_DETECT;
 
     let targetMark = null;
     let targetIdx = -1;
-    for (let i = activeLeg; i < courseSeq.length; i++) {
-        const mark = marksById[courseSeq[i]];
+    for (let i = activeLeg; i < scanLimit; i++) {
+        const mark = marksById[courseSeq[i % courseSeq.length]];
         if (!mark) continue;
+        const prevSeqIdx = (i - 1 + courseSeq.length) % courseSeq.length;
         const prev = (i === 0)
             ? startAnchor
-            : (marksById[courseSeq[i - 1]] || startAnchor);
+            : (marksById[courseSeq[prevSeqIdx]] || startAnchor);
         const legBearing = bearingDegrees(prev.lat, prev.lon, mark.lat, mark.lon);
         const offset = ((legBearing - twd + 540) % 360) - 180;
         if (Math.abs(offset) <= 90) {
@@ -702,23 +788,33 @@ function teamInitials(name) {
 }
 
 // Build the divIcon HTML for a boat marker. Includes the directional
-// arrow plus a small label (initials · speed · heel) so the per-boat
-// readout sits beside the boat itself instead of in a separate legend.
-// Heel is omitted when IMU isn't available (e.g. GPX-only boats).
-function createBoatIcon(color, rotation = 0, initials = '', speedKn = null, heelDeg = null) {
+// arrow plus a small label (initials · speed · heel · TWA) — each piece
+// can be hidden via the top-right SHOW legend (markerOverlays). The
+// initials chip stays so boats are always identifiable; only the
+// numeric stats can be turned off.
+function createBoatIcon(color, rotation = 0, initials = '', speedKn = null, heelDeg = null, twaSigned = null) {
     const svg = `
         <svg class="boat-marker-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"
              style="transform: rotate(${rotation}deg);">
             <path d="M12 2 L20 20 L12 16 L4 20 Z"
                   fill="${color}" stroke="white" stroke-width="1.5"/>
         </svg>`;
-    const speedTxt = (speedKn != null && Number.isFinite(speedKn)) ? `${speedKn.toFixed(1)}kn` : '';
-    // Heel is signed (port = negative on this fleet's IMU); show side
-    // explicitly with Sd/Pt instead of a +/− that's easy to misread.
-    const heelTxt = (heelDeg != null && Number.isFinite(heelDeg))
+    const ovr = markerOverlays || { speed: true, heel: true, twa: true };
+    const speedTxt = (ovr.speed && speedKn != null && Number.isFinite(speedKn))
+        ? `${speedKn.toFixed(1)}kn` : '';
+    // Heel: signed (port = negative on this fleet's IMU). Show side
+    // explicitly with Sd/Pt instead of ± so it's unambiguous on the map.
+    const heelTxt = (ovr.heel && heelDeg != null && Number.isFinite(heelDeg))
         ? ` ${heelDeg >= 0 ? 'Sd' : 'Pt'} ${Math.round(Math.abs(heelDeg))}°`
         : '';
-    const stats = (speedTxt || heelTxt) ? `<span class="bml-stats">${speedTxt}${heelTxt}</span>` : '';
+    // TWA: signed true wind angle. Negative = port tack, positive = stbd.
+    // Per-boat (depends on COG), so it tells you how close-hauled / deep
+    // each boat is sailing.
+    const twaTxt = (ovr.twa && twaSigned != null && Number.isFinite(twaSigned))
+        ? ` ${twaSigned <= 0 ? 'P' : 'S'}${Math.round(Math.abs(twaSigned))}°`
+        : '';
+    const stats = (speedTxt || heelTxt || twaTxt)
+        ? `<span class="bml-stats">${speedTxt}${heelTxt}${twaTxt}</span>` : '';
     const label = initials || stats
         ? `<span class="boat-marker-label"><span class="bml-init" style="color:${color}">${initials}</span>${stats}</span>`
         : '';
@@ -771,29 +867,82 @@ function startMidpoint(race) {
     return null;
 }
 
-// Walk each boat's track once and record the first time it passed within
-// MARK_ROUNDING_RADIUS_M of the next-in-sequence mark. Marks must be
-// rounded in course order — overshoots aren't credited until the chain
-// catches up. Result stored on layer.roundingTimes (epoch ms per leg).
-function precomputeRoundingsForLayer(layer, courseSeq, marksById) {
+// How many laps to scan for. Most J/80 club races are 1–2 laps; 4 is a
+// safe ceiling that covers everything we've ever sailed. Over-scanning
+// is harmless — if the boat never re-enters the next slot's radius the
+// algorithm just stops.
+const MAX_LAPS_TO_DETECT = 4;
+
+// Walk each boat's track once and record the time it passed within
+// MARK_ROUNDING_RADIUS_M of each mark in the course sequence — repeated
+// up to MAX_LAPS_TO_DETECT times so that races defined as a single lap
+// of [W, L] (the common J/80 pattern) automatically pick up the second
+// lap's roundings without anyone having to re-enter the marks. After
+// the last detected rounding, if a finish_line is defined and the boat
+// crosses it, that crossing is appended as the race-end timestamp.
+//
+// Result stored on layer.roundingTimes — a flat array of epoch ms, one
+// entry per detected event. Length up to courseSeq.length * MAX_LAPS + 1
+// (the +1 = finish-line crossing).
+function precomputeRoundingsForLayer(layer, courseSeq, marksById, finishLine) {
     if (!courseSeq?.length || !layer?.data?.length) {
         layer.roundingTimes = null;
         return;
     }
-    const times = new Array(courseSeq.length);
-    let idx = 0;
-    for (let i = 0; i < layer.data.length && idx < courseSeq.length; i++) {
+    const times = [];
+    const maxEvents = courseSeq.length * MAX_LAPS_TO_DETECT;
+    let lastSampleConsumed = 0;
+    for (let i = 0; i < layer.data.length && times.length < maxEvents; i++) {
         const p = layer.data[i];
         if (!p.lat || !p.lon) continue;
-        const m = marksById[courseSeq[idx]];
-        if (!m) { idx++; i--; continue; }  // skip dangling reference
+        const seqIdx = times.length % courseSeq.length;
+        const m = marksById[courseSeq[seqIdx]];
+        if (!m) break;  // dangling mark id — give up rather than mis-credit
         const d = haversineMeters(p.lat, p.lon, m.lat, m.lon);
         if (d < MARK_ROUNDING_RADIUS_M) {
-            times[idx] = new Date(p.t).getTime();
-            idx++;
+            times.push(new Date(p.t).getTime());
+            lastSampleConsumed = i;
         }
     }
+
+    // Finish-line crossing: walk forward from the last detected rounding
+    // and look for the first GPS segment that intersects the line. If no
+    // finish line is defined or the boat never crosses, leave the array
+    // as-is (last rounding becomes the de-facto finish).
+    if (finishLine && finishLine.pin_lat != null && finishLine.boat_lat != null) {
+        const startIdx = times.length ? lastSampleConsumed + 1 : 1;
+        let prevP = layer.data[startIdx - 1] || null;
+        for (let i = startIdx; i < layer.data.length; i++) {
+            const p = layer.data[i];
+            if (!p.lat || !p.lon) { prevP = p; continue; }
+            if (prevP && prevP.lat && prevP.lon) {
+                if (segmentsIntersect(
+                    prevP.lat, prevP.lon, p.lat, p.lon,
+                    finishLine.pin_lat, finishLine.pin_lon,
+                    finishLine.boat_lat, finishLine.boat_lon
+                )) {
+                    times.push(new Date(p.t).getTime());
+                    break;
+                }
+            }
+            prevP = p;
+        }
+    }
+
     layer.roundingTimes = times;
+}
+
+// 2-D segment intersection. Lat/lon at Boston-Harbor scale is close
+// enough to a Cartesian plane (sub-metre error over a few km) for a
+// boolean "did the boat's last GPS segment cross the finish line?"
+// check. Returns false for collinear or non-overlapping segments.
+function segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+    const d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+    const d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+    const d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+           ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
 
 // --- Weather-station wind (Tier 2 wind / TWD / laylines) ---
@@ -1187,9 +1336,22 @@ function precomputeAllRoundings() {
     if (!currentRace) return;
     const marksById = buildMarksById(currentRace);
     const courseSeq = currentRace.course || [];
+    const finishLine = currentRace.finish_line || null;
     for (const layer of Object.values(boatLayers)) {
-        precomputeRoundingsForLayer(layer, courseSeq, marksById);
+        precomputeRoundingsForLayer(layer, courseSeq, marksById, finishLine);
     }
+    // Race-wide totalLegs = max events any boat reached. Used by the
+    // leaderboard to know when a boat has "finished" and by the layline
+    // scanner to stop drawing once the fleet is done. With multi-lap
+    // detection in precomputeRoundingsForLayer, this lifts the implicit
+    // `courseSeq.length` ceiling so race 2 (course=[W,L], 2 laps, with
+    // a finish line) shows 4 legs in the summary instead of 2.
+    let maxEvents = 0;
+    for (const layer of Object.values(boatLayers)) {
+        const n = layer?.roundingTimes?.length || 0;
+        if (n > maxEvents) maxEvents = n;
+    }
+    currentRace._totalLegs = maxEvents;
 }
 
 function legsCompletedAt(layer, targetTimeMs) {
@@ -1205,19 +1367,23 @@ function legsCompletedAt(layer, targetTimeMs) {
 // Along-course meters from start to current playback time. Sums leg
 // lengths for completed legs and adds projected progress along the
 // active leg (legLength - distToTarget, clamped to [0, legLength]).
+// Indexes into courseSeq modulo its length so multi-lap progress (race
+// 2: course=[W,L] sailed 2× → legsCompleted up to 4) keeps growing
+// instead of capping at the end of lap 1.
 function progressMetersAt(point, courseSeq, marksById, legsCompleted, startAnchor) {
     if (!courseSeq?.length || !point) return 0;
     let prev = startAnchor;
     if (!prev) return 0;
     let cum = 0;
     for (let i = 0; i < legsCompleted; i++) {
-        const m = marksById[courseSeq[i]];
+        const m = marksById[courseSeq[i % courseSeq.length]];
         if (!m) break;
         cum += haversineMeters(prev.lat, prev.lon, m.lat, m.lon);
         prev = m;
     }
-    if (legsCompleted < courseSeq.length && prev) {
-        const target = marksById[courseSeq[legsCompleted]];
+    const totalLegs = currentRace?._totalLegs ?? courseSeq.length;
+    if (legsCompleted < totalLegs && prev) {
+        const target = marksById[courseSeq[legsCompleted % courseSeq.length]];
         if (target) {
             const legLen = haversineMeters(prev.lat, prev.lon, target.lat, target.lon);
             const distToT = haversineMeters(point.lat, point.lon, target.lat, target.lon);
@@ -1306,14 +1472,18 @@ function updateBoatPositions(timeSeconds) {
         if (closest && closest.lat && closest.lon) {
             layer.marker.setLatLng([closest.lat, closest.lon]);
 
-            // Update boat icon (rotation + label with initials/speed/heel).
-            // Heel is sourced from the IMU sample nearest playback time;
-            // GPX-only boats have no IMU and the label simply omits heel.
+            // Update boat icon (rotation + label with initials/speed/heel/TWA).
+            // Heel is sourced from the IMU sample nearest playback time
+            // (GPX-only boats have no IMU → omitted). TWA is computed from
+            // the NOAA TWD at this moment minus the boat's COG, so it
+            // works without an onboard wind sensor.
             const course = closest.course || 0;
             const speedKn = closest.speed_kn ?? null;
             const imuSample = nearestSampleAt(layer.imu, targetTime);
             const heelDeg = imuSample?.heel ?? null;
-            layer.marker.setIcon(createBoatIcon(layer.color, course, layer.initials, speedKn, heelDeg));
+            const wSample = windAt(targetTime);
+            const twaSigned = wSample ? (((wSample.twd - course + 540) % 360) - 180) : null;
+            layer.marker.setIcon(createBoatIcon(layer.color, course, layer.initials, speedKn, heelDeg, twaSigned));
 
             // Cache current playback-time point + index so the leaderboard
             // reads the same value the map shows and can look up cumulative
@@ -1629,8 +1799,9 @@ function calculatePositions() {
             legsCompleted = legsCompletedAt(layer, targetTimeMs);
             progressM = progressMetersAt(point, courseSeq, marksById, legsCompleted,
                                          startAnchor || { lat: gps[0].lat, lon: gps[0].lon });
-            if (legsCompleted < courseSeq.length) {
-                const target = marksById[courseSeq[legsCompleted]];
+            const totalLegsLB = currentRace?._totalLegs ?? courseSeq.length;
+            if (legsCompleted < totalLegsLB) {
+                const target = marksById[courseSeq[legsCompleted % courseSeq.length]];
                 if (target) {
                     nextMarkName = target.name || target.mark_type || `Mark ${legsCompleted + 1}`;
                     distToNext = haversineMeters(point.lat, point.lon, target.lat, target.lon);
@@ -1657,12 +1828,12 @@ function calculatePositions() {
             polarPct = polarPercent(point.speed_kn || 0, twa, windNow.tws);
         }
 
-        // Boats that have completed every leg are "finished". For ranking,
-        // their tiebreaker is finish time (last rounding), NOT distToNext —
-        // distToNext is null once the course is done, so the previous
-        // sort fell back to insertion order and could rank a later
-        // finisher above an earlier one (race 2026-05-04 race 2).
-        const totalLegs = courseSeq.length;
+        // Boats that have completed every event are "finished". The total
+        // event count is the fleet maximum from precomputeAllRoundings —
+        // not just `courseSeq.length`, because multi-lap detection lets
+        // roundingTimes exceed the course length and a finish-line
+        // crossing adds one more event.
+        const totalLegs = currentRace._totalLegs ?? courseSeq.length;
         const finished = courseDefined && totalLegs > 0 && legsCompleted >= totalLegs;
         const finishTimeMs = (finished && layer?.roundingTimes && layer.roundingTimes[totalLegs - 1] != null)
             ? layer.roundingTimes[totalLegs - 1]
@@ -2120,8 +2291,9 @@ function updateBoatDrawer() {
     const startAnchor = startMidpoint(currentRace);
     const legsCompleted = legsCompletedAt(layer, targetMs);
     let nextMarkBlock = '';
-    if (courseSeq.length && legsCompleted < courseSeq.length) {
-        const target = marksById[courseSeq[legsCompleted]];
+    const totalLegsDrawer = currentRace?._totalLegs ?? courseSeq.length;
+    if (courseSeq.length && legsCompleted < totalLegsDrawer) {
+        const target = marksById[courseSeq[legsCompleted % courseSeq.length]];
         if (target && point.lat && point.lon) {
             const distToNext = haversineMeters(point.lat, point.lon, target.lat, target.lon);
             const brg = bearingDegrees(point.lat, point.lon, target.lat, target.lon);
