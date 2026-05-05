@@ -3178,6 +3178,37 @@ async function loadRaceData(raceId) {
 
         console.log('[Race] Loaded race data:', currentRace.name);
 
+        // Attach the race-coach chat panel. The callback is recomputed
+        // on every chat turn so the briefing reflects the latest state
+        // (e.g. if the user changes wind source mid-conversation).
+        if (window.SailFramesChat?.attach) {
+            const ctxFn = () => {
+                const allManeuvers = [];
+                for (const [deviceId, layer] of Object.entries(boatLayers)) {
+                    if (typeof detectManeuversForLayer !== 'function') break;
+                    const team = raceData?.boats?.[deviceId]?.boat?.team_name
+                              || raceData?.boats?.[deviceId]?.boat?.boat_name
+                              || deviceId;
+                    for (const m of detectManeuversForLayer(layer)) {
+                        allManeuvers.push({ deviceId, team, ...m });
+                    }
+                }
+                return {
+                    currentRace,
+                    raceDataBoats: raceData?.boats || {},
+                    boatLayers,
+                    legRows: typeof computeLegSummary === 'function' ? computeLegSummary() : [],
+                    maneuvers: allManeuvers,
+                    weatherWindSamples,
+                    weatherWindSource,
+                    finishOrder: null,  // leaderboard order is recomputed per playback tick;
+                                         // briefing's per-boat finish_position derives from
+                                         // the per-boat roundingTimes instead.
+                };
+            };
+            window.SailFramesChat.attach(ctxFn);
+        }
+
     } catch (err) {
         console.error('[Race] Failed to load race data:', err);
         alert('Failed to load race data. Check console for details.');
