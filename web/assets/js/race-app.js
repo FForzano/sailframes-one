@@ -77,11 +77,11 @@ let visibleStationIds = new Set();
 // Preferred-first ordering for the auto-pick. Synoptic SYN_* stations
 // are added dynamically below if/when they appear in the API response.
 // Order matters: the auto-pick at race load walks this list and takes the
-// first station with usable samples. Logan (KBOS) is the operational
-// default for the Boston Harbor fleet — it's an FAA METAR that updates
-// hourly and is consistently available; CSIM3 (Castle Island) is closer
-// to the racing area but its NDBC feed has more dropouts.
-const PRIMARY_WIND_STATIONS = ['KBOS', 'CSIM3', '44013'];
+// first station with usable samples. Boston 16NM (NDBC 44013) is the
+// operational default for the Boston Harbor fleet — open-ocean buoy with
+// the cleanest signal (no land/airport interference); Logan (KBOS) and
+// Castle Island (CSIM3) are fallbacks when 44013 has dropouts.
+const PRIMARY_WIND_STATIONS = ['44013', 'KBOS', 'CSIM3'];
 let selectedWindStationId = null;  // user-selected wind source (null = auto-pick)
 
 // User-controlled visibility toggles. Defaults are ON so the dashboard
@@ -609,19 +609,37 @@ function renderLaylines() {
     const startAnchor = startMidpoint(currentRace);
     if (!startAnchor) return;
 
-    // Next-windward-only: draw laylines just for the mark the leader is
-    // currently sailing toward, and only if it sits upwind of the start.
-    // Once the leader rounds it the layer rebuilds with the next target;
-    // when the next target is downwind (offset/leeward/gate) nothing is
-    // drawn, which is the racing convention — laylines are an upwind tool.
+    // Find the *next upwind beat* in the course from activeLeg forward.
+    // We scan each remaining leg and check whether the bearing from the
+    // previous mark (or start) into this mark is within ±90° of TWD —
+    // i.e. is this leg a beat? The first beat we hit is what we draw
+    // laylines for. This covers two-lap W-L courses (laylines on W2
+    // even after L is rounded) and courses with offset+gate marks
+    // (W2's laylines visible during the downwind segment, tactically
+    // useful for planning the second beat). Race 2 of 2026-05-04 had no
+    // laylines on its leg-3 windward because the prior code only tested
+    // bearing-from-START — fragile when the course has the same mark id
+    // appearing twice or when intermediate marks confuse the index walk.
     const courseSeq = currentRace.course;
     if (activeLeg >= courseSeq.length) return;  // race finished
-    const targetMark = marksById[courseSeq[activeLeg]];
-    if (!targetMark) return;
 
-    const brgFromStart = bearingDegrees(startAnchor.lat, startAnchor.lon, targetMark.lat, targetMark.lon);
-    const offset = ((brgFromStart - twd + 540) % 360) - 180;
-    if (Math.abs(offset) > 90) return;  // next mark is downwind — no laylines
+    let targetMark = null;
+    let targetIdx = -1;
+    for (let i = activeLeg; i < courseSeq.length; i++) {
+        const mark = marksById[courseSeq[i]];
+        if (!mark) continue;
+        const prev = (i === 0)
+            ? startAnchor
+            : (marksById[courseSeq[i - 1]] || startAnchor);
+        const legBearing = bearingDegrees(prev.lat, prev.lon, mark.lat, mark.lon);
+        const offset = ((legBearing - twd + 540) % 360) - 180;
+        if (Math.abs(offset) <= 90) {
+            targetMark = mark;
+            targetIdx = i;
+            break;
+        }
+    }
+    if (!targetMark) return;  // no upwind leg ahead — racing downwind to finish
 
     laylineLayer = L.featureGroup().addTo(map);
     const LAYLINE_M = 3000;
@@ -632,13 +650,14 @@ function renderLaylines() {
 
     const styleStb = { color: '#22d3ee', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
     const stylePort = { color: '#ef4444', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
-    const markName = targetMark.name || targetMark.mark_type || `Mark ${activeLeg + 1}`;
+    const markName = targetMark.name || targetMark.mark_type || `Mark ${targetIdx + 1}`;
     const twdLabel = `TWD ${twd.toFixed(0)}°`;
+    const legNote = (targetIdx > activeLeg) ? ` (leg ${targetIdx + 1})` : '';
     L.polyline([[targetMark.lat, targetMark.lon], stbEnd], styleStb)
-        .bindTooltip(`Starboard layline → ${markName} · ${twdLabel}`, { sticky: true })
+        .bindTooltip(`Starboard layline → ${markName}${legNote} · ${twdLabel}`, { sticky: true })
         .addTo(laylineLayer);
     L.polyline([[targetMark.lat, targetMark.lon], portEnd], stylePort)
-        .bindTooltip(`Port layline → ${markName} · ${twdLabel}`, { sticky: true })
+        .bindTooltip(`Port layline → ${markName}${legNote} · ${twdLabel}`, { sticky: true })
         .addTo(laylineLayer);
 }
 
