@@ -98,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.03.09"
+#define FW_VERSION    "2026.05.05.01"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -429,6 +429,13 @@ TaskHandle_t diagTaskHandle = NULL;
 // task. When Core 1 hangs, the last value here pinpoints the stuck section.
 volatile const char* g_loopSection = "boot";
 volatile uint32_t    g_loopIter = 0;
+
+// boot.log session record is written once per power cycle, after the first
+// valid GPS time + date arrives. The diagnostics task then appends an
+// "alive" heartbeat every 5 min so a missing tail in the next session
+// distinguishes battery-died / crashed from clean power-off.
+bool g_bootSessionLogged = false;
+unsigned long g_lastAliveLog = 0;
 
 // True while Core 0 is mid-WiFi-work: WiFi scan, connect, upload cycle.
 // Core 1 must NOT touch the WiFi/LWIP stack (handleTelnet, telnetServer,
@@ -879,6 +886,37 @@ static const char* resetReasonStr(esp_reset_reason_t r) {
     case ESP_RST_SDIO:       return "SDIO";
     default:                 return "UNKNOWN";
   }
+}
+
+// Append a single line to /boot.log, taking sdMutex with a short timeout so
+// a busy SD path (logging, upload) can't stall the caller. The setup-time
+// "boot fw=…" record runs before the mutex exists and writes directly; this
+// helper is for runtime appends from loop() and diagnosticsTask.
+void appendBootLog(const char* line) {
+  if (!sdOK) return;
+  if (sdMutex && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(200)) != pdTRUE) return;
+  File f = SD.open("/boot.log", FILE_APPEND);
+  if (f) {
+    f.println(line);
+    f.close();
+  }
+  if (sdMutex) xSemaphoreGive(sdMutex);
+}
+
+// Format gps.utc_time (HHMMSS) + gps.date (DDMMYY) into ISO8601 "YYYY-MM-DDTHH:MM:SSZ".
+// Returns false if either field is not yet populated.
+static bool formatGpsIso(char* out, size_t outSize) {
+  if (strlen(gps.utc_time) < 6) return false;
+  if (strlen(gps.date) < 6) return false;
+  if (gps.date[4] == '0' && gps.date[5] == '0') return false;  // year 00 = invalid
+  snprintf(out, outSize, "20%c%c-%c%c-%c%cT%c%c:%c%c:%c%cZ",
+           gps.date[4], gps.date[5],          // YY
+           gps.date[2], gps.date[3],          // MM
+           gps.date[0], gps.date[1],          // DD
+           gps.utc_time[0], gps.utc_time[1],  // HH
+           gps.utc_time[2], gps.utc_time[3],  // MM
+           gps.utc_time[4], gps.utc_time[5]); // SS
+  return true;
 }
 
 void setup() {
@@ -4508,6 +4546,22 @@ void diagnosticsTask(void* param) {
                   (const char*)g_loopSection,
                   (unsigned long)iter, delta);
     lastIter = iter;
+
+    // Every 5 minutes, append an "alive" line to /boot.log with wall-clock
+    // + battery + heap. The last such line before the next boot is the
+    // device's last known good moment — that gap is how we tell crash /
+    // battery-died / clean-power-off apart.
+    if (g_bootSessionLogged && now - g_lastAliveLog >= 5UL * 60UL * 1000UL) {
+      char iso[24];
+      if (formatGpsIso(iso, sizeof(iso))) {
+        char line[96];
+        snprintf(line, sizeof(line), "alive t=%s batt=%.2fV %d%% heap=%u",
+                 iso, battery.voltage, battery.percent, ESP.getFreeHeap());
+        appendBootLog(line);
+        g_lastAliveLog = now;
+      }
+    }
+
     vTaskDelay(pdMS_TO_TICKS(5000));
   }
 }
@@ -4799,6 +4853,20 @@ void loop() {
 
   g_loopSection = "gps";
   readGPS();
+
+  // Once per boot: when GPS time first becomes valid, stamp boot.log with
+  // wall-clock + battery so we can correlate this session with the previous
+  // "alive" tail and tell battery-died from clean-power-off.
+  if (!g_bootSessionLogged) {
+    char iso[24];
+    if (formatGpsIso(iso, sizeof(iso))) {
+      char line[80];
+      snprintf(line, sizeof(line), "session t=%s batt=%.2fV %d%%",
+               iso, battery.voltage, battery.percent);
+      appendBootLog(line);
+      g_bootSessionLogged = true;
+    }
+  }
 
   g_loopSection = "rec-state";
   updateRecordingState();

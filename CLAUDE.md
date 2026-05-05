@@ -205,10 +205,25 @@ deadlocked Core 1 inside LWIP under upload contention (firmware
 └── wind_mac.txt                     # Calypso MAC; presence = wind enabled
 ```
 
-### `boot.log` format (since 2026.05.03.08)
+### `boot.log` format (since 2026.05.03.08, extended 2026.05.05.01)
 
-Each boot appends one line: `boot fw=<ver> reset=<reason> heap=<free> min_heap=<min>`
+Each boot appends one line at setup time:
+`boot fw=<ver> reset=<reason> heap=<free> min_heap=<min>`
 where `reset` is one of `POWERON / SW / PANIC / TASK_WDT / INT_WDT / BROWNOUT / DEEPSLEEP / EXT`.
+Note: with the SPDT slide switch wiring, every clean session shows `POWERON`
+— the reset reason alone cannot distinguish "battery died" from "user
+toggled switch". Use the timestamped lines below for that.
+
+Once GPS time becomes valid in a given session, one extra line is appended:
+`session t=<iso> batt=<v>V <pct>%`
+
+Every 5 minutes the diagnostics task appends a heartbeat:
+`alive t=<iso> batt=<v>V <pct>% heap=<free>`
+
+Reading the log:
+- Last `alive` before next `boot` = device's last known good moment.
+- Gap of seconds → user power-off. Gap of minutes with healthy `batt%` →
+  crash. Gap with `batt%` already below ~10% → battery died.
 
 ---
 
