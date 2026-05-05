@@ -1788,23 +1788,32 @@ function updateAllWindMarkers(targetTimeMs) {
 }
 
 function fitMapToBounds() {
-    // Initial framing: tight zoom on the START LINE alone. The user
-    // wants to land already looking at where the action begins — the
-    // pin/boat ends and the boats milling for position. Including the
-    // first windward in the bounds was making the view too wide; on a
-    // typical Boston Harbor beat the windward sits well above the
-    // start, dragging the camera back. The follow-mode pan kicks in
-    // as boats start sailing toward the windward.
+    // Initial framing: start line + first mark in one frame. That's
+    // the racing area — pre-start positioning at the bottom, the first
+    // beat at the top — and what the user wants to see when they land
+    // on a race. Once they press play, follow-mode (which frames the
+    // fleet only) takes over.
+    const corners = [];
     const sl = currentRace?.start_line;
     if (sl && sl.pin_lat != null && sl.boat_lat != null) {
-        const bounds = L.latLngBounds([
-            [sl.pin_lat, sl.pin_lon],
-            [sl.boat_lat, sl.boat_lon],
-        ]);
-        console.log('[Race] Fitting to start-line bounds:', bounds.toBBoxString());
-        // Tight: minimal padding, deep maxZoom — the start line should
-        // fill most of the viewport.
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
+        corners.push([sl.pin_lat, sl.pin_lon]);
+        corners.push([sl.boat_lat, sl.boat_lon]);
+    }
+    const courseSeq = currentRace?.course || [];
+    if (courseSeq.length) {
+        const marksById = buildMarksById(currentRace);
+        const firstMark = marksById[courseSeq[0]];
+        if (firstMark && firstMark.lat != null && firstMark.lon != null) {
+            corners.push([firstMark.lat, firstMark.lon]);
+        }
+    }
+    if (corners.length >= 2) {
+        const bounds = L.latLngBounds(corners);
+        console.log('[Race] Fitting to start-line + first-mark bounds:', bounds.toBBoxString());
+        // Padding 60 px gives breathing room around the line endpoints
+        // and the windward; maxZoom 17 caps how tight we go for short
+        // beats so the windward never fills the screen alone.
+        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
         return;
     }
 
