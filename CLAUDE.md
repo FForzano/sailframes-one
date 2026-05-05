@@ -205,7 +205,7 @@ deadlocked Core 1 inside LWIP under upload contention (firmware
 └── wind_mac.txt                     # Calypso MAC; presence = wind enabled
 ```
 
-### `boot.log` format (since 2026.05.03.08, extended 2026.05.05.01)
+### `boot.log` format (since 2026.05.03.08, extended 2026.05.05.01 / .08)
 
 Each boot appends one line at setup time:
 `boot fw=<ver> reset=<reason> heap=<free> min_heap=<min>`
@@ -220,10 +220,25 @@ Once GPS time becomes valid in a given session, one extra line is appended:
 Every 5 minutes the diagnostics task appends a heartbeat:
 `alive t=<iso> batt=<v>V <pct>% heap=<free>`
 
+Auto-OTA + watchdog markers (since 2026.05.05.08):
+```
+ota start
+ota end ok                                  ← clean OTA path (same-version no-op or successful download+restart)
+ota end fail                                ← any failure exit (timeout, SHA mismatch, write error)
+ota watchdog: deadline exceeded at sect=…   ← diag task killed a stuck OTA past 180 s (forces SW reset)
+loop watchdog: Core 1 stuck at sect=… for Nms — restart    ← diag task killed a wedged Core 1 (90 s no g_loopIter movement)
+```
+
 Reading the log:
 - Last `alive` before next `boot` = device's last known good moment.
 - Gap of seconds → user power-off. Gap of minutes with healthy `batt%` →
   crash. Gap with `batt%` already below ~10% → battery died.
+- A `*watchdog: …` line followed by `boot reset=SW` = a soft hang
+  was caught and self-recovered. The `sect=` value names the
+  exact `g_loopSection` Core 1 was inside when it died.
+- Synchronised silent deaths across multiple boats at the same
+  wall-clock moment = shared external trigger (WiFi reconnect,
+  AP association, etc.) — see gotcha #22.
 
 ---
 
@@ -547,6 +562,36 @@ Stations: 44013 / CSIM3 (Castle Island) / 44029 / BUZM3 / NTKM3 / KBOS (Logan).
     weak signal. Bumped wdt to 300 s. `boot.log` on SD now records reset
     reasons so future similar events are self-documenting.
 
+22. **Auto-OTA HTTPClient stall hang** (introduced 2026.05.05.07,
+    mitigated 2026.05.05.08) — `performOTAUpdate` is called from
+    `uploadTaskFunc` after every clean upload cycle. The recv loop in
+    `performOTAUpdateBody` was `if (avail) { … esp_task_wdt_reset(); }
+    else { delay(5); }` — when the server held TCP alive but stopped
+    sending data, the `else` branch spun forever without feeding the
+    wdt. `setTimeout(300000)` did not actually bound this case. Result:
+    Core 0 wedged with `wifiBusy=true` and `uploading=true` stuck,
+    nothing in boot.log, only manual power cycle recovered the device.
+    Hit 3 of 6 fleet boats simultaneously at 2026-05-05 16:10 EDT on
+    Home-IOT reconnect (only the 3 with pending uploads triggered the
+    auto-OTA branch). Fix: stall watchdog (20 s no-bytes → abort) +
+    `g_otaDeadlineMs` global hard ceiling (180 s) enforced by the diag
+    task + tightened HTTPClient timeouts (manifest 30→10 s, binary
+    300→20 s) + generic Core-1 loop watchdog (90 s no `g_loopIter`
+    movement → `esp_restart()`). Auto-OTA preserved; future stalls
+    cost a 90–180 s recovery reset, not a silent brick.
+
+23. **USB-C serial not enumerating with SPDT switch ON** — when both
+    USB Vbus AND the boost module's 5 V output are present at the dev
+    board's VIN rail simultaneously, the host USB hub current-limits
+    and CP2102 doesn't enumerate. Workaround for live debugging:
+    disconnect the JST battery, leave switch ON (irrelevant — no
+    battery), plug USB-C → ESP32 boots from USB only, CP2102 enumerates
+    cleanly. This means **live serial of a hung device requires
+    opening the enclosure and disconnecting the battery without
+    disturbing the fault state**, which usually isn't possible. Plan
+    for SD `/boot.log` forensics + the `*watchdog: …` markers from
+    gotcha #22 as the primary diagnostic instead.
+
 ---
 
 ## Weather Data Integration
@@ -611,8 +656,25 @@ lives separately.
 - **2026-05-03:** Race dashboard Tier 2 → 3 (course-aware leaderboard,
   VMG, NOAA wind integration, polar overlay, per-boat drawer, layline
   toggle, wind source picker, leg + maneuver modals).
+- **2026-05-05:** Race dashboard live-race UX overhaul — start-line
+  + first-mark landing zoom, follow-mode that pans without zooming
+  out, per-boat marker labels (initials + speed + heel + TWA + VMG +
+  %pol + rank, all toggleable via SHOW legend), perf-charts moved
+  to a fadable overlay, leaderboard freezes per-boat at finish,
+  multi-lap leg detection (course×N + finish-line crossing).
+  Layline scan now finds the next upwind beat in the expanded
+  course and pivots with live TWD. Default basemap = Light Blue
+  (Carto dark inverted). GA4 wiring across all 6 pages. Auto-load
+  defaults to Race 2 of the latest day.
+- **2026-05-05 PM:** 3-of-6 fleet hang on Home-IOT reconnect at
+  16:10 EDT diagnosed via boot.log forensics (no wdt/brownout/panic
+  fired — soft hang with `wifiBusy=true` stuck). Root cause: auto-OTA
+  recv loop in `.07` had no stall watchdog. Hardened in `2026.05.05.08`
+  — see gotcha #22 — with stall + deadline + Core 1 loop watchdogs.
 
 ---
 
-*Last updated: 2026-05-04 — S1 Pi notes split into `docs/S1_LEGACY.md`;
-this file refocused on the deployed E1 fleet + web dashboard.*
+*Last updated: 2026-05-05 — added gotchas #22 (auto-OTA stall hang +
+fix in 2026.05.05.08) and #23 (USB-C / SPDT switch enumeration quirk);
+extended boot.log format with the new `ota *` and `*watchdog` markers;
+added 2026-05-05 entries to project history.*
