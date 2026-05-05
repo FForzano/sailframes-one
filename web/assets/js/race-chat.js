@@ -38,7 +38,7 @@
         <div class="sf-chat-header">
           <strong>Ask an AI Coach</strong>
           <label class="sf-chat-asas">
-            <span>I am</span>
+            <span>I'm</span>
             <select class="sf-chat-boat">
               <option value="">a spectator</option>
             </select>
@@ -81,10 +81,23 @@
     boatSelectEl.innerHTML = '<option value="">a spectator</option>';
     for (const id of Object.keys(boats)) {
       const meta = boats[id]?.boat || boats[id] || {};
-      const label = meta.team_name || meta.boat_name || meta.hull || id;
+      const team = meta.team_name || null;
+      const boatName = meta.boat_name || meta.hull || null;
+      // Format: "on Vela Veloce team (boat Wizard)"
+      // If team and boat name are the same (or one is missing), collapse.
+      let label;
+      if (team && boatName && team !== boatName) {
+        label = `on ${team} team (boat ${boatName})`;
+      } else if (team) {
+        label = `on ${team}`;
+      } else if (boatName) {
+        label = `on ${boatName}`;
+      } else {
+        label = `on ${id}`;
+      }
       const opt = document.createElement('option');
       opt.value = id;
-      opt.textContent = `skipper of ${label}`;
+      opt.textContent = label;
       boatSelectEl.appendChild(opt);
     }
     // Preserve user selection across refreshes when possible.
@@ -93,12 +106,57 @@
     }
   }
 
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Replace "(t=NNN)" markers (often preceded by an HH:MM:SS local time)
+  // with clickable spans that jump the timeline to that second-offset.
+  // The marker form is the contract in the system prompt.
+  function linkifyTimes(rawText) {
+    const escaped = escapeHtml(rawText);
+    return escaped.replace(
+      /(\d{1,2}:\d{2}(?::\d{2})?)\s*\(t=(\d+)\)/g,
+      (_, time, t) => {
+        const tNum = parseInt(t, 10);
+        return `<a href="#t=${tNum}" class="sf-chat-tlink" data-t="${tNum}">${time}</a>`;
+      }
+    );
+  }
+
+  function bindTimeLinks(el) {
+    el.querySelectorAll('a.sf-chat-tlink').forEach((a) => {
+      if (a.dataset.sfBound) return;
+      a.dataset.sfBound = '1';
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const t = parseInt(a.dataset.t, 10);
+        if (window.SailFramesRace?.seekTo) window.SailFramesRace.seekTo(t);
+        const u = new URL(location.href);
+        u.searchParams.set('t', t);
+        history.replaceState({}, '', u);
+      });
+    });
+  }
+
   function pushMessage(role, text) {
     const m = el('div', `sf-chat-msg sf-chat-msg-${role}`);
-    m.textContent = text;
+    if (role === 'assistant' && text) {
+      m.innerHTML = linkifyTimes(text);
+      bindTimeLinks(m);
+    } else {
+      m.textContent = text;
+    }
     logEl.appendChild(m);
     logEl.scrollTop = logEl.scrollHeight;
     return m;
+  }
+
+  function setAssistantText(el, text) {
+    el.innerHTML = linkifyTimes(text);
+    bindTimeLinks(el);
   }
 
   async function send(text) {
@@ -116,13 +174,22 @@
     const ctx = getCtx();
     const briefing = window.SailFramesBriefing.build(ctx);
 
+    // Send the team/boat NAME (not the device id) so the model
+    // never sees E1..E6 in the user_boat field either.
+    const selectedId = boatSelectEl.value;
+    let userBoat = null;
+    if (selectedId) {
+      const m = (ctx.raceDataBoats && ctx.raceDataBoats[selectedId]?.boat) || {};
+      userBoat = m.team_name || m.boat_name || selectedId;
+    }
+
     try {
       const resp = await fetch(ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           race_briefing: briefing,
-          user_boat: boatSelectEl.value || null,
+          user_boat: userBoat,
           messages: messages,
         }),
       });
@@ -134,7 +201,8 @@
       }
       const data = await resp.json();
       buf = data.text || '';
-      replyEl.textContent = buf || '(no response)';
+      if (buf) setAssistantText(replyEl, buf);
+      else replyEl.textContent = '(no response)';
       messages.push({ role: 'assistant', content: buf });
     } catch (e) {
       replyEl.textContent = `Error: ${e.message}`;

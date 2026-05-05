@@ -25,11 +25,11 @@
 
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
     <link rel="stylesheet" href="./assets/css/race.css?v=21">
-    <link rel="stylesheet" href="./assets/css/race-chat.css?v=4">
+    <link rel="stylesheet" href="./assets/css/race-chat.css?v=5">
     <script src="./config.js"></script>
     <script src="./assets/js/analytics.js"></script>
-    <script src="./assets/js/race-briefing.js?v=3"></script>
-    <script src="./assets/js/race-chat.js?v=4"></script>
+    <script src="./assets/js/race-briefing.js?v=4"></script>
+    <script src="./assets/js/race-chat.js?v=5"></script>
 </head>
 <body class="race-dashboard">
     <header class="header">
@@ -208,6 +208,8 @@
             <span class="time-label" id="time-current">00:00:00</span>
             <input type="range" id="timeline-slider" min="0" max="1000" value="0" step="1">
             <span class="time-label" id="time-total">00:00:00</span>
+            <button id="btn-share-moment" class="btn-share-moment"
+                    title="Copy a permalink to this moment in the race">🔗 Share</button>
         </div>
     </footer>
 
@@ -273,6 +275,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=22"></script>
+    <script type="module" src="./assets/js/race-app.js?v=23"></script>
 </body>
 </html>

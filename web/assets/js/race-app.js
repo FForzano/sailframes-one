@@ -3178,6 +3178,24 @@ async function loadRaceData(raceId) {
 
         console.log('[Race] Loaded race data:', currentRace.name);
 
+        // Honor a ?t=NN permalink: jump the playback cursor to that
+        // many seconds from race start. Clamp to [0, raceDuration].
+        // Pause so the user lands ON the moment instead of streaming
+        // past it, and only do this on first load (subsequent loads
+        // for the same race re-read the URL).
+        try {
+            const tParam = new URLSearchParams(location.search).get('t');
+            if (tParam != null) {
+                const tSec = Math.max(0, Math.min(parseInt(tParam, 10) || 0, raceDuration));
+                if (isPlaying) togglePlayback();
+                currentTime = tSec;
+                updatePlaybackPosition();
+                updatePlayCursor(tSec);
+            }
+        } catch (e) {
+            console.warn('[Race] ?t= parse failed:', e);
+        }
+
         // Attach the race-coach chat panel. The callback is recomputed
         // on every chat turn so the briefing reflects the latest state
         // (e.g. if the user changes wind source mid-conversation).
@@ -4214,4 +4232,48 @@ function setupEventListeners() {
 
     // Playback controls
     setupPlaybackControls();
+
+    // Share-this-moment button: copies a ?t=N permalink to the
+    // clipboard and gives quick visual feedback. The chat panel's
+    // (t=N) markers go through the same window.SailFramesRace.seekTo
+    // path so a link from the AI coach behaves identically.
+    const btnShare = document.getElementById('btn-share-moment');
+    if (btnShare) {
+        btnShare.addEventListener('click', async () => {
+            const t = Math.max(0, Math.round(currentTime || 0));
+            const u = new URL(location.href);
+            u.searchParams.set('t', t);
+            const url = u.toString();
+            history.replaceState({}, '', u);
+            const restore = btnShare.textContent;
+            try {
+                await navigator.clipboard.writeText(url);
+                btnShare.textContent = '✓ Copied';
+            } catch {
+                // Clipboard API may be blocked; show the URL instead so
+                // the user can copy manually.
+                btnShare.textContent = '✓';
+                window.prompt('Copy this link:', url);
+            }
+            setTimeout(() => { btnShare.textContent = restore; }, 1600);
+        });
+    }
 }
+
+// Public API consumed by the chat panel's (t=N) link handler and any
+// external integration. Intentionally tiny — the rest of the dashboard
+// state is module-internal.
+window.SailFramesRace = {
+    seekTo(tSec) {
+        const t = Math.max(0, Math.min(parseInt(tSec, 10) || 0, raceDuration || 0));
+        if (isPlaying) togglePlayback();
+        currentTime = t;
+        updatePlaybackPosition();
+        updatePlayCursor(t);
+        const u = new URL(location.href);
+        u.searchParams.set('t', t);
+        history.replaceState({}, '', u);
+    },
+    getCurrentT() { return Math.round(currentTime || 0); },
+    getRaceId() { return currentRace?.race_id || null; },
+};
