@@ -80,6 +80,11 @@ let laylinesVisible = true;
 // behavior. Changing this re-renders every boat's trail at the current
 // playback time.
 let trailWindowMs = 60_000;
+// Index into currentRace.course of the next mark the leader has yet to round.
+// Drives "next windward only" layline rendering — when the leader rounds the
+// current target, laylines shift to the next mark (and disappear if that
+// mark is downwind). 0 = pre-start, course.length = finished.
+let activeLeg = 0;
 let polarOverlayVisible = true;
 
 // J/80 typical upwind tack angle (degrees off true wind). Used for laylines.
@@ -363,6 +368,9 @@ function clearBoatLayers() {
         map.removeLayer(laylineLayer);
         laylineLayer = null;
     }
+    // Reset leader-leg pointer so prior race's state doesn't bleed into the
+    // freshly loaded one (laylines redraw to course[0] on next leaderboard tick).
+    activeLeg = 0;
     if (windMarker) {
         map.removeLayer(windMarker);
         windMarker = null;
@@ -480,31 +488,36 @@ function renderLaylines() {
     const startAnchor = startMidpoint(currentRace);
     if (!startAnchor) return;
 
+    // Next-windward-only: draw laylines just for the mark the leader is
+    // currently sailing toward, and only if it sits upwind of the start.
+    // Once the leader rounds it the layer rebuilds with the next target;
+    // when the next target is downwind (offset/leeward/gate) nothing is
+    // drawn, which is the racing convention — laylines are an upwind tool.
+    const courseSeq = currentRace.course;
+    if (activeLeg >= courseSeq.length) return;  // race finished
+    const targetMark = marksById[courseSeq[activeLeg]];
+    if (!targetMark) return;
+
+    const brgFromStart = bearingDegrees(startAnchor.lat, startAnchor.lon, targetMark.lat, targetMark.lon);
+    const offset = ((brgFromStart - raceAvgTWD + 540) % 360) - 180;
+    if (Math.abs(offset) > 90) return;  // next mark is downwind — no laylines
+
     laylineLayer = L.featureGroup().addTo(map);
     const LAYLINE_M = 3000;
+    const stbBearing = (raceAvgTWD + 180 - J80_UPWIND_TACK_ANGLE + 360) % 360;
+    const portBearing = (raceAvgTWD + 180 + J80_UPWIND_TACK_ANGLE) % 360;
+    const stbEnd = destinationPoint(targetMark.lat, targetMark.lon, stbBearing, LAYLINE_M);
+    const portEnd = destinationPoint(targetMark.lat, targetMark.lon, portBearing, LAYLINE_M);
 
-    for (const markId of currentRace.course) {
-        const m = marksById[markId];
-        if (!m) continue;
-        // Is this an upwind mark? Bearing from startAnchor to mark vs. wind FROM bearing.
-        const brgFromStart = bearingDegrees(startAnchor.lat, startAnchor.lon, m.lat, m.lon);
-        const offset = ((brgFromStart - raceAvgTWD + 540) % 360) - 180;
-        if (Math.abs(offset) > 90) continue;  // mark is downwind of start, skip
-        // Starboard layline FROM mark extends downwind by +tack_angle from TWD+180.
-        const stbBearing = (raceAvgTWD + 180 - J80_UPWIND_TACK_ANGLE + 360) % 360;
-        const portBearing = (raceAvgTWD + 180 + J80_UPWIND_TACK_ANGLE) % 360;
-        const stbEnd = destinationPoint(m.lat, m.lon, stbBearing, LAYLINE_M);
-        const portEnd = destinationPoint(m.lat, m.lon, portBearing, LAYLINE_M);
-
-        const styleStb = { color: '#22d3ee', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
-        const stylePort = { color: '#ef4444', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
-        L.polyline([[m.lat, m.lon], stbEnd], styleStb)
-            .bindTooltip('Starboard layline', { sticky: true })
-            .addTo(laylineLayer);
-        L.polyline([[m.lat, m.lon], portEnd], stylePort)
-            .bindTooltip('Port layline', { sticky: true })
-            .addTo(laylineLayer);
-    }
+    const styleStb = { color: '#22d3ee', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
+    const stylePort = { color: '#ef4444', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
+    const markName = targetMark.name || targetMark.mark_type || `Mark ${activeLeg + 1}`;
+    L.polyline([[targetMark.lat, targetMark.lon], stbEnd], styleStb)
+        .bindTooltip(`Starboard layline → ${markName}`, { sticky: true })
+        .addTo(laylineLayer);
+    L.polyline([[targetMark.lat, targetMark.lon], portEnd], stylePort)
+        .bindTooltip(`Port layline → ${markName}`, { sticky: true })
+        .addTo(laylineLayer);
 }
 
 function createBoatIcon(color, rotation = 0) {
@@ -1325,6 +1338,17 @@ function renderLeaderboard() {
 
     // Get current positions based on distance or speed
     const positions = calculatePositions();
+
+    // Sync laylines to the leader's next mark. When the leader rounds
+    // (legsCompleted advances), shift laylines to the next target — or
+    // hide them if the next target is downwind. Only re-renders when the
+    // index actually changes, so we're not rebuilding polylines every
+    // frame.
+    const newActiveLeg = positions[0]?.legsCompleted ?? 0;
+    if (newActiveLeg !== activeLeg) {
+        activeLeg = newActiveLeg;
+        renderLaylines();
+    }
 
     const drawerActive = drawerDeviceId;
     container.innerHTML = positions.map((item, index) => {
