@@ -99,6 +99,10 @@ let trailWindowMs = 60_000;
 // current target, laylines shift to the next mark (and disappear if that
 // mark is downwind). 0 = pre-start, course.length = finished.
 let activeLeg = 0;
+// TWD used to draw the currently rendered laylines. Updated each playback
+// tick from windAt(targetTime) so the laylines pivot when the wind shifts.
+// null = haven't sampled yet → renderLaylines falls back to raceAvgTWD.
+let lastLaylineTWD = null;
 let polarOverlayVisible = true;
 
 // J/80 typical upwind tack angle (degrees off true wind). Used for laylines.
@@ -387,6 +391,9 @@ function clearBoatLayers() {
     // Reset leader-leg pointer so prior race's state doesn't bleed into the
     // freshly loaded one (laylines redraw to course[0] on next leaderboard tick).
     activeLeg = 0;
+    // Drop the cached layline TWD too — next syncLaylineWind() tick will
+    // resample from the new race's wind data.
+    lastLaylineTWD = null;
     if (windMarker) {
         map.removeLayer(windMarker);
         windMarker = null;
@@ -430,6 +437,13 @@ function addLaylinesMapControl() {
             e.preventDefault();
             laylinesVisible = !laylinesVisible;
             a.classList.toggle('active', laylinesVisible);
+            // When turning on, snap immediately to the wind at the playback
+            // cursor instead of waiting for the next updateBoatPositions tick.
+            if (laylinesVisible && currentRace) {
+                const targetMs = new Date(currentRace.start_time).getTime() + (playCursorSeconds * 1000);
+                lastLaylineTWD = null;  // force re-sample
+                syncLaylineWind(targetMs);
+            }
             renderLaylines();
         });
         return div;
@@ -586,7 +600,11 @@ function applyTrailWindow(layer) {
 function renderLaylines() {
     if (laylineLayer) { map.removeLayer(laylineLayer); laylineLayer = null; }
     if (!laylinesVisible) return;
-    if (raceAvgTWD == null || !currentRace?.course?.length) return;
+    // Prefer the live TWD set by syncLaylineWind() against playback time;
+    // fall back to the race-average if no sample has been seen yet (e.g.
+    // initial render before the first updateBoatPositions tick).
+    const twd = lastLaylineTWD ?? raceAvgTWD;
+    if (twd == null || !currentRace?.course?.length) return;
     const marksById = buildMarksById(currentRace);
     const startAnchor = startMidpoint(currentRace);
     if (!startAnchor) return;
@@ -602,25 +620,44 @@ function renderLaylines() {
     if (!targetMark) return;
 
     const brgFromStart = bearingDegrees(startAnchor.lat, startAnchor.lon, targetMark.lat, targetMark.lon);
-    const offset = ((brgFromStart - raceAvgTWD + 540) % 360) - 180;
+    const offset = ((brgFromStart - twd + 540) % 360) - 180;
     if (Math.abs(offset) > 90) return;  // next mark is downwind — no laylines
 
     laylineLayer = L.featureGroup().addTo(map);
     const LAYLINE_M = 3000;
-    const stbBearing = (raceAvgTWD + 180 - J80_UPWIND_TACK_ANGLE + 360) % 360;
-    const portBearing = (raceAvgTWD + 180 + J80_UPWIND_TACK_ANGLE) % 360;
+    const stbBearing = (twd + 180 - J80_UPWIND_TACK_ANGLE + 360) % 360;
+    const portBearing = (twd + 180 + J80_UPWIND_TACK_ANGLE) % 360;
     const stbEnd = destinationPoint(targetMark.lat, targetMark.lon, stbBearing, LAYLINE_M);
     const portEnd = destinationPoint(targetMark.lat, targetMark.lon, portBearing, LAYLINE_M);
 
     const styleStb = { color: '#22d3ee', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
     const stylePort = { color: '#ef4444', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
     const markName = targetMark.name || targetMark.mark_type || `Mark ${activeLeg + 1}`;
+    const twdLabel = `TWD ${twd.toFixed(0)}°`;
     L.polyline([[targetMark.lat, targetMark.lon], stbEnd], styleStb)
-        .bindTooltip(`Starboard layline → ${markName}`, { sticky: true })
+        .bindTooltip(`Starboard layline → ${markName} · ${twdLabel}`, { sticky: true })
         .addTo(laylineLayer);
     L.polyline([[targetMark.lat, targetMark.lon], portEnd], stylePort)
-        .bindTooltip(`Port layline → ${markName}`, { sticky: true })
+        .bindTooltip(`Port layline → ${markName} · ${twdLabel}`, { sticky: true })
         .addTo(laylineLayer);
+}
+
+// Re-render laylines if the wind at the current playback time has shifted
+// enough since the last render (≥1°). Cheap guard: avoids rebuilding the
+// two polylines on every frame when interpolation jitter is sub-degree.
+// Called from updateBoatPositions; also re-fires on layline toggle so the
+// initial display reflects the playback cursor's wind, not race-average.
+function syncLaylineWind(targetTimeMs) {
+    if (!laylinesVisible) return;
+    const sample = windAt(targetTimeMs);
+    const twd = sample?.twd;
+    if (twd == null) return;
+    if (lastLaylineTWD != null) {
+        const diff = Math.abs(((twd - lastLaylineTWD + 540) % 360) - 180);
+        if (diff < 1) return;
+    }
+    lastLaylineTWD = twd;
+    renderLaylines();
 }
 
 // Two- to four-letter team initials, e.g. "Mystic Mutiny" → "MM",
@@ -1088,11 +1125,15 @@ function setWindStation(stationId) {
     selectedWindStationId = stationId;
     rebuildWindFromSelected();
     renderWindSourcePicker();
-    renderLaylines();
+    // New station → new wind series. Force the layline TWD to resample
+    // against the current playback time before rebuilding the polylines.
+    lastLaylineTWD = null;
     if (currentRace) {
         const targetMs = new Date(currentRace.start_time).getTime() + (playCursorSeconds * 1000);
+        syncLaylineWind(targetMs);
         updateWindBadge(targetMs);
     }
+    renderLaylines();
     updateSpeedChart();           // rebuilds polar overlays under new wind
     renderLeaderboard();          // TWA/%pol depend on wind
     updateBoatDrawer();
@@ -1272,6 +1313,9 @@ function updateBoatPositions(timeSeconds) {
     renderLeaderboard();
     updatePlayCursor(timeSeconds);
     updateWindBadge(targetTime);
+    // Pivot the laylines to the wind at the current playback time. Cheap
+    // — re-renders only when TWD has shifted ≥1° from the last drawn pair.
+    syncLaylineWind(targetTime);
     updateBoatDrawer();
 }
 
