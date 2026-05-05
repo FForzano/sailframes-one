@@ -100,7 +100,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.05.03"
+#define FW_VERSION    "2026.05.05.04"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -3700,6 +3700,30 @@ bool performOTAUpdate() {
     }
   }
 
+  // Claim the radio for OTA. Same gates the upload task uses:
+  //  - pauseBLEForWiFi() stops in-flight NimBLE scans / wind client.
+  //  - uploading=true makes checkWindConnection() early-return.
+  //  - wifiBusy=true blocks Core 1 LWIP-touching paths (telnet etc.).
+  // Without this, BLE coexistence steals airtime mid-download and
+  // throughput collapses to ~30 B/s.
+  pauseBLEForWiFi();
+  bool prevUploading = uploading;
+  bool prevWifiBusy  = wifiBusy;
+  uploading = true;
+  wifiBusy  = true;
+
+  bool ok = performOTAUpdateBody();
+
+  // On success the body calls ESP.restart() and never returns here;
+  // on any failure path we land here and must release the radio.
+  uploading = prevUploading;
+  wifiBusy  = prevWifiBusy;
+  return ok;
+}
+
+static bool performOTAUpdateBody() {
+  Serial.printf("[OTA] WiFi RSSI: %d dBm, free heap: %u\n", WiFi.RSSI(), ESP.getFreeHeap());
+
   String host = String(config.s3_bucket) + ".s3." + String(config.s3_region) + ".amazonaws.com";
   String manifestUrl = "http://" + host + "/firmware/" + String(config.boat_id) + "/latest.json";
 
@@ -3783,7 +3807,7 @@ bool performOTAUpdate() {
   mbedtls_sha256_starts(&shaCtx, 0);
 
   WiFiClient* stream = bHttp.getStreamPtr();
-  uint8_t buf[1024];
+  uint8_t buf[4096];  // matches ESP32 flash sector size — Update.write batches per sector
   size_t total = 0;
   unsigned long lastLog = millis();
 
