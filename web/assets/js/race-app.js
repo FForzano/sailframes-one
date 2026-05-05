@@ -123,6 +123,13 @@ let markerOverlays = {
     heel:  true,
     twa:   true,
 };
+
+// Auto-follow: keep the map framed on the current race leader and the
+// mark they're sailing toward. Re-fits bounds at most every 700 ms to
+// avoid jitter during slider scrubbing or fast playback. Toggle in the
+// topright FOLLOW control; persisted to localStorage.
+let followLeader = true;
+let lastFollowPanMs = 0;
 let polarOverlayVisible = true;
 
 // J/80 typical upwind tack angle (degrees off true wind). Used for laylines.
@@ -217,6 +224,7 @@ async function init() {
     // Initialize map
     initMap();
     addLaylinesMapControl();
+    addFollowLeaderMapControl();
     addMarkerOverlaysMapControl();   // includes the trail-window dropdown
     addMapWindPicker();
     setupChartsOverlay();
@@ -471,6 +479,96 @@ function addLaylinesMapControl() {
         return div;
     };
     ctl.addTo(map);
+}
+
+// Auto-follow toggle. When on, the map flies to the current leader and
+// the mark they're heading toward, re-framing as the fleet progresses
+// through windward / leeward / second beat / finish. When off the user
+// has full manual pan/zoom control. Default ON; persisted across races.
+function addFollowLeaderMapControl() {
+    if (!map) return;
+    try {
+        const saved = localStorage.getItem('sf-follow-leader');
+        if (saved !== null) followLeader = saved === '1';
+    } catch {}
+    const ctl = L.control({ position: 'topright' });
+    ctl.onAdd = function () {
+        const div = L.DomUtil.create('div', 'leaflet-bar map-toggle-control');
+        div.innerHTML = `<a href="#" id="follow-toggle" class="${followLeader ? 'active' : ''}" title="Auto-pan/zoom to keep the leader and next mark on screen">⚐ Follow</a>`;
+        L.DomEvent.disableClickPropagation(div);
+        const a = div.querySelector('#follow-toggle');
+        a.addEventListener('click', (e) => {
+            e.preventDefault();
+            followLeader = !followLeader;
+            a.classList.toggle('active', followLeader);
+            try { localStorage.setItem('sf-follow-leader', followLeader ? '1' : '0'); } catch {}
+            if (followLeader && currentRace) {
+                applyLeaderFollow(true);
+            }
+        });
+        return div;
+    };
+    ctl.addTo(map);
+}
+
+// Reframe the map around (leader's current position, mark they're
+// sailing to). Throttled so a slider scrub doesn't fire ten flyToBounds
+// per second. force=true bypasses the throttle (used on race load and
+// when the user re-enables follow).
+function applyLeaderFollow(force = false, targetTimeMsArg = null) {
+    if (!followLeader && !force) return;
+    if (!map || !currentRace) return;
+    const now = Date.now();
+    if (!force && now - lastFollowPanMs < 700) return;
+
+    const courseSeq = currentRace.course || [];
+    const marksById = courseSeq.length ? buildMarksById(currentRace) : {};
+    const targetTimeMs = targetTimeMsArg
+        ?? new Date(currentRace.start_time).getTime() + (playCursorSeconds * 1000);
+
+    // Leader = boat with the most rounding events at this playback time.
+    // Ties broken by smallest distToNext (closer to the mark = ahead).
+    let leaderLayer = null;
+    let leaderLegs = -1;
+    let leaderDist = Infinity;
+    for (const layer of Object.values(boatLayers)) {
+        if (!layer.current) continue;
+        const legs = legsCompletedAt(layer, targetTimeMs);
+        const seqIdx = courseSeq.length ? legs % courseSeq.length : 0;
+        const nextMark = courseSeq.length ? marksById[courseSeq[seqIdx]] : null;
+        const d = nextMark
+            ? haversineMeters(layer.current.lat, layer.current.lon, nextMark.lat, nextMark.lon)
+            : Infinity;
+        if (legs > leaderLegs || (legs === leaderLegs && d < leaderDist)) {
+            leaderLegs = legs;
+            leaderDist = d;
+            leaderLayer = layer;
+        }
+    }
+    if (!leaderLayer?.current) return;
+
+    // Bounds = leader position + the mark they're going to. If race is
+    // finished (no next mark), include the finish line if defined; else
+    // just center on the leader.
+    const corners = [[leaderLayer.current.lat, leaderLayer.current.lon]];
+    const totalLegs = currentRace._totalLegs ?? courseSeq.length;
+    if (courseSeq.length && leaderLegs < totalLegs) {
+        const seqIdx = leaderLegs % courseSeq.length;
+        const nextMark = marksById[courseSeq[seqIdx]];
+        if (nextMark) corners.push([nextMark.lat, nextMark.lon]);
+    } else if (currentRace.finish_line?.pin_lat != null) {
+        const fl = currentRace.finish_line;
+        corners.push([fl.pin_lat, fl.pin_lon]);
+        corners.push([fl.boat_lat, fl.boat_lon]);
+    }
+
+    lastFollowPanMs = now;
+    if (corners.length >= 2) {
+        const bounds = L.latLngBounds(corners);
+        map.flyToBounds(bounds, { padding: [80, 80], maxZoom: 17, duration: 0.5 });
+    } else {
+        map.flyTo(corners[0], 17, { duration: 0.5 });
+    }
 }
 
 // Trail window options shown in the SHOW > Trail dropdown. 30s exists
@@ -1508,6 +1606,10 @@ function updateBoatPositions(timeSeconds) {
     // Pivot the laylines to the wind at the current playback time. Cheap
     // — re-renders only when TWD has shifted ≥1° from the last drawn pair.
     syncLaylineWind(targetTime);
+    // Re-frame the map around the leader + their next mark. Throttled
+    // internally to one fly per ~700 ms so slider scrubbing or fast
+    // playback doesn't ricochet the viewport.
+    applyLeaderFollow(false, targetTime);
     updateBoatDrawer();
 }
 
@@ -2927,8 +3029,13 @@ async function loadRaceData(raceId) {
 
         console.log(`[Race] Total GPS points: ${totalGpsPoints}, boatLayers:`, Object.keys(boatLayers));
 
-        // Fit map to show all tracks
-        fitMapToBounds();
+        // Initial framing: if Follow is on, the first updateBoatPositions
+        // tick (below) will fly to leader + next mark. If off, we still
+        // need a sensible starting view — fall back to the start-line +
+        // first-mark bounds.
+        if (!followLeader) {
+            fitMapToBounds();
+        }
 
         // Render course (marks + start/finish lines) if present
         renderCourseViewLayer(currentRace);
