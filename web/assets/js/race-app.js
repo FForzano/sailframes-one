@@ -46,7 +46,7 @@ let raceData = null;
 let map = null;
 let boatLayers = {};  // device_id -> { track, marker }
 let isPlaying = false;
-let playbackSpeed = 1;
+let playbackSpeed = 10;  // default 10× — 25-min race scrubs in ~2.5 min
 let currentTime = 0;  // seconds from race start
 let raceDuration = 0;
 let playbackInterval = null;
@@ -118,10 +118,13 @@ let lastLaylineTWD = null;
 //           nice but only one boat in the fleet has the Calypso, and TWD
 //           is fleet-global (already on the wind picker).
 let markerOverlays = {
-    trail: true,
-    speed: true,
-    heel:  true,
-    twa:   true,
+    trail:    true,
+    speed:    true,
+    heel:     true,
+    twa:      true,
+    vmg:      false,   // signed VMG to next mark (kn) — opt-in, label gets long
+    polarPct: false,   // %polar — sailing-the-boat-well indicator
+    rank:     false,   // current leaderboard position (1..6)
 };
 
 // Auto-follow: keep the map framed on the current race leader and the
@@ -314,16 +317,17 @@ async function loadLatestRaceWithData() {
             return;
         }
 
-        // Pick the latest race DAY, then load its FIRST race (Race 1).
-        // Auto-loading the most recent race outright was unhelpful when
-        // a regatta day has 3 races — racers want to start their replay
-        // at the beginning of the day, not at race 3.
+        // Pick the latest race DAY, then load its 2nd race (Race 2 by
+        // convention — racers asked for this as the default landing
+        // race; Race 1 has the most variable course-setup churn, Race
+        // 2 is usually the cleanest "real race" to debrief). Falls
+        // back to Race 1 if the day only has one race.
         const latestDate = racesWithBoats[0].date;
         const dayRaces = racesWithBoats
             .filter(r => r.date === latestDate)
             .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
-        const targetRace = dayRaces[0];
-        console.log('[Race] Auto-loading first race of latest day:', targetRace.name, targetRace.date, targetRace.race_id);
+        const targetRace = dayRaces[1] || dayRaces[0];
+        console.log('[Race] Auto-loading Race 2 of latest day:', targetRace.name, targetRace.date, targetRace.race_id);
 
         // Set the regatta dropdown (use __all__ for races without regatta)
         const regattaId = targetRace.regatta_id || '__all__';
@@ -527,18 +531,19 @@ function addFollowLeaderMapControl() {
     ctl.addTo(map);
 }
 
-// Pan the map so the fleet stays on screen, WITHOUT changing zoom.
-// Pressing play used to fitBounds the whole course and snap the user
-// back to a wide view, undoing the start-line zoom-in. Now we just
-// pan the camera centre to the midpoint between the leader and the
-// mark they're chasing — the user keeps whatever zoom they set
-// (initial start-line zoom, or anything they pinch to manually).
+// Camera follow during playback. Two-phase behaviour:
+//   1. While all visible boats + the leader's next mark fit inside the
+//      current viewport (with margin), we just panTo the centre — zoom
+//      stays exactly where the user set it. Boats sailing from start
+//      to first mark stay framed without ever losing the tight zoom.
+//   2. Only when the fleet has spread BEYOND what the current zoom can
+//      contain do we flyToBounds — and even then, capped at the
+//      current zoom so we never zoom IN past the user's setting. Net
+//      effect: zoom only ever loosens, monotonically, as needed.
 //
-// Throttled (2.5 s) so scrubbing doesn't ricochet, and pan flight is
-// slow (1.4 s, ease-out) so the motion reads as a glide. Hysteresis:
-// skip the pan when the target centre is already close to the current
-// map centre (less than ~25 % of the viewport away) — avoids twitchy
-// micro-corrections.
+// Throttled to 2.5 s; flight 1.4 s with ease-out; pixel-space
+// hysteresis suppresses micro-corrections when the fleet is already
+// well-framed.
 function applyLeaderFollow(force = false, targetTimeMsArg = null) {
     if (!followLeader && !force) return;
     if (!map || !currentRace) return;
@@ -550,66 +555,72 @@ function applyLeaderFollow(force = false, targetTimeMsArg = null) {
     const targetTimeMs = targetTimeMsArg
         ?? new Date(currentRace.start_time).getTime() + (playCursorSeconds * 1000);
 
-    // Find the leader (most rounding events; ties → closest to next mark)
-    // and remember their position + the mark they're heading to.
-    let leaderPos = null;
+    // Collect every visible boat's position; identify the leader and
+    // their next mark in the same pass.
+    const boatLatLngs = [];
     let leaderLegs = -1;
     let leaderDist = Infinity;
     let leaderNextMark = null;
     for (const layer of Object.values(boatLayers)) {
         if (!layer.visible || !layer.current) continue;
+        boatLatLngs.push([layer.current.lat, layer.current.lon]);
         const legs = legsCompletedAt(layer, targetTimeMs);
-        let nextMark = null, d = Infinity;
         if (courseSeq.length) {
             const seqIdx = legs % courseSeq.length;
-            nextMark = marksById[courseSeq[seqIdx]];
-            if (nextMark) d = haversineMeters(layer.current.lat, layer.current.lon, nextMark.lat, nextMark.lon);
-        }
-        if (legs > leaderLegs || (legs === leaderLegs && d < leaderDist)) {
-            leaderLegs = legs;
-            leaderDist = d;
-            leaderNextMark = nextMark;
-            leaderPos = [layer.current.lat, layer.current.lon];
+            const nextMark = marksById[courseSeq[seqIdx]];
+            const d = nextMark
+                ? haversineMeters(layer.current.lat, layer.current.lon, nextMark.lat, nextMark.lon)
+                : Infinity;
+            if (legs > leaderLegs || (legs === leaderLegs && d < leaderDist)) {
+                leaderLegs = legs;
+                leaderDist = d;
+                leaderNextMark = nextMark;
+            }
         }
     }
-    if (!leaderPos) return;
+    if (boatLatLngs.length === 0) return;
 
-    // Camera target: midpoint between leader and next mark when one
-    // exists, else just the leader. This biases the view slightly
-    // ahead of the leader so what they're sailing toward is visible.
-    let targetCentre;
+    // Bounds: every boat + the leader's next mark (or finish line, when
+    // racing toward the finish). The mark anchor biases the camera
+    // slightly ahead of the fleet so the user sees what they're
+    // sailing toward, not just where they are.
+    const corners = [...boatLatLngs];
     const totalLegs = currentRace._totalLegs ?? courseSeq.length;
     if (courseSeq.length && leaderLegs < totalLegs && leaderNextMark) {
-        targetCentre = L.latLng(
-            (leaderPos[0] + leaderNextMark.lat) / 2,
-            (leaderPos[1] + leaderNextMark.lon) / 2
-        );
+        corners.push([leaderNextMark.lat, leaderNextMark.lon]);
     } else if (currentRace.finish_line?.pin_lat != null) {
         const fl = currentRace.finish_line;
-        const flMidLat = (fl.pin_lat + fl.boat_lat) / 2;
-        const flMidLon = (fl.pin_lon + fl.boat_lon) / 2;
-        targetCentre = L.latLng((leaderPos[0] + flMidLat) / 2, (leaderPos[1] + flMidLon) / 2);
-    } else {
-        targetCentre = L.latLng(leaderPos[0], leaderPos[1]);
+        corners.push([fl.pin_lat, fl.pin_lon]);
+        corners.push([fl.boat_lat, fl.boat_lon]);
+    }
+    const newBounds = L.latLngBounds(corners);
+    const newCentre = newBounds.getCenter();
+    const currentZoom = map.getZoom();
+
+    // Phase 1 — bounds fit inside the current viewport (with a small
+    // padding margin)? Just pan; preserve zoom.
+    const viewBounds = map.getBounds().pad(-0.1);
+    if (viewBounds.contains(newBounds)) {
+        // Pixel-space hysteresis to skip insignificant pans.
+        if (!force) {
+            const sz = map.getSize();
+            const cur = map.latLngToLayerPoint(map.getCenter());
+            const tgt = map.latLngToLayerPoint(newCentre);
+            const distPx = Math.hypot(tgt.x - cur.x, tgt.y - cur.y);
+            if (distPx < 0.2 * Math.min(sz.x, sz.y)) return;
+        }
+        lastFollowPanMs = now;
+        map.panTo(newCentre, { animate: true, duration: 1.4, easeLinearity: 0.25 });
+        return;
     }
 
-    // Hysteresis in screen-pixel space: if the new centre projects to
-    // within ~25 % of the viewport diagonal of the current centre, the
-    // fleet is still well-framed at the current zoom — no need to pan.
-    if (!force) {
-        const sz = map.getSize();
-        const cur = map.latLngToLayerPoint(map.getCenter());
-        const tgt = map.latLngToLayerPoint(targetCentre);
-        const dx = tgt.x - cur.x, dy = tgt.y - cur.y;
-        const distPx = Math.sqrt(dx * dx + dy * dy);
-        const threshold = 0.25 * Math.min(sz.x, sz.y);
-        if (distPx < threshold) return;
-    }
-
+    // Phase 2 — bounds outgrew the viewport (boats spreading past the
+    // first mark). Loosen zoom just enough to fit, capped at current
+    // zoom so we never zoom in unexpectedly.
     lastFollowPanMs = now;
-    // panTo with animation — preserves current zoom level.
-    map.panTo(targetCentre, {
-        animate: true,
+    map.flyToBounds(newBounds, {
+        padding: [60, 60],
+        maxZoom: currentZoom,   // never zoom IN — only out, as needed
         duration: 1.4,
         easeLinearity: 0.25,
     });
@@ -651,10 +662,13 @@ function addMarkerOverlaysMapControl() {
     } catch {}
 
     const items = [
-        { key: 'trail', label: 'Trail' },
-        { key: 'speed', label: 'Speed' },
-        { key: 'heel',  label: 'Heel' },
-        { key: 'twa',   label: 'TWA' },
+        { key: 'trail',    label: 'Trail' },
+        { key: 'speed',    label: 'Speed' },
+        { key: 'heel',     label: 'Heel' },
+        { key: 'twa',      label: 'TWA' },
+        { key: 'vmg',      label: 'VMG' },
+        { key: 'polarPct', label: '%pol' },
+        { key: 'rank',     label: 'Rank' },
     ];
 
     const ctl = L.control({ position: 'topright' });
@@ -936,38 +950,47 @@ function teamInitials(name) {
 // can be hidden via the top-right SHOW legend (markerOverlays). The
 // initials chip stays so boats are always identifiable; only the
 // numeric stats can be turned off.
-function createBoatIcon(color, rotation = 0, initials = '', speedKn = null, heelDeg = null, twaSigned = null) {
+function createBoatIcon(color, rotation = 0, initials = '', stats = {}) {
     const svg = `
         <svg class="boat-marker-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"
              style="transform: rotate(${rotation}deg);">
             <path d="M12 2 L20 20 L12 16 L4 20 Z"
                   fill="${color}" stroke="white" stroke-width="1.5"/>
         </svg>`;
-    const ovr = markerOverlays || { speed: true, heel: true, twa: true };
-    const speedTxt = (ovr.speed && speedKn != null && Number.isFinite(speedKn))
-        ? `${speedKn.toFixed(1)}kn` : '';
-    // Heel: signed (port = negative on this fleet's IMU). P/S matches
-    // the TWA convention so the two metrics read consistently. The
-    // "Heel " prefix labels the value so it isn't mistaken for TWA.
-    const heelTxt = (ovr.heel && heelDeg != null && Number.isFinite(heelDeg))
-        ? ` Heel ${heelDeg >= 0 ? 'S' : 'P'} ${Math.round(Math.abs(heelDeg))}°`
-        : '';
-    // TWA: signed true wind angle. Negative = port tack, positive = stbd.
-    // Per-boat (depends on COG), so it tells you how close-hauled / deep
-    // each boat is sailing.
-    const twaTxt = (ovr.twa && twaSigned != null && Number.isFinite(twaSigned))
-        ? ` TWA ${twaSigned <= 0 ? 'P' : 'S'} ${Math.round(Math.abs(twaSigned))}°`
-        : '';
-    const stats = (speedTxt || heelTxt || twaTxt)
-        ? `<span class="bml-stats">${speedTxt}${heelTxt}${twaTxt}</span>` : '';
-    const label = initials || stats
-        ? `<span class="boat-marker-label"><span class="bml-init" style="color:${color}">${initials}</span>${stats}</span>`
+    const ovr = markerOverlays || {};
+    const parts = [];
+    // Rank (#1..#6) — current leaderboard position.
+    if (ovr.rank && stats.rank != null) parts.push(`#${stats.rank}`);
+    // Speed in knots.
+    if (ovr.speed && Number.isFinite(stats.speedKn)) parts.push(`${stats.speedKn.toFixed(1)}kn`);
+    // Heel: signed (port = negative). P/S matches TWA convention.
+    if (ovr.heel && Number.isFinite(stats.heelDeg)) {
+        const s = stats.heelDeg >= 0 ? 'S' : 'P';
+        parts.push(`Heel ${s} ${Math.round(Math.abs(stats.heelDeg))}°`);
+    }
+    // TWA: signed true wind angle. Per-boat (TWD - COG).
+    if (ovr.twa && Number.isFinite(stats.twaSigned)) {
+        const s = stats.twaSigned <= 0 ? 'P' : 'S';
+        parts.push(`TWA ${s} ${Math.round(Math.abs(stats.twaSigned))}°`);
+    }
+    // VMG to next mark (kn). Signed: + = closing, - = losing ground.
+    if (ovr.vmg && Number.isFinite(stats.vmg)) {
+        const sign = stats.vmg >= 0 ? '+' : '';
+        parts.push(`VMG ${sign}${stats.vmg.toFixed(1)}`);
+    }
+    // %polar — performance vs J/80 polar target.
+    if (ovr.polarPct && Number.isFinite(stats.polarPct)) {
+        parts.push(`${Math.round(stats.polarPct)}%pol`);
+    }
+    const statsHtml = parts.length ? `<span class="bml-stats">${parts.join(' ')}</span>` : '';
+    const label = (initials || parts.length)
+        ? `<span class="boat-marker-label"><span class="bml-init" style="color:${color}">${initials}</span>${statsHtml ? ' ' + statsHtml : ''}</span>`
         : '';
     return L.divIcon({
         html: `<div class="boat-marker-wrap">${svg}${label}</div>`,
         className: 'boat-marker',
-        iconSize: null,        // let the wrap size to its content
-        iconAnchor: [12, 12],  // anchor on the arrow's center
+        iconSize: null,
+        iconAnchor: [12, 12],
     });
 }
 
@@ -1596,54 +1619,62 @@ function addBoatTrack(deviceId, gpsData, boat, imuData = null) {
 function updateBoatPositions(timeSeconds) {
     const startTime = currentRace ? new Date(currentRace.start_time).getTime() : 0;
     const targetTime = startTime + timeSeconds * 1000;
+    playCursorSeconds = timeSeconds;  // calculatePositions reads this
 
+    // Pass 1: snap each boat's layer.current/currentIdx to the closest
+    // GPS sample for this playback time. This must complete before
+    // calculatePositions runs because the leaderboard ranking and the
+    // VMG / %pol / progress numbers all read layer.current.
     for (const [deviceId, layer] of Object.entries(boatLayers)) {
         if (!layer.visible || !layer.data.length) continue;
-
-        // Find closest data point + its index
         let closestIdx = 0;
         let minDiff = Infinity;
         for (let i = 0; i < layer.data.length; i++) {
             const pointTime = new Date(layer.data[i].t).getTime();
             const diff = Math.abs(pointTime - targetTime);
-            if (diff < minDiff) {
-                minDiff = diff;
-                closestIdx = i;
-            }
+            if (diff < minDiff) { minDiff = diff; closestIdx = i; }
         }
         const closest = layer.data[closestIdx];
-
-        // Update marker position and rotation
         if (closest && closest.lat && closest.lon) {
             layer.marker.setLatLng([closest.lat, closest.lon]);
-
-            // Update boat icon (rotation + label with initials/speed/heel/TWA).
-            // Heel is sourced from the IMU sample nearest playback time
-            // (GPX-only boats have no IMU → omitted). TWA is computed from
-            // the NOAA TWD at this moment minus the boat's COG, so it
-            // works without an onboard wind sensor.
-            const course = closest.course || 0;
-            const speedKn = closest.speed_kn ?? null;
-            const imuSample = nearestSampleAt(layer.imu, targetTime);
-            const heelDeg = imuSample?.heel ?? null;
-            const wSample = windAt(targetTime);
-            const twaSigned = wSample ? (((wSample.twd - course + 540) % 360) - 180) : null;
-            layer.marker.setIcon(createBoatIcon(layer.color, course, layer.initials, speedKn, heelDeg, twaSigned));
-
-            // Cache current playback-time point + index so the leaderboard
-            // reads the same value the map shows and can look up cumulative
-            // distance traveled.
             layer.current = closest;
             layer.currentIdx = closestIdx;
-
-            // Trim the trail polyline to the configured window around the
-            // current index. Cheap — walks back at most ~window/sample_rate
-            // points (60 at 1 Hz for the 1m default).
             applyTrailWindow(layer);
         }
     }
 
-    // Refresh leaderboard + chart play cursors + drawer at playback time
+    // Compute the leaderboard once so per-boat stats (vmg / polarPct /
+    // rank) are available to the marker labels and don't get
+    // recomputed downstream.
+    const positions = calculatePositions();
+    const statsByDevice = new Map();
+    positions.forEach((p, idx) => {
+        statsByDevice.set(p.deviceId, { ...p, rank: idx + 1 });
+    });
+
+    // Pass 2: paint each marker icon with its full stats payload.
+    for (const [deviceId, layer] of Object.entries(boatLayers)) {
+        if (!layer.visible || !layer.current) continue;
+        const closest = layer.current;
+        const course = closest.course || 0;
+        const imuSample = nearestSampleAt(layer.imu, targetTime);
+        const heelDeg = imuSample?.heel ?? null;
+        const wSample = windAt(targetTime);
+        const twaSigned = wSample ? (((wSample.twd - course + 540) % 360) - 180) : null;
+        const lbStats = statsByDevice.get(deviceId);
+        layer.marker.setIcon(createBoatIcon(layer.color, course, layer.initials, {
+            speedKn: closest.speed_kn ?? null,
+            heelDeg,
+            twaSigned,
+            vmg: lbStats?.vmg ?? null,
+            polarPct: lbStats?.polarPct ?? null,
+            rank: lbStats?.rank ?? null,
+        }));
+    }
+
+    // Refresh leaderboard + chart play cursors + drawer at playback time.
+    // renderLeaderboard recomputes positions internally — the small
+    // duplication is fine and keeps the flow simple.
     renderLeaderboard();
     updatePlayCursor(timeSeconds);
     updateWindBadge(targetTime);
@@ -1778,35 +1809,23 @@ function updateAllWindMarkers(targetTimeMs) {
 }
 
 function fitMapToBounds() {
-    // Default landing view: zoom to the start line + first mark so the
-    // pre-start area and the first beat are framed at race-load time.
-    // This is what the user actually wants to see when they open a race
-    // — the full-track bounds were too zoomed-out to read at a glance,
-    // especially with multi-lap races covering the same water twice.
-    // Falls back to the all-GPS bounds if course/start aren't defined.
-    const corners = [];
+    // Initial framing: tight zoom on the START LINE alone. The user
+    // wants to land already looking at where the action begins — the
+    // pin/boat ends and the boats milling for position. Including the
+    // first windward in the bounds was making the view too wide; on a
+    // typical Boston Harbor beat the windward sits well above the
+    // start, dragging the camera back. The follow-mode pan kicks in
+    // as boats start sailing toward the windward.
     const sl = currentRace?.start_line;
     if (sl && sl.pin_lat != null && sl.boat_lat != null) {
-        corners.push([sl.pin_lat, sl.pin_lon]);
-        corners.push([sl.boat_lat, sl.boat_lon]);
-    }
-    const courseSeq = currentRace?.course || [];
-    if (courseSeq.length) {
-        const marksById = buildMarksById(currentRace);
-        const firstMark = marksById[courseSeq[0]];
-        if (firstMark && firstMark.lat != null && firstMark.lon != null) {
-            corners.push([firstMark.lat, firstMark.lon]);
-        }
-    }
-
-    if (corners.length >= 2) {
-        const bounds = L.latLngBounds(corners);
-        console.log('[Race] Fitting to start-line + first-mark bounds:', bounds.toBBoxString());
-        // Tight zoom on the racing area: the start line and first
-        // windward should fill the viewport so the user can read the
-        // pre-start line set, the bias, and the layline geometry at a
-        // glance. Smaller padding (60 px) + maxZoom 17 gets us in close.
-        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+        const bounds = L.latLngBounds([
+            [sl.pin_lat, sl.pin_lon],
+            [sl.boat_lat, sl.boat_lon],
+        ]);
+        console.log('[Race] Fitting to start-line bounds:', bounds.toBBoxString());
+        // Tight: minimal padding, deep maxZoom — the start line should
+        // fill most of the viewport.
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
         return;
     }
 
