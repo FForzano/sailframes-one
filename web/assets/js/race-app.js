@@ -46,7 +46,7 @@ let raceData = null;
 let map = null;
 let boatLayers = {};  // device_id -> { track, marker }
 let isPlaying = false;
-let playbackSpeed = 20;  // default 20× — 25-min race plays in ~75 s
+let playbackSpeed = 10;  // default 10× — 25-min race plays in ~2.5 min
 let currentTime = 0;  // seconds from race start
 let raceDuration = 0;
 let playbackInterval = null;
@@ -568,11 +568,18 @@ function applyLeaderFollow(force = false) {
     const newCentre = newBounds.getCenter();
     const currentZoom = map.getZoom();
 
-    // Phase 1 — bounds fit inside the current viewport (with a small
-    // padding margin)? Just pan; preserve zoom.
+    // Camera transitions are INSTANT (animate: false). The previous
+    // smooth animations caused the boat trail polyline to visibly lag
+    // behind the marker — Leaflet repaints the SVG path on each
+    // playback tick while the map's CSS-transformed pane interpolates
+    // over the flight, so the trail-tail and boat appear momentarily
+    // detached. Snapping the view eliminates the mismatch entirely.
+    // The 2.5 s throttle + pixel-space hysteresis keep snaps sparse so
+    // the camera doesn't strobe.
+    //
+    // Phase 1 — bounds fit inside the current viewport: just pan.
     const viewBounds = map.getBounds().pad(-0.1);
     if (viewBounds.contains(newBounds)) {
-        // Pixel-space hysteresis to skip insignificant pans.
         if (!force) {
             const sz = map.getSize();
             const cur = map.latLngToLayerPoint(map.getCenter());
@@ -581,19 +588,17 @@ function applyLeaderFollow(force = false) {
             if (distPx < 0.2 * Math.min(sz.x, sz.y)) return;
         }
         lastFollowPanMs = now;
-        map.panTo(newCentre, { animate: true, duration: 1.4, easeLinearity: 0.25 });
+        map.panTo(newCentre, { animate: false });
         return;
     }
 
-    // Phase 2 — bounds outgrew the viewport (boats spreading past the
-    // first mark). Loosen zoom just enough to fit, capped at current
-    // zoom so we never zoom in unexpectedly.
+    // Phase 2 — bounds outgrew the viewport. Snap to fit; cap at
+    // current zoom so we never zoom in unexpectedly.
     lastFollowPanMs = now;
-    map.flyToBounds(newBounds, {
+    map.fitBounds(newBounds, {
         padding: [60, 60],
-        maxZoom: currentZoom,   // never zoom IN — only out, as needed
-        duration: 1.4,
-        easeLinearity: 0.25,
+        maxZoom: currentZoom,
+        animate: false,
     });
 }
 
