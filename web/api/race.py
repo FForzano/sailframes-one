@@ -858,8 +858,8 @@ def _parse_gpx(content: bytes) -> list[dict]:
             "t": pt["t"],
             "lat": pt["lat"],
             "lon": pt["lon"],
-            "sog": round(sog, 2),
-            "cog": round(cog, 1),
+            "speed_kn": round(sog, 2),
+            "course": round(cog, 1),
         })
 
     return result
