@@ -545,56 +545,26 @@ function addFollowLeaderMapControl() {
 // Throttled to 2.5 s; flight 1.4 s with ease-out; pixel-space
 // hysteresis suppresses micro-corrections when the fleet is already
 // well-framed.
-function applyLeaderFollow(force = false, targetTimeMsArg = null) {
+function applyLeaderFollow(force = false) {
     if (!followLeader && !force) return;
     if (!map || !currentRace) return;
     const now = Date.now();
     if (!force && now - lastFollowPanMs < 2500) return;
 
-    const courseSeq = currentRace.course || [];
-    const marksById = courseSeq.length ? buildMarksById(currentRace) : {};
-    const targetTimeMs = targetTimeMsArg
-        ?? new Date(currentRace.start_time).getTime() + (playCursorSeconds * 1000);
-
-    // Collect every visible boat's position; identify the leader and
-    // their next mark in the same pass.
+    // Camera target = the fleet, nothing else. The earlier version
+    // included the leader's next mark (and the finish line) in the
+    // bounds so the camera would lead the fleet — but that meant a
+    // far-away windward dragged the zoom out the moment play started.
+    // Per user: "focus on the fleet not all course". We only zoom out
+    // when the BOATS themselves no longer fit at the current zoom.
     const boatLatLngs = [];
-    let leaderLegs = -1;
-    let leaderDist = Infinity;
-    let leaderNextMark = null;
     for (const layer of Object.values(boatLayers)) {
         if (!layer.visible || !layer.current) continue;
         boatLatLngs.push([layer.current.lat, layer.current.lon]);
-        const legs = legsCompletedAt(layer, targetTimeMs);
-        if (courseSeq.length) {
-            const seqIdx = legs % courseSeq.length;
-            const nextMark = marksById[courseSeq[seqIdx]];
-            const d = nextMark
-                ? haversineMeters(layer.current.lat, layer.current.lon, nextMark.lat, nextMark.lon)
-                : Infinity;
-            if (legs > leaderLegs || (legs === leaderLegs && d < leaderDist)) {
-                leaderLegs = legs;
-                leaderDist = d;
-                leaderNextMark = nextMark;
-            }
-        }
     }
     if (boatLatLngs.length === 0) return;
 
-    // Bounds: every boat + the leader's next mark (or finish line, when
-    // racing toward the finish). The mark anchor biases the camera
-    // slightly ahead of the fleet so the user sees what they're
-    // sailing toward, not just where they are.
-    const corners = [...boatLatLngs];
-    const totalLegs = currentRace._totalLegs ?? courseSeq.length;
-    if (courseSeq.length && leaderLegs < totalLegs && leaderNextMark) {
-        corners.push([leaderNextMark.lat, leaderNextMark.lon]);
-    } else if (currentRace.finish_line?.pin_lat != null) {
-        const fl = currentRace.finish_line;
-        corners.push([fl.pin_lat, fl.pin_lon]);
-        corners.push([fl.boat_lat, fl.boat_lon]);
-    }
-    const newBounds = L.latLngBounds(corners);
+    const newBounds = L.latLngBounds(boatLatLngs);
     const newCentre = newBounds.getCenter();
     const currentZoom = map.getZoom();
 
@@ -1688,7 +1658,7 @@ function updateBoatPositions(timeSeconds) {
     // Re-frame the map around the leader + their next mark. Throttled
     // internally to one fly per ~700 ms so slider scrubbing or fast
     // playback doesn't ricochet the viewport.
-    applyLeaderFollow(false, targetTime);
+    applyLeaderFollow(false);
     updateBoatDrawer();
 }
 
