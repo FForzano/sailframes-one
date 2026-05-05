@@ -1339,12 +1339,14 @@ function renderLeaderboard() {
     // Get current positions based on distance or speed
     const positions = calculatePositions();
 
-    // Sync laylines to the leader's next mark. When the leader rounds
-    // (legsCompleted advances), shift laylines to the next target — or
-    // hide them if the next target is downwind. Only re-renders when the
-    // index actually changes, so we're not rebuilding polylines every
-    // frame.
-    const newActiveLeg = positions[0]?.legsCompleted ?? 0;
+    // Sync laylines to the *trailing* boat's next mark — laylines stay
+    // visible until the LAST boat rounds, so boats still approaching the
+    // windward keep their tactical aid even after the leader is past.
+    // Shifts to the next target (or hides, if that target is downwind)
+    // only when every boat has rounded. Re-renders only on change.
+    const newActiveLeg = positions.length
+        ? Math.min(...positions.map(p => p.legsCompleted))
+        : 0;
     if (newActiveLeg !== activeLeg) {
         activeLeg = newActiveLeg;
         renderLaylines();
