@@ -67,13 +67,29 @@
       send(inputEl.value);
     };
 
-    // Populate boat dropdown from the current ctx fleet.
-    const c = getCtx();
-    for (const id of Object.keys(c.boats || {})) {
+    populateBoatSelect();
+  }
+
+  // Refresh the "I am" dropdown from the current ctx fleet. Called both
+  // at build time and on every open() — the race may not be loaded yet
+  // when the panel is first built.
+  function populateBoatSelect() {
+    if (!boatSelectEl || !getCtx) return;
+    const prev = boatSelectEl.value;
+    const c = getCtx() || {};
+    const boats = c.raceDataBoats || c.boats || {};
+    boatSelectEl.innerHTML = '<option value="">a spectator</option>';
+    for (const id of Object.keys(boats)) {
+      const meta = boats[id]?.boat || boats[id] || {};
+      const label = meta.team_name || meta.boat_name || meta.hull || id;
       const opt = document.createElement('option');
       opt.value = id;
-      opt.textContent = `skipper of ${c.boats[id].hull || id}`;
+      opt.textContent = `skipper of ${label}`;
       boatSelectEl.appendChild(opt);
+    }
+    // Preserve user selection across refreshes when possible.
+    if (prev && [...boatSelectEl.options].some((o) => o.value === prev)) {
+      boatSelectEl.value = prev;
     }
   }
 
@@ -152,6 +168,7 @@
 
   NS.open = function () {
     if (!panelEl) return;
+    populateBoatSelect();
     panelEl.hidden = false;
     if (inputEl) inputEl.focus();
   };
