@@ -3,8 +3,8 @@
 /* Layout */
 .race-dashboard .race-main {
     display: grid;
-    grid-template-columns: 1fr 360px 320px;
-    gap: 1rem;
+    grid-template-columns: 1fr 300px 260px;
+    gap: 0.5rem;
     height: calc(100vh - 60px - 60px); /* header + timeline */
 }
 
@@ -49,6 +49,10 @@
 .race-dashboard .map-panel {
     display: flex;
     flex-direction: column;
+    /* Override main.css map-panel cap (max-width: 60%) so the map fills its
+       1fr grid track on the race dashboard. */
+    max-width: none;
+    min-width: 0;
 }
 
 .race-dashboard .race-panel {
@@ -801,6 +805,31 @@ body.course-editing .boat-legend {
 
 .map-toggle-control a:hover { background: rgba(15, 23, 42, 0.95); color: #fff; }
 .map-toggle-control a.active { color: #22d3ee; }
+
+/* Trail-window segmented picker (sits under the layline toggle, topright). */
+.trail-window-control {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    background: rgba(15, 23, 42, 0.85);
+}
+.trail-window-control .trail-window-label {
+    padding: 4px 6px 4px 8px;
+    font-size: 0.6rem;
+    font-family: monospace;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    align-self: center;
+}
+.trail-window-control a {
+    padding: 4px 8px;
+    border-left: 1px solid rgba(100, 116, 139, 0.3);
+    background: transparent;
+}
+.trail-window-control a.active {
+    color: #22d3ee;
+    background: rgba(34, 211, 238, 0.12);
+}
 
 /* Polar overlay toggle in chart header */
 .chart-overlay-toggle {

@@ -75,6 +75,11 @@ let selectedWindStationId = null;  // user-selected wind source (null = auto-pic
 // a race session but reset when the page reloads (intentional — no
 // cross-session state).
 let laylinesVisible = true;
+// Trail window: how much past track to render as a polyline. Default 1 min
+// keeps the map readable; "All" (Infinity) restores the historical full-race
+// behavior. Changing this re-renders every boat's trail at the current
+// playback time.
+let trailWindowMs = 60_000;
 let polarOverlayVisible = true;
 
 // J/80 typical upwind tack angle (degrees off true wind). Used for laylines.
@@ -169,6 +174,7 @@ async function init() {
     // Initialize map
     initMap();
     addLaylinesMapControl();
+    addTrailWindowMapControl();
 
     // Initialize chart
     initSpeedChart();
@@ -405,6 +411,65 @@ function addLaylinesMapControl() {
         return div;
     };
     ctl.addTo(map);
+}
+
+// Segmented picker for the trail window. Sits under the layline toggle in
+// the topright corner. Selecting a window calls refreshAllTrails() at the
+// current playback time so the change is visible immediately.
+function addTrailWindowMapControl() {
+    if (!map) return;
+    const options = [
+        { label: '1m',  ms: 60_000 },
+        { label: '5m',  ms: 5 * 60_000 },
+        { label: '10m', ms: 10 * 60_000 },
+        { label: 'All', ms: Infinity },
+    ];
+    const ctl = L.control({ position: 'topright' });
+    ctl.onAdd = function () {
+        const div = L.DomUtil.create('div', 'leaflet-bar map-toggle-control trail-window-control');
+        div.title = 'Trail window — how much past track to draw';
+        div.innerHTML = `<span class="trail-window-label">TRAIL</span>` +
+            options.map(o =>
+                `<a href="#" data-ms="${o.ms}" class="${o.ms === trailWindowMs ? 'active' : ''}">${o.label}</a>`
+            ).join('');
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        div.querySelectorAll('a').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                const ms = Number(a.dataset.ms);
+                trailWindowMs = ms;
+                div.querySelectorAll('a').forEach(b => b.classList.toggle('active', Number(b.dataset.ms) === ms));
+                refreshAllTrails();
+            });
+        });
+        return div;
+    };
+    ctl.addTo(map);
+}
+
+// Trim each boat's polyline to the configured trail window around the
+// current playback index. With trailWindowMs === Infinity the full track
+// is restored.
+function refreshAllTrails() {
+    for (const layer of Object.values(boatLayers)) {
+        applyTrailWindow(layer);
+    }
+}
+
+function applyTrailWindow(layer) {
+    if (!layer || !layer.track || !layer.coords || !layer.times) return;
+    const n = layer.coords.length;
+    if (n === 0) return;
+    const endIdx = Math.min(n - 1, layer.currentIdx ?? (n - 1));
+    if (!Number.isFinite(trailWindowMs)) {
+        layer.track.setLatLngs(layer.coords);
+        return;
+    }
+    const cutoff = layer.times[endIdx] - trailWindowMs;
+    let startIdx = endIdx;
+    while (startIdx > 0 && layer.times[startIdx - 1] >= cutoff) startIdx--;
+    layer.track.setLatLngs(layer.coords.slice(startIdx, endIdx + 1));
 }
 
 function renderLaylines() {
@@ -946,9 +1011,10 @@ function progressMetersAt(point, courseSeq, marksById, legsCompleted, startAncho
 function addBoatTrack(deviceId, gpsData, boat) {
     const color = BOAT_COLORS[deviceId] || '#888888';
 
-    // Create track polyline
+    // Create track polyline (initially empty — populated by applyTrailWindow
+    // after the first updateBoatPositions call sets currentIdx).
     const coords = gpsData.map(p => [p.lat, p.lon]);
-    const track = L.polyline(coords, {
+    const track = L.polyline([], {
         color: color,
         weight: 3,
         opacity: 0.8,
@@ -974,10 +1040,19 @@ function addBoatTrack(deviceId, gpsData, boat) {
         cumDist[i] = cumDist[i - 1] + seg;
     }
 
+    // Pre-parse timestamps once so the trail window can walk back from the
+    // current playback index without re-parsing ISO strings every frame.
+    const times = new Float64Array(gpsData.length);
+    for (let i = 0; i < gpsData.length; i++) {
+        times[i] = new Date(gpsData[i].t).getTime();
+    }
+
     boatLayers[deviceId] = {
         track,
         marker,
         data: gpsData,
+        coords,
+        times,
         cumDist,
         boat,
         color,
@@ -1018,6 +1093,11 @@ function updateBoatPositions(timeSeconds) {
             // distance traveled.
             layer.current = closest;
             layer.currentIdx = closestIdx;
+
+            // Trim the trail polyline to the configured window around the
+            // current index. Cheap — walks back at most ~window/sample_rate
+            // points (60 at 1 Hz for the 1m default).
+            applyTrailWindow(layer);
 
             // Update legend with current speed
             updateLegendSpeed(deviceId, closest.speed_kn || 0);
@@ -1366,6 +1446,17 @@ function calculatePositions() {
             polarPct = polarPercent(point.speed_kn || 0, twa, windNow.tws);
         }
 
+        // Boats that have completed every leg are "finished". For ranking,
+        // their tiebreaker is finish time (last rounding), NOT distToNext —
+        // distToNext is null once the course is done, so the previous
+        // sort fell back to insertion order and could rank a later
+        // finisher above an earlier one (race 2026-05-04 race 2).
+        const totalLegs = courseSeq.length;
+        const finished = courseDefined && totalLegs > 0 && legsCompleted >= totalLegs;
+        const finishTimeMs = (finished && layer?.roundingTimes && layer.roundingTimes[totalLegs - 1] != null)
+            ? layer.roundingTimes[totalLegs - 1]
+            : null;
+
         positions.push({
             deviceId,
             displayName,
@@ -1380,15 +1471,23 @@ function calculatePositions() {
             vmg,
             twa,
             polarPct,
+            finished,
+            finishTimeMs,
             gap: null,  // filled in below
         });
     }
 
-    // Rank: course-aware uses (legsCompleted DESC, distToNext ASC); fallback
-    // is cumulative distance traveled.
+    // Rank: course-aware uses (legsCompleted DESC, then finishTime ASC for
+    // boats that finished, then distToNext ASC for boats still racing).
+    // Fallback (no course) is cumulative distance traveled.
     if (courseDefined) {
         positions.sort((a, b) => {
             if (b.legsCompleted !== a.legsCompleted) return b.legsCompleted - a.legsCompleted;
+            if (a.finished && b.finished) {
+                const ta = a.finishTimeMs ?? Infinity;
+                const tb = b.finishTimeMs ?? Infinity;
+                if (ta !== tb) return ta - tb;
+            }
             const da = a.distToNext ?? Infinity;
             const db = b.distToNext ?? Infinity;
             return da - db;
