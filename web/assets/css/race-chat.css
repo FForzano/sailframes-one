@@ -1,27 +1,12 @@
 .sf-chat-root {
+  font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+.sf-chat-panel {
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 9999;
-  font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif;
-}
-
-.sf-chat-toggle {
-  background: #1f2d3d;
-  color: #fff;
-  border: 0;
-  border-radius: 24px;
-  padding: 10px 16px;
-  font-weight: 600;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  cursor: pointer;
-}
-.sf-chat-toggle:hover { background: #2c3e50; }
-
-.sf-chat-panel {
-  position: absolute;
-  right: 0;
-  bottom: 56px;
   width: 380px;
   max-width: calc(100vw - 32px);
   height: 540px;

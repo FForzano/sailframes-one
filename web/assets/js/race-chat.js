@@ -34,10 +34,9 @@
   function build(ctx) {
     const root = el('div', 'sf-chat-root');
     root.innerHTML = `
-      <button class="sf-chat-toggle" aria-label="Race coach">Race coach</button>
       <div class="sf-chat-panel" hidden>
         <div class="sf-chat-header">
-          <strong>Race coach</strong>
+          <strong>Ask an AI Coach</strong>
           <label class="sf-chat-asas">
             <span>I am</span>
             <select class="sf-chat-boat">
@@ -62,10 +61,6 @@
     inputEl = root.querySelector('.sf-chat-input');
     boatSelectEl = root.querySelector('.sf-chat-boat');
 
-    root.querySelector('.sf-chat-toggle').onclick = () => {
-      panelEl.hidden = !panelEl.hidden;
-      if (!panelEl.hidden) inputEl.focus();
-    };
     root.querySelector('.sf-chat-close').onclick = () => { panelEl.hidden = true; };
     root.querySelector('.sf-chat-input-row').onsubmit = (e) => {
       e.preventDefault();
@@ -139,10 +134,29 @@
    */
   NS.attach = function (contextFn) {
     getCtx = contextFn;
+    const init = () => {
+      if (!panelEl) build();
+      // Wire up the toolbar button if it's there.
+      const btn = document.getElementById('btn-race-coach');
+      if (btn && !btn.dataset.sfChatBound) {
+        btn.dataset.sfChatBound = '1';
+        btn.addEventListener('click', () => NS.open());
+      }
+    };
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => build());
+      document.addEventListener('DOMContentLoaded', init);
     } else {
-      build();
+      init();
     }
+  };
+
+  NS.open = function () {
+    if (!panelEl) return;
+    panelEl.hidden = false;
+    if (inputEl) inputEl.focus();
+  };
+
+  NS.close = function () {
+    if (panelEl) panelEl.hidden = true;
   };
 })();
