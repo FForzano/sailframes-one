@@ -100,7 +100,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.05.05"
+#define FW_VERSION    "2026.05.05.06"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -2639,9 +2639,9 @@ void updateDisplayD2() {
     bool windInd = false;
 #endif
     if (windInd) {
-      snprintf(left, sizeof(left), "BAT %d%% W  %s", battery.percent, fwShortTag());
+      snprintf(left, sizeof(left), "BAT %d%% W  FW %s", battery.percent, fwShortTag());
     } else {
-      snprintf(left, sizeof(left), "BAT %d%%  %s", battery.percent, fwShortTag());
+      snprintf(left, sizeof(left), "BAT %d%%  FW %s", battery.percent, fwShortTag());
     }
     tft.drawString(left, 5, 456, 2);
 
