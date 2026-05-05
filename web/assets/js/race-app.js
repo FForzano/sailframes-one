@@ -314,23 +314,31 @@ async function loadLatestRaceWithData() {
             return;
         }
 
-        const latestRace = racesWithBoats[0];
-        console.log('[Race] Auto-loading latest race with data:', latestRace.name, latestRace.date, latestRace.race_id);
+        // Pick the latest race DAY, then load its FIRST race (Race 1).
+        // Auto-loading the most recent race outright was unhelpful when
+        // a regatta day has 3 races — racers want to start their replay
+        // at the beginning of the day, not at race 3.
+        const latestDate = racesWithBoats[0].date;
+        const dayRaces = racesWithBoats
+            .filter(r => r.date === latestDate)
+            .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+        const targetRace = dayRaces[0];
+        console.log('[Race] Auto-loading first race of latest day:', targetRace.name, targetRace.date, targetRace.race_id);
 
         // Set the regatta dropdown (use __all__ for races without regatta)
-        const regattaId = latestRace.regatta_id || '__all__';
+        const regattaId = targetRace.regatta_id || '__all__';
         document.getElementById('regatta-select').value = regattaId;
         await loadRaceDays(regattaId);
 
         // Set the race day dropdown
-        document.getElementById('raceday-select').value = latestRace.date;
-        loadRacesForDay(latestRace.date);
+        document.getElementById('raceday-select').value = targetRace.date;
+        loadRacesForDay(targetRace.date);
 
         // Set the race dropdown
-        document.getElementById('race-select').value = latestRace.race_id;
+        document.getElementById('race-select').value = targetRace.race_id;
 
         // Load the race data
-        await loadRaceData(latestRace.race_id);
+        await loadRaceData(targetRace.race_id);
 
     } catch (err) {
         console.error('[Race] Failed to auto-load latest race:', err);
@@ -1772,9 +1780,11 @@ function fitMapToBounds() {
     if (corners.length >= 2) {
         const bounds = L.latLngBounds(corners);
         console.log('[Race] Fitting to start-line + first-mark bounds:', bounds.toBBoxString());
-        // Generous padding so neither end of the start line nor the
-        // mark sit on the panel edge under the layline / SHOW controls.
-        map.fitBounds(bounds, { padding: [80, 80], maxZoom: 16 });
+        // Tight zoom on the racing area: the start line and first
+        // windward should fill the viewport so the user can read the
+        // pre-start line set, the bias, and the layline geometry at a
+        // glance. Smaller padding (60 px) + maxZoom 17 gets us in close.
+        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
         return;
     }
 
@@ -3103,13 +3113,14 @@ async function loadRaceData(raceId) {
 
         console.log(`[Race] Total GPS points: ${totalGpsPoints}, boatLayers:`, Object.keys(boatLayers));
 
-        // Initial framing: if Follow is on, the first updateBoatPositions
-        // tick (below) will fly to leader + next mark. If off, we still
-        // need a sensible starting view — fall back to the start-line +
-        // first-mark bounds.
-        if (!followLeader) {
-            fitMapToBounds();
-        }
+        // Initial framing: always zoom to start line + first mark on
+        // race load — that's where the action begins regardless of
+        // whether follow-mode is enabled. The follow-mode throttle is
+        // armed (lastFollowPanMs = now) so the first updateBoatPositions
+        // tick doesn't immediately re-fly past this framing; subsequent
+        // playback ticks then take over once enough time has passed.
+        fitMapToBounds();
+        lastFollowPanMs = Date.now();
 
         // Render course (marks + start/finish lines) if present
         renderCourseViewLayer(currentRace);
