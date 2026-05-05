@@ -62,6 +62,7 @@
     boatSelectEl = root.querySelector('.sf-chat-boat');
 
     root.querySelector('.sf-chat-close').onclick = () => { panelEl.hidden = true; };
+    enableDrag(panelEl, root.querySelector('.sf-chat-header'));
     root.querySelector('.sf-chat-input-row').onsubmit = (e) => {
       e.preventDefault();
       send(inputEl.value);
@@ -104,6 +105,51 @@
     if (prev && [...boatSelectEl.options].some((o) => o.value === prev)) {
       boatSelectEl.value = prev;
     }
+  }
+
+  // Drag-to-move via the header. Skips when the user is interacting
+  // with form controls (select, button, label) inside the header so
+  // the close button and "I'm" picker still work normally. Pins the
+  // panel via left/top once dragged so the original right/bottom
+  // anchor doesn't keep pulling it back.
+  function enableDrag(panel, handle) {
+    if (!panel || !handle) return;
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0, dragging = false;
+
+    handle.addEventListener('mousedown', (e) => {
+      const tag = (e.target && e.target.tagName) || '';
+      if (/^(SELECT|OPTION|BUTTON|INPUT)$/.test(tag)) return;
+      if (e.target.closest && e.target.closest('label,button,select,input')) return;
+
+      // Convert from right/bottom anchor to left/top once at drag start.
+      const r = panel.getBoundingClientRect();
+      panel.style.left = `${r.left}px`;
+      panel.style.top = `${r.top}px`;
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+
+      startX = e.clientX; startY = e.clientY;
+      startLeft = r.left; startTop = r.top;
+      dragging = true;
+      handle.style.cursor = 'grabbing';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      const r = panel.getBoundingClientRect();
+      const maxLeft = window.innerWidth - r.width;
+      const maxTop  = window.innerHeight - r.height;
+      panel.style.left = `${Math.max(0, Math.min(startLeft + dx, maxLeft))}px`;
+      panel.style.top  = `${Math.max(0, Math.min(startTop + dy, maxTop))}px`;
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.style.cursor = '';
+    });
   }
 
   function escapeHtml(s) {
