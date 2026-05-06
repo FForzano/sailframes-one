@@ -3835,13 +3835,22 @@ function renderCourseViewLayer(race) {
         const line = race[kind];
         if (!line || line.pin_lat == null) continue;
         const color = LINE_COLORS[kind];
-        L.polyline([[line.pin_lat, line.pin_lon], [line.boat_lat, line.boat_lon]], {
-            color, weight: 3, dashArray: '6 4', opacity: 0.85,
-        }).bindTooltip(kind === 'start_line' ? 'Start' : 'Finish').addTo(courseViewLayer);
+        const ends = [[line.pin_lat, line.pin_lon], [line.boat_lat, line.boat_lon]];
+        const tip = kind === 'start_line' ? 'Start' : 'Finish';
+        // White halo underneath so the line stays legible on every
+        // basemap (Light Blue, OSM, Satellite). Then the bright dashed
+        // line on top, opaque, thicker than the prior 3 px so the start
+        // line reads at a glance during pre-start positioning.
+        L.polyline(ends, {
+            color: '#ffffff', weight: 9, opacity: 0.55, lineCap: 'round',
+        }).addTo(courseViewLayer);
+        L.polyline(ends, {
+            color, weight: 5, opacity: 1.0, dashArray: '10 6', lineCap: 'round',
+        }).bindTooltip(tip).addTo(courseViewLayer);
         L.marker([line.pin_lat, line.pin_lon], { icon: lineEndIcon('pin') })
-            .bindTooltip(`${kind === 'start_line' ? 'Start' : 'Finish'} pin`).addTo(courseViewLayer);
+            .bindTooltip(`${tip} pin`).addTo(courseViewLayer);
         L.marker([line.boat_lat, line.boat_lon], { icon: lineEndIcon('boat') })
-            .bindTooltip(`${kind === 'start_line' ? 'Start' : 'Finish'} committee`).addTo(courseViewLayer);
+            .bindTooltip(`${tip} committee`).addTo(courseViewLayer);
     }
 
     for (const m of (race.marks || [])) {
