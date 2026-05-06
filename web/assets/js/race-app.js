@@ -3838,14 +3838,14 @@ function renderCourseViewLayer(race) {
         const ends = [[line.pin_lat, line.pin_lon], [line.boat_lat, line.boat_lon]];
         const tip = kind === 'start_line' ? 'Start' : 'Finish';
         // White halo underneath so the line stays legible on every
-        // basemap (Light Blue, OSM, Satellite). Then the bright dashed
-        // line on top, opaque, thicker than the prior 3 px so the start
-        // line reads at a glance during pre-start positioning.
+        // basemap (Light Blue, OSM, Satellite). Slimmer than the
+        // first attempt — halo + line tuned to be visible without
+        // dominating the map.
         L.polyline(ends, {
-            color: '#ffffff', weight: 9, opacity: 0.55, lineCap: 'round',
+            color: '#ffffff', weight: 5, opacity: 0.5, lineCap: 'round',
         }).addTo(courseViewLayer);
         L.polyline(ends, {
-            color, weight: 5, opacity: 1.0, dashArray: '10 6', lineCap: 'round',
+            color, weight: 2.5, opacity: 1.0, dashArray: '8 5', lineCap: 'round',
         }).bindTooltip(tip).addTo(courseViewLayer);
         L.marker([line.pin_lat, line.pin_lon], { icon: lineEndIcon('pin') })
             .bindTooltip(`${tip} pin`).addTo(courseViewLayer);

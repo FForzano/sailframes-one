@@ -186,12 +186,16 @@
 
     const pin  = [sl.pin_lat,  sl.pin_lon];
     const cmte = [sl.boat_lat, sl.boat_lon];
-    const line = L.polyline([pin, cmte], { color: '#22d3ee', weight: 3, opacity: 0.95 }).addTo(map);
+    // Same halo + bright-dashed treatment as the main race map (see
+    // renderCourseViewLayer in race-app.js) so the start line reads
+    // identically across both views.
+    const halo = L.polyline([pin, cmte], { color: '#ffffff', weight: 5, opacity: 0.5, lineCap: 'round' }).addTo(map);
+    const line = L.polyline([pin, cmte], { color: '#22d3ee', weight: 2.5, opacity: 1.0, dashArray: '8 5', lineCap: 'round' }).addTo(map);
     const pinMarker  = L.circleMarker(pin,  { radius: 6, color: '#22d3ee', fillColor: '#22d3ee', fillOpacity: 1, weight: 2 })
                         .bindTooltip('Pin', { direction: 'right', offset: [10, 0] }).addTo(map);
     const cmteMarker = L.circleMarker(cmte, { radius: 6, color: '#22d3ee', fillColor: '#22d3ee', fillOpacity: 1, weight: 2 })
                         .bindTooltip('Committee', { direction: 'right', offset: [10, 0] }).addTo(map);
-    startLineLayers.push(line, pinMarker, cmteMarker);
+    startLineLayers.push(halo, line, pinMarker, cmteMarker);
 
     // Tight frame on the line itself with modest padding so we can see
     // boats positioning around it. Cap zoom so we don't punch in past
