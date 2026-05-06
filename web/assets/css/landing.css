@@ -334,15 +334,16 @@ body.landing-page {
     display: block;
 }
 
-/* Landscape figures stack on the right. They can crop-to-cover since
-   nothing critical sits at the very edges. */
+/* Landscape figures stack on the right at natural aspect — never
+   cropped. Their cells size to their content so there's no dark
+   gap below the captions. */
 .hardware-photos figure:not(.featured) {
     grid-column: 2;
+    align-self: start;
 }
 .hardware-photos figure:not(.featured) img {
     width: 100%;
-    height: 240px;
-    object-fit: cover;
+    height: auto;
     display: block;
 }
 
@@ -353,7 +354,6 @@ body.landing-page {
         grid-column: auto;
         grid-row: auto;
     }
-    .hardware-photos figure:not(.featured) img { height: 240px; }
 }
 
 .hardware-grid {
