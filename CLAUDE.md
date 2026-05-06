@@ -59,6 +59,17 @@ sailframes/core/
 
 ## E1 Hardware Stack (ESP32 Fleet Tracker)
 
+<p align="center">
+  <img src="web/assets/img/hardware/e1-running.jpg" alt="E-series tracker running outdoors — TFT shows COG / SOG / GPS status / battery" width="32%">
+  <img src="web/assets/img/hardware/e1-internal.jpg" alt="E2 internals — ESP32, LG290P GNSS, BNO085 IMU on custom PCB v1.1" width="32%">
+  <img src="web/assets/img/hardware/e1-fleet.jpg" alt="Full fleet — six trackers (E1–E6)" width="32%">
+</p>
+<p align="center"><sub>
+  Left: in use, sunlight-readable TFT. ·
+  Centre: internals on PCB v1.1. ·
+  Right: the fleet of six.
+</sub></p>
+
 | Component | Part | Interface | Notes |
 |---|---|---|---|
 | MCU | ELEGOO ESP32 DevKit V1 (CP2102) | USB-C | Dual-core 240 MHz, Wi-Fi + BLE |
