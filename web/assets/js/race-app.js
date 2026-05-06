@@ -4233,6 +4233,27 @@ function setupEventListeners() {
     // Playback controls
     setupPlaybackControls();
 
+    // Start Review button: opens the modal start-sequence player
+    // (own map zoomed to start line, RRS Appendix S horn signals,
+    // pre-start GPS animation from t=-3:00 to t=+1:00).
+    const btnStartReview = document.getElementById('btn-start-review');
+    if (btnStartReview) {
+        btnStartReview.addEventListener('click', () => {
+            if (!window.SailFramesStartReview?.open) return;
+            if (!currentRace) {
+                alert('Load a race first.');
+                return;
+            }
+            window.SailFramesStartReview.open({
+                currentRace,
+                raceData,
+                boatLayers,
+                BOAT_COLORS,
+                apiBase: API_BASE,
+            });
+        });
+    }
+
     // Share-this-moment button: copies a ?t=N permalink to the
     // clipboard and gives quick visual feedback. The chat panel's
     // (t=N) markers go through the same window.SailFramesRace.seekTo

@@ -93,7 +93,9 @@ def lambda_handler(event, context):
             if race_id and '/data' in path and http_method == 'GET':
                 qs = event.get('queryStringParameters', {}) or {}
                 sensors = qs.get('sensors', 'gps,imu,wind')
-                return get_race_data(race_id, sensors)
+                pad_start = int(qs.get('pad_start', '0') or 0)
+                pad_end = int(qs.get('pad_end', '0') or 0)
+                return get_race_data(race_id, sensors, pad_start, pad_end)
 
             # CRUD operations
             if http_method == 'GET' and not race_id:
@@ -353,13 +355,30 @@ def delete_race(race_id):
 
 # --- Race Data ---
 
-def get_race_data(race_id, sensors_str):
+def get_race_data(race_id, sensors_str, pad_start_sec=0, pad_end_sec=0):
     race_data = load_json(f'races/{race_id}/race.json')
     if not race_data:
         return response(404, {'error': f'Race not found: {race_id}'})
 
     start_time = race_data['start_time']
     end_time = race_data['end_time']
+
+    # Optional widening for start-review / post-race overrun analysis.
+    # Caller passes pad_start_sec/pad_end_sec in seconds; we shift the
+    # filter window outward only — the official race window in the
+    # response stays as recorded.
+    filter_start = start_time
+    filter_end = end_time
+    if pad_start_sec > 0 or pad_end_sec > 0:
+        try:
+            s_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            e_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            from datetime import timedelta
+            filter_start = (s_dt - timedelta(seconds=max(0, pad_start_sec))).isoformat().replace('+00:00', 'Z')
+            filter_end = (e_dt + timedelta(seconds=max(0, pad_end_sec))).isoformat().replace('+00:00', 'Z')
+        except Exception as e:
+            logger.warning(f'pad parse failed, using race window: {e}')
+
     requested_sensors = [s.strip() for s in sensors_str.split(',')]
 
     boats_data = {}
@@ -393,7 +412,7 @@ def get_race_data(race_id, sensors_str):
                 sensor_key = f"processed/{device_id}/{session_path}/{sensor}.json"
                 data = load_json(sensor_key)
                 if isinstance(data, list):
-                    filtered = [d for d in data if _in_window(d.get('t', ''), start_time, end_time)]
+                    filtered = [d for d in data if _in_window(d.get('t', ''), filter_start, filter_end)]
                     boat_sensors[sensor] = filtered
                 else:
                     boat_sensors[sensor] = data
