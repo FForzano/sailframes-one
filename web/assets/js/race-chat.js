@@ -34,6 +34,21 @@
   const messages = [];        // { role, content }
   let streaming = false;
 
+  // Stable session id so we can correlate every Q&A from one chat
+  // sitting (across reloads) when reviewing the logs later. Survives
+  // the page lifetime via localStorage; rotates only if cleared.
+  function sessionId() {
+    try {
+      let id = localStorage.getItem('sf-chat-session-id');
+      if (!id) {
+        id = (crypto.randomUUID && crypto.randomUUID()) ||
+             ('s' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+        localStorage.setItem('sf-chat-session-id', id);
+      }
+      return id;
+    } catch { return 'anon'; }
+  }
+
   function el(tag, cls, html) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -149,7 +164,7 @@
           <button type="submit" class="sf-chat-send">Send</button>
         </form>
         <div class="sf-chat-foot">
-          <span>Answers come from race data only. Powered by Claude.</span>
+          <span>🔬 <strong>Prototype</strong> — answers vary in quality. Tap 👍 / 👌 / 👎 below each answer to help me improve.</span>
           <button type="button" class="sf-chat-close-btn">Close</button>
         </div>
       </div>`;
@@ -377,9 +392,18 @@
 
   function pushMessage(role, text) {
     const m = el('div', `sf-chat-msg sf-chat-msg-${role}`);
-    if (role === 'assistant' && text) {
-      m.innerHTML = linkifyTimes(text);
-      bindTimeLinks(m);
+    if (role === 'assistant') {
+      // Assistant messages need to host both the text AND a feedback
+      // widget. Wrap the text in a span so we can update it without
+      // wiping the widget.
+      const body = el('span', 'sf-chat-msg-body');
+      if (text) {
+        body.innerHTML = linkifyTimes(text);
+        bindTimeLinks(body);
+      } else {
+        body.textContent = '';
+      }
+      m.appendChild(body);
     } else {
       m.textContent = text;
     }
@@ -389,8 +413,95 @@
   }
 
   function setAssistantText(el, text) {
-    el.innerHTML = linkifyTimes(text);
-    bindTimeLinks(el);
+    // el here is the outer .sf-chat-msg wrapper. Update only the
+    // inner body span so the feedback widget (added later, after
+    // message_id arrives) survives.
+    const body = el.querySelector('.sf-chat-msg-body') || el;
+    body.innerHTML = linkifyTimes(text);
+    bindTimeLinks(body);
+  }
+
+  // Append a feedback widget (👍 / 👌 / 👎 + reason form) under an
+  // assistant message. Only attached once we have a message_id from
+  // the server (so feedback can reference the stored Q&A log).
+  function attachFeedbackWidget(msgEl, messageId) {
+    if (!messageId || msgEl.querySelector('.sf-chat-feedback')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'sf-chat-feedback';
+    wrap.innerHTML = `
+      <span class="sf-chat-feedback-prompt">How was this answer?</span>
+      <button type="button" class="sf-chat-feedback-btn" data-rating="great" title="Great answer">👍 Great</button>
+      <button type="button" class="sf-chat-feedback-btn" data-rating="ok"    title="OK answer">👌 OK</button>
+      <button type="button" class="sf-chat-feedback-btn" data-rating="bad"   title="Bad answer">👎 Bad</button>
+      <div class="sf-chat-feedback-reason" hidden>
+        <textarea class="sf-chat-feedback-comment" rows="2" maxlength="2000"
+                  placeholder="What was wrong? (anything specific helps me improve)"></textarea>
+        <div class="sf-chat-feedback-reason-actions">
+          <button type="button" class="sf-chat-feedback-skip">Skip</button>
+          <button type="button" class="sf-chat-feedback-submit">Submit</button>
+        </div>
+      </div>
+      <span class="sf-chat-feedback-thanks" hidden>Thanks — logged for improvement.</span>
+    `;
+    msgEl.appendChild(wrap);
+
+    const btns = wrap.querySelectorAll('.sf-chat-feedback-btn');
+    const reason = wrap.querySelector('.sf-chat-feedback-reason');
+    const commentEl = wrap.querySelector('.sf-chat-feedback-comment');
+    const thanks = wrap.querySelector('.sf-chat-feedback-thanks');
+    const promptEl = wrap.querySelector('.sf-chat-feedback-prompt');
+
+    function lockButtons(activeRating) {
+      btns.forEach((b) => {
+        b.disabled = true;
+        if (b.dataset.rating === activeRating) b.classList.add('is-selected');
+      });
+    }
+    function showThanks() {
+      promptEl.hidden = true;
+      reason.hidden = true;
+      thanks.hidden = false;
+    }
+
+    btns.forEach((b) => {
+      b.addEventListener('click', () => {
+        const rating = b.dataset.rating;
+        if (rating === 'bad') {
+          // Don't lock yet — user might cancel the reason form. Just
+          // toggle the reason field visible and pre-mark the button.
+          btns.forEach((x) => x.classList.toggle('is-selected', x === b));
+          reason.hidden = false;
+          commentEl.focus();
+        } else {
+          lockButtons(rating);
+          postFeedback(messageId, rating, '').catch(() => {});
+          showThanks();
+        }
+      });
+    });
+
+    wrap.querySelector('.sf-chat-feedback-skip').addEventListener('click', () => {
+      reason.hidden = true;
+      btns.forEach((b) => b.classList.remove('is-selected'));
+    });
+    wrap.querySelector('.sf-chat-feedback-submit').addEventListener('click', () => {
+      lockButtons('bad');
+      postFeedback(messageId, 'bad', commentEl.value || '').catch(() => {});
+      showThanks();
+    });
+  }
+
+  async function postFeedback(messageId, rating, comment) {
+    const url = ENDPOINT.replace(/\/?$/, '/') + 'feedback';
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: messageId, rating, comment }),
+      });
+    } catch (e) {
+      console.warn('[chat] feedback post failed:', e);
+    }
   }
 
   async function send(text, opts) {
@@ -420,11 +531,13 @@
     // intent (optional) maps server-side to a stronger model. Today
     // only "debrief" is mapped → Claude Opus 4.7. All other turns use
     // the Sonnet 4.6 default. Keeping this server-side prevents
-    // arbitrary model abuse from the client.
+    // arbitrary model abuse from the client. session_id correlates
+    // every Q&A in this chat sitting for later review.
     const reqBody = {
       race_briefing: briefing,
       user_boat: userBoat,
       messages: messages,
+      session_id: sessionId(),
     };
     if (opts && opts.intent) reqBody.intent = opts.intent;
 
@@ -445,6 +558,12 @@
       if (buf) setAssistantText(replyEl, buf);
       else replyEl.textContent = '(no response)';
       messages.push({ role: 'assistant', content: buf });
+      // Attach the feedback widget once the server has confirmed and
+      // returned a message_id. No id → no widget (stays clean and
+      // doesn't pretend to record what the server didn't log).
+      if (buf && data.message_id) {
+        attachFeedbackWidget(replyEl, data.message_id);
+      }
     } catch (e) {
       replyEl.textContent = `Error: ${e.message}`;
     } finally {

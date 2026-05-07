@@ -28,6 +28,8 @@ import os
 import time
 import urllib.error
 import urllib.request
+import uuid
+from datetime import datetime, timezone
 
 import boto3
 
@@ -36,6 +38,7 @@ log.setLevel(logging.INFO)
 
 _secrets = boto3.client("secretsmanager")
 _ddb = boto3.client("dynamodb")
+_s3 = boto3.client("s3")
 
 ANTHROPIC_SECRET_ARN = os.environ["ANTHROPIC_SECRET_ARN"]
 RATE_LIMIT_TABLE = os.environ.get("RATE_LIMIT_TABLE", "")
@@ -53,6 +56,12 @@ INTENT_MODEL = {
 # allowing a multi-paragraph debrief with rule citations and
 # leg-by-leg analysis. Override per-deploy via env if needed.
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
+# Where chat Q&A + feedback land. Same bucket as the fleet/race data
+# under a dedicated prefix; no separate infra. Each turn writes one
+# JSON object; feedback updates the same object in place. Easy to
+# join later for prompt-iteration analysis.
+LOG_BUCKET = os.environ.get("LOG_BUCKET", "sailframes-fleet-data-prod")
+LOG_PREFIX = os.environ.get("LOG_PREFIX", "chat_logs")
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
@@ -357,6 +366,93 @@ def _client_ip(event):
     return http.get("sourceIp") or "unknown"
 
 
+# ============================================================
+# Chat-log persistence (Q&A + feedback)
+# ============================================================
+# We log every successful turn so we can review prompt quality and
+# iterate on the system prompt. Each `message_id` is `YYYY-MM-DD_<hex>`
+# so the date is recoverable from the id alone — feedback updates
+# can find the original log file without a database lookup.
+#
+# Data captured:
+#   - timestamp, model, intent, ip, session_id (browser-supplied)
+#   - user_boat (team name) + race_id / race_name (from briefing.race)
+#   - question text, answer text
+#   - usage tokens (input / cache_read / cache_creation / output)
+#   - feedback (filled in by /feedback endpoint, null until then)
+# Briefing JSON itself is NOT stored — too large; race_id is enough
+# to re-derive it from the dashboard if a question needs revisiting.
+# ============================================================
+
+def _new_message_id():
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    short = uuid.uuid4().hex[:16]
+    return f"{date}_{short}"
+
+
+def _log_key_for(message_id):
+    # message_id format is "YYYY-MM-DD_<hex>"; the date prefix is the
+    # first 10 chars. Falls back to a flat path if the format is bad.
+    if len(message_id) >= 10 and message_id[10:11] == "_":
+        date = message_id[:10]
+    else:
+        date = "unknown-date"
+    return f"{LOG_PREFIX}/{date}/{message_id}.json"
+
+
+def _write_chat_log(message_id, payload):
+    if not LOG_BUCKET:
+        return
+    try:
+        _s3.put_object(
+            Bucket=LOG_BUCKET,
+            Key=_log_key_for(message_id),
+            Body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            ContentType="application/json",
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("chat log write failed: %s", e)
+
+
+def _record_feedback(body):
+    """Update an existing chat log with user feedback (great/ok/bad)."""
+    message_id = (body.get("message_id") or "").strip()
+    rating = (body.get("rating") or "").strip().lower()
+    comment = (body.get("comment") or "").strip()
+    if not message_id:
+        return _resp(400, {"error": "message_id required"})
+    if rating not in ("great", "ok", "bad"):
+        return _resp(400, {"error": "rating must be great|ok|bad"})
+
+    key = _log_key_for(message_id)
+    try:
+        obj = _s3.get_object(Bucket=LOG_BUCKET, Key=key)
+        data = json.loads(obj["Body"].read())
+    except _s3.exceptions.NoSuchKey:
+        return _resp(404, {"error": "log entry not found"})
+    except Exception as e:  # noqa: BLE001
+        log.warning("feedback read failed: %s", e)
+        return _resp(500, {"error": "could not load log entry"})
+
+    data["feedback"] = {
+        "rating": rating,
+        "comment": comment[:2000],   # cap to keep S3 object reasonable
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        _s3.put_object(
+            Bucket=LOG_BUCKET,
+            Key=key,
+            Body=json.dumps(data, separators=(",", ":")).encode("utf-8"),
+            ContentType="application/json",
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("feedback write failed: %s", e)
+        return _resp(500, {"error": "could not save feedback"})
+
+    return _resp(200, {"ok": True, "rating": rating})
+
+
 def _rate_limit_ok(ip):
     if not RATE_LIMIT_TABLE:
         return True
@@ -448,11 +544,12 @@ def _call_anthropic(model, grounding_text, conversation_msgs):
     )
     parts = payload.get("content") or []
     text = "".join(b.get("text", "") for b in parts if b.get("type") == "text")
-    return text
+    return text, usage
 
 
 def lambda_handler(event, context):
     method = (event.get("requestContext", {}).get("http", {}) or {}).get("method", "POST")
+    raw_path = event.get("rawPath") or event.get("path") or "/"
 
     if method == "OPTIONS":
         return {"statusCode": 204, "headers": _cors_headers(), "body": ""}
@@ -472,10 +569,17 @@ def lambda_handler(event, context):
     except Exception:
         return _resp(400, {"error": "invalid JSON"})
 
+    # Path-based dispatch on the Function URL:
+    #   POST /            → chat (default)
+    #   POST /feedback    → record user feedback on a previous answer
+    if raw_path.endswith("/feedback"):
+        return _record_feedback(body)
+
     briefing = body.get("race_briefing") or {}
     user_boat = body.get("user_boat")
     messages = body.get("messages") or []
     intent = body.get("intent")  # optional; maps to a stronger model
+    session_id = (body.get("session_id") or "").strip()[:64]
     if not isinstance(messages, list) or not messages:
         return _resp(400, {"error": "messages required"})
 
@@ -500,7 +604,7 @@ def lambda_handler(event, context):
     ]
 
     try:
-        text = _call_anthropic(model, grounding, conversation)
+        text, usage = _call_anthropic(model, grounding, conversation)
     except urllib.error.HTTPError as e:
         log.error("anthropic HTTP %d: %s", e.code, e.read()[:500])
         return _resp(502, {"error": "model error"})
@@ -508,4 +612,38 @@ def lambda_handler(event, context):
         log.error("anthropic call failed: %s", e)
         return _resp(502, {"error": "model error"})
 
-    return _resp(200, {"text": text})
+    # Persist the Q&A. The last user message is the question; everything
+    # before is conversation history (we capture all turns in this race
+    # session via session_id, but only this answer's question text in
+    # the question field for easy review).
+    last_user = next(
+        (m["content"] for m in reversed(conversation)
+         if m.get("role") == "user" and isinstance(m.get("content"), str)),
+        ""
+    )
+    race_meta = (briefing.get("race") or {})
+    message_id = _new_message_id()
+    _write_chat_log(message_id, {
+        "message_id": message_id,
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "ip": ip,
+        "session_id": session_id,
+        "model": model,
+        "intent": intent,
+        "user_boat": user_boat,
+        "race_id": race_meta.get("id"),
+        "race_name": race_meta.get("name"),
+        "race_date": race_meta.get("date"),
+        "question": last_user[:8000],
+        "answer": text,
+        "n_history_turns": max(0, len(conversation) - 1),
+        "usage": {
+            "input_tokens": usage.get("input_tokens"),
+            "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
+            "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+        },
+        "feedback": None,
+    })
+
+    return _resp(200, {"text": text, "message_id": message_id})
