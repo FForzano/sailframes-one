@@ -42,6 +42,11 @@
       key: 'debrief',
       label: '📋 Full debrief',
       requiresBoat: true,
+      // intent="debrief" tells the Lambda to route this turn to
+      // Opus 4.7 (vs Sonnet 4.6 default). Premium model for the one
+      // chip that actually justifies the cost — multi-section,
+      // multi-rule output with full reasoning depth.
+      intent: 'debrief',
       prompt: 'Give me the full coach-mode debrief for my boat — bottom line, what worked, what cost time (with permalinks and the data that proves it), any rule encounters, and two concrete things to try next race.',
     },
     {
@@ -172,7 +177,7 @@
         // need user input). Returning null cancels.
         const text = qa.promptFn ? qa.promptFn() : qa.prompt;
         if (!text) return;
-        send(text);
+        send(text, { intent: qa.intent || null });
       });
     });
 
@@ -378,7 +383,7 @@
     bindTimeLinks(el);
   }
 
-  async function send(text) {
+  async function send(text, opts) {
     text = (text || '').trim();
     if (!text || streaming) return;
     streaming = true;
@@ -402,15 +407,22 @@
       userBoat = m.team_name || m.boat_name || selectedId;
     }
 
+    // intent (optional) maps server-side to a stronger model. Today
+    // only "debrief" is mapped → Claude Opus 4.7. All other turns use
+    // the Sonnet 4.6 default. Keeping this server-side prevents
+    // arbitrary model abuse from the client.
+    const reqBody = {
+      race_briefing: briefing,
+      user_boat: userBoat,
+      messages: messages,
+    };
+    if (opts && opts.intent) reqBody.intent = opts.intent;
+
     try {
       const resp = await fetch(ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          race_briefing: briefing,
-          user_boat: userBoat,
-          messages: messages,
-        }),
+        body: JSON.stringify(reqBody),
       });
       if (!resp.ok) {
         const errBody = await resp.text();

@@ -40,7 +40,15 @@ _ddb = boto3.client("dynamodb")
 ANTHROPIC_SECRET_ARN = os.environ["ANTHROPIC_SECRET_ARN"]
 RATE_LIMIT_TABLE = os.environ.get("RATE_LIMIT_TABLE", "")
 RATE_LIMIT_PER_HOUR = int(os.environ.get("RATE_LIMIT_PER_HOUR", "30"))
-MODEL = os.environ.get("MODEL", "claude-haiku-4-5-20251001")
+DEFAULT_MODEL = os.environ.get("MODEL", "claude-sonnet-4-6")
+# Per-intent model overrides. The "Full debrief" chip in the chat UI
+# sends intent="debrief" — we route that to Opus 4.7 because the
+# multi-section, multi-rule output justifies the cost. Adding a new
+# intent here is the safe way to extend; clients can't pick arbitrary
+# models from the request body.
+INTENT_MODEL = {
+    "debrief": "claude-opus-4-7",
+}
 # Coaching reports want room. 4096 keeps the bill in check while
 # allowing a multi-paragraph debrief with rule citations and
 # leg-by-leg analysis. Override per-deploy via env if needed.
@@ -169,9 +177,20 @@ these to back up every claim with a specific moment + permalink:
   specific positions. Cap is 2400 points/boat (~40 min) — for races
   that long the tail is truncated and you should mention it.
 
-- `imu_per_leg[name]` — per-leg `{avg_heel_deg, max_heel_abs_deg,
-  avg_pitch_deg}`. Heel pattern is the single strongest performance
-  signal on this fleet:
+- `imu_tracks_per_boat[name]` — full-resolution IMU at 1 s cadence,
+  same compact columnar format as `tracks_per_boat`:
+      { "fields": ["t_sec", "heel", "pitch"],
+        "samples": [[0, 12.3, 1.5], [1, 12.4, 1.6], ...] }
+  Use this to reason about heel through specific maneuvers — e.g.
+  heel recovery time after a tack, heel oscillation downwind
+  (death-roll precursor), trim consistency through a wind shift.
+
+- `imu_per_leg[name]` — pre-aggregated per-leg `{avg_heel_deg,
+  max_heel_abs_deg, avg_pitch_deg}` for quick reference when the
+  question doesn't need second-by-second detail.
+
+  Heel pattern is the single strongest performance signal on this
+  fleet:
     * Upwind 15–22° = on the gear, full power, helm light.
     * Upwind <12° = underpowered (sheet harder, point lower for power).
     * Upwind >25° sustained = overpowered (vang on, traveler down,
@@ -359,11 +378,47 @@ def _rate_limit_ok(ip):
         return True
 
 
-def _call_anthropic(api_messages):
+def _call_anthropic(model, grounding_text, conversation_msgs):
+    """Call the Anthropic Messages API with prompt caching enabled.
+
+    Two cache breakpoints:
+      1. system prompt    — never changes between turns; cached on
+                            every request.
+      2. grounding (briefing JSON) — first user message; identical
+                            within a chat session for one race, so it
+                            caches across turns.
+
+    Cache writes cost 1.25x base input price; reads cost 0.25x. A
+    5-turn conversation drops from full-price-per-turn to roughly
+    1.25 + 4*0.25 = 2.25x base cost vs 5x without caching — ~55%
+    savings. Cache TTL is ~5 min ephemeral; long-paused sessions
+    re-pay the write.
+    """
+    system_blocks = [
+        {
+            "type": "text",
+            "text": SYSTEM_PROMPT,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    api_messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": grounding_text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+    ]
+    api_messages += conversation_msgs
+
     body = json.dumps({
-        "model": MODEL,
+        "model": model,
         "max_tokens": MAX_OUTPUT_TOKENS,
-        "system": SYSTEM_PROMPT,
+        "system": system_blocks,
         "messages": api_messages,
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -376,8 +431,19 @@ def _call_anthropic(api_messages):
             "content-type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=180) as r:
         payload = json.loads(r.read())
+    # Surface cache-hit telemetry to CloudWatch so we can watch
+    # caching effectiveness over real traffic.
+    usage = payload.get("usage") or {}
+    log.info(
+        "anthropic model=%s in=%s cache_read=%s cache_write=%s out=%s",
+        model,
+        usage.get("input_tokens"),
+        usage.get("cache_read_input_tokens"),
+        usage.get("cache_creation_input_tokens"),
+        usage.get("output_tokens"),
+    )
     parts = payload.get("content") or []
     text = "".join(b.get("text", "") for b in parts if b.get("type") == "text")
     return text
@@ -407,8 +473,14 @@ def lambda_handler(event, context):
     briefing = body.get("race_briefing") or {}
     user_boat = body.get("user_boat")
     messages = body.get("messages") or []
+    intent = body.get("intent")  # optional; maps to a stronger model
     if not isinstance(messages, list) or not messages:
         return _resp(400, {"error": "messages required"})
+
+    # Server-side intent → model mapping. Clients can request a
+    # specific intent (e.g. "debrief") but cannot pick an arbitrary
+    # model from the request body — keeps cost surface controlled.
+    model = INTENT_MODEL.get(intent, DEFAULT_MODEL)
 
     user_boat_block = (
         f"<user_boat>{user_boat}</user_boat>" if user_boat
@@ -419,15 +491,14 @@ def lambda_handler(event, context):
         f"<race_briefing>\n{json.dumps(briefing, separators=(',', ':'))}\n</race_briefing>"
     )
 
-    api_messages = [{"role": "user", "content": grounding}]
-    api_messages += [
+    conversation = [
         {"role": m["role"], "content": m["content"]}
         for m in messages
         if isinstance(m, dict) and m.get("role") in ("user", "assistant")
     ]
 
     try:
-        text = _call_anthropic(api_messages)
+        text = _call_anthropic(model, grounding, conversation)
     except urllib.error.HTTPError as e:
         log.error("anthropic HTTP %d: %s", e.code, e.read()[:500])
         return _resp(502, {"error": "model error"})

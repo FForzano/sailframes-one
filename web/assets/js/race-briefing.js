@@ -294,6 +294,35 @@
     return { fields: ['t_sec', 'lat', 'lon', 'cog', 'sog'], samples };
   }
 
+  // 1 Hz IMU samples in the same columnar format as GPS tracks. With
+  // Sonnet 4.6 / Opus 4.7's 1 M context window we can afford to ship
+  // every IMU sample, not just per-leg averages — the model can then
+  // reason about heel patterns through specific maneuvers (heel
+  // recovery time after a tack, heel oscillation = death-roll risk
+  // downwind, etc.). Per-leg summary stays for quick reference.
+  function downsampleImu(imu, startMs, stepSec = 1, maxPts = 2400) {
+    const empty = { fields: ['t_sec', 'heel', 'pitch'], samples: [] };
+    if (!imu || !imu.length) return empty;
+    const samples = [];
+    let nextT = startMs == null ? null : startMs;
+    const stepMs = stepSec * 1000;
+    for (const s of imu) {
+      const tMs = new Date(s.t).getTime();
+      if (!Number.isFinite(tMs)) continue;
+      if (nextT == null) nextT = tMs;
+      if (tMs >= nextT) {
+        samples.push([
+          startMs != null ? Math.max(0, Math.round((tMs - startMs) / 1000)) : null,
+          round(s.heel, 1),
+          round(s.pitch, 1),
+        ]);
+        nextT += stepMs;
+        if (samples.length >= maxPts) break;
+      }
+    }
+    return { fields: ['t_sec', 'heel', 'pitch'], samples };
+  }
+
   // Per-leg IMU summary — heel pattern is the strongest single
   // performance signal we have on this fleet (over-flat → underpowered
   // upwind, over-heeled → broaching downwind / wasted righting moment).
@@ -581,13 +610,15 @@
     const raceAvgTwd = wind?.twd_avg_deg != null ? wind.twd_avg_deg : null;
 
     const gpsTracksByName = {};
-    const imuByName = {};
+    const imuTracksByName = {};
+    const imuPerLegByName = {};
     for (const id of boatIds) {
       const m = boatsMap[id]?.boat || {};
       const name = m.team_name || m.boat_name || id;
       const sensors = boatsMap[id]?.sensors || {};
       gpsTracksByName[name] = downsampleTrack(sensors.gps, startMs);
-      imuByName[name] = summarizeImuPerLeg(sensors.imu, legBoundsFor(id));
+      imuTracksByName[name] = downsampleImu(sensors.imu, startMs);
+      imuPerLegByName[name] = summarizeImuPerLeg(sensors.imu, legBoundsFor(id));
     }
 
     const windSeries = buildWindSeries(ctx.weatherWindSamples || [], startMs);
@@ -638,8 +669,9 @@
       // Keys named verbosely so the model knows what each is without
       // a separate schema. See helpers above for downsample rates +
       // caps; total payload typically ~30-50 KB JSON.
-      tracks_per_boat: gpsTracksByName,             // {name: [{t_sec,lat,lon,cog,sog}, ...]}
-      imu_per_leg: imuByName,                       // {name: [{leg, avg_heel_deg, max_heel_abs_deg, avg_pitch_deg}, ...]}
+      tracks_per_boat: gpsTracksByName,             // {name: {fields, samples}}  — 1 Hz columnar
+      imu_tracks_per_boat: imuTracksByName,         // {name: {fields, samples}}  — 1 Hz columnar (heel/pitch)
+      imu_per_leg: imuPerLegByName,                 // {name: [{leg, avg_heel_deg, max_heel_abs_deg, avg_pitch_deg}, ...]}
       wind_series: windSeries,                      // [{t_sec, twd, tws}, ...]  one sample/min
       laylines_at_avg_twd: laylines,                // [{mark_name, port_layline_bearing, starboard_layline_bearing, ...}]
       boat_encounters: encounters,                  // [{at, distance_m, boats[], rule_family_hint}]
