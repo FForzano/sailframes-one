@@ -125,6 +125,67 @@
 }
 .sf-chat-tlink:hover { color: #1a4480; }
 
+/* Quick-action chip row — sits between the header and the message log.
+   Horizontal scroll on overflow so the row doesn't wrap and chew the
+   panel's vertical real estate on small panels. */
+.sf-chat-quickactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5eaef;
+  background: #f8fafc;
+}
+.sf-chat-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 14px;
+  border: 1px solid #c9d2da;
+  background: #ffffff;
+  color: #1f2d3d;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.sf-chat-chip:hover:not(:disabled) {
+  background: #eaf3ff;
+  border-color: #4a90e2;
+  color: #1a4480;
+}
+.sf-chat-chip:active:not(:disabled) { transform: translateY(1px); }
+.sf-chat-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* RRS citation link — distinct from time-link colour so the user
+   sees at a glance whether they're clicking a timeline jump or an
+   external reference. */
+.sf-chat-rulelink {
+  color: #8a4a00;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  font-weight: 500;
+}
+.sf-chat-rulelink:hover { color: #5a2f00; }
+.sf-chat-rulelink::after {
+  content: " ↗";
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+/* Brief highlight pulse used when the user clicks a coach-mode chip
+   without selecting their boat first — draws the eye to the picker. */
+@keyframes sf-chat-flash {
+  0%, 100% { box-shadow: none; }
+  50%      { box-shadow: 0 0 0 3px rgba(255, 165, 0, 0.6); }
+}
+.sf-chat-flash {
+  animation: sf-chat-flash 0.8s ease-in-out;
+  border-radius: 4px;
+}
+
 .sf-chat-foot {
   font-size: 11px;
   color: #8696a3;

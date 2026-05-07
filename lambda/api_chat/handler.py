@@ -224,7 +224,11 @@ way", "protest", "penalty", or "RRS", switch to RULE-CHECK MODE:
        - tacking through head-to-wind with another boat in proximity
          → RRS 13 (tacking boat keeps clear).
   2. For each potential infringement, cite:
-       - the RRS rule number (e.g. "RRS 10", "RRS 18.2(b)"),
+       - the RRS rule number using the EXACT form "RRS N" (or
+         "RRS N.M(x)" for sub-rules — e.g. "RRS 10", "RRS 18.2(b)").
+         The dashboard auto-linkifies this exact form to the official
+         rule book; deviations like "rule 10" or "RRS-10" still link
+         but read worse, and "rule ten" doesn't link at all.
        - the specific moment in `HH:MM:SS (t=N)` form,
        - which boat had right-of-way and which had to keep clear,
        - the geometric evidence from the briefing,

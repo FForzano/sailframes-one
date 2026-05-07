@@ -31,6 +31,51 @@
     return e;
   }
 
+  // Quick-action chips. Each fires a pre-baked prompt to give the
+  // user a one-click path to common coaching analyses without
+  // having to remember the magic words. `requiresBoat: true` chips
+  // are only enabled when the user has identified their boat in
+  // the "I'm" picker (otherwise the system prompt won't switch into
+  // coach mode and the answer is generic).
+  const QUICK_ACTIONS = [
+    {
+      key: 'debrief',
+      label: '📋 Full debrief',
+      requiresBoat: true,
+      prompt: 'Give me the full coach-mode debrief for my boat — bottom line, what worked, what cost time (with permalinks and the data that proves it), any rule encounters, and two concrete things to try next race.',
+    },
+    {
+      key: 'rules',
+      label: '⚖️ Rule check',
+      prompt: 'Walk through the boat_encounters list and flag every potential racing-rules infringement you can see. For each, cite the RRS rule number, the moment in HH:MM:SS (t=N) form, who had right of way, and the geometric evidence. Distinguish clear-cut from ambiguous calls.',
+    },
+    {
+      key: 'start',
+      label: '🚩 Start analysis',
+      prompt: 'Analyse how each boat started: line bias and approach end (pin vs committee), distance from the line at the gun, line speed at the gun, and any boats that look like they were OCS. Rank the starts best to worst with a short reason for each.',
+    },
+    {
+      key: 'wind',
+      label: '💨 Wind shifts',
+      prompt: 'Identify the significant wind shifts during this race (use the wind_series). For each shift give the moment in HH:MM:SS (t=N), the magnitude in degrees, the direction, and which boats responded best vs worst (cross-reference against tracks_per_boat and any tacks in the maneuvers list).',
+    },
+    {
+      key: 'marks',
+      label: '🎯 Mark roundings',
+      prompt: 'Review every mark rounding for the fleet. Use the by_mark ranking to see arrival order, then look at tracks_per_boat around each rounding to assess quality (inside/outside, speed retained, time lost or gained). Call out the cleanest and the costliest roundings of the race.',
+    },
+    {
+      key: 'encounters',
+      label: '🤝 Close encounters',
+      prompt: 'Summarise the boat-on-boat close encounters (boat_encounters). Group them into tactical wins, tactical losses, and neutral crosses. For each, name the boats, the moment, the configuration (port/stbd, leeward/windward), and the outcome.',
+    },
+    {
+      key: 'highlights',
+      label: '🌊 Best & worst moments',
+      prompt: 'Pick the 3 best and 3 worst tactical moments of this race across the entire fleet. For each, name the boat(s), the moment in HH:MM:SS (t=N), what happened, and the data that proves it (heel angle, %polar, layline distance, encounter geometry, etc.).',
+    },
+  ];
+
   function build(ctx) {
     const root = el('div', 'sf-chat-root');
     root.innerHTML = `
@@ -44,6 +89,14 @@
             </select>
           </label>
           <button class="sf-chat-close" aria-label="Close">×</button>
+        </div>
+        <div class="sf-chat-quickactions" role="toolbar" aria-label="Quick actions">
+          ${QUICK_ACTIONS.map((qa) => `
+            <button type="button" class="sf-chat-chip"
+                    data-qa="${qa.key}"
+                    data-requires-boat="${qa.requiresBoat ? '1' : '0'}"
+                    title="${escapeAttr(qa.prompt)}">${qa.label}</button>
+          `).join('')}
         </div>
         <div class="sf-chat-log"></div>
         <form class="sf-chat-input-row">
@@ -72,7 +125,46 @@
       send(inputEl.value);
     };
 
+    // Wire up quick-action chips. Each click fires the pre-baked
+    // prompt straight into send() — no edit step. User can still
+    // type a custom question in the input row.
+    root.querySelectorAll('.sf-chat-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const qa = QUICK_ACTIONS.find((x) => x.key === chip.dataset.qa);
+        if (!qa) return;
+        if (qa.requiresBoat && !boatSelectEl.value) {
+          // Nudge the user to pick their boat instead of silently sending
+          // a debrief that the model can't actually personalise.
+          boatSelectEl.focus();
+          flashElement(boatSelectEl);
+          return;
+        }
+        send(qa.prompt);
+      });
+    });
+
+    // Disable boat-required chips when the picker is on "spectator".
+    const refreshChipState = () => {
+      const haveBoat = !!boatSelectEl.value;
+      root.querySelectorAll('.sf-chat-chip[data-requires-boat="1"]').forEach((chip) => {
+        chip.disabled = !haveBoat;
+        chip.title = haveBoat
+          ? (QUICK_ACTIONS.find((x) => x.key === chip.dataset.qa)?.prompt || '')
+          : 'Pick your boat in the "I\'m" selector to enable coach-mode';
+      });
+    };
+    boatSelectEl.addEventListener('change', refreshChipState);
+
     populateBoatSelect();
+    refreshChipState();
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+  function flashElement(el) {
+    el.classList.add('sf-chat-flash');
+    setTimeout(() => el.classList.remove('sf-chat-flash'), 800);
   }
 
   // Refresh the "I am" dropdown from the current ctx fleet. Called both
@@ -162,11 +254,29 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  // Make every "t=N" token in the model's reply clickable. Two passes
-  // so the canonical "HH:MM:SS (t=N)" form keeps its human time as the
-  // link text, and any standalone "t=N" or "(t=N)" still gets linked
-  // (rendered as a "[+M:SS]" offset). The contract with the LLM lives
-  // in the system prompt; the linkifier is tolerant on purpose.
+  // Build an external link to the official Racing Rules of Sailing
+  // 2025-2028. World Sailing publishes the PDF without stable
+  // per-rule deep-links, so we route through a Google search scoped
+  // to the authoritative sources. Always opens in a new tab so the
+  // user doesn't lose their chat context.
+  function ruleHref(ruleNumber) {
+    const q = encodeURIComponent(
+      `Racing Rules of Sailing 2025-2028 Rule ${ruleNumber}`
+    );
+    return `https://www.google.com/search?q=${q}`;
+  }
+
+  // Make every "t=N" token AND every "RRS N" / "Rule N" citation in
+  // the model's reply clickable.
+  //
+  // Time linkification: two passes so "HH:MM:SS (t=N)" keeps the
+  // human time as link text, and any bare/standalone "t=N" still
+  // gets linked (rendered as a "[+M:SS]" offset).
+  //
+  // Rule linkification: matches "RRS 10", "RRS 18.2(b)", or
+  // "Rule 10" / "rule 18", and wraps in an out-of-band link to the
+  // official rule book. Skips matches inside an existing <a> tag
+  // (the time pass runs first so this guard catches its output).
   function linkifyTimes(rawText) {
     let s = escapeHtml(rawText);
     // Pass 1: "HH:MM[:SS] (t=N)" → link the time, drop the marker.
@@ -186,6 +296,16 @@
         const mm = Math.floor(n / 60), ss = n % 60;
         const label = `[+${mm}:${String(ss).padStart(2, '0')}]`;
         return `<a href="#" class="sf-chat-tlink" data-t="${n}">${label}</a>`;
+      }
+    );
+    // Pass 3: RRS rule citations. Match "RRS N" or "Rule N" with an
+    // optional sub-rule decoration like "18.2(b)" or "44.2".
+    // Trailing punctuation isn't captured so it stays outside the link.
+    s = s.replace(
+      /\b(RRS|Rule|rule)\s+(\d{1,3}(?:\.\d+)?(?:\([a-z]\))?)/g,
+      (full, prefix, ruleNum) => {
+        const url = ruleHref(ruleNum);
+        return `<a href="${url}" class="sf-chat-rulelink" target="_blank" rel="noopener" title="Open Racing Rules of Sailing 2025-2028, Rule ${ruleNum}">${prefix} ${ruleNum}</a>`;
       }
     );
     return s;
