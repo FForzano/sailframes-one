@@ -74,6 +74,35 @@
       label: '🌊 Best & worst moments',
       prompt: 'Pick the 3 best and 3 worst tactical moments of this race across the entire fleet. For each, name the boat(s), the moment in HH:MM:SS (t=N), what happened, and the data that proves it (heel angle, %polar, layline distance, encounter geometry, etc.).',
     },
+    {
+      // Dynamic chip — asks the user for a rule number on click,
+      // then sends a prompt that (1) explains the rule in plain
+      // language and (2) scans the race for moments where the rule
+      // could apply.
+      key: 'rule-lookup',
+      label: '📖 Look up RRS…',
+      tooltip: 'Ask about a specific Racing Rule (e.g. 10, 18.2, 44.2). I explain it, then check this race for situations where it applies.',
+      promptFn: () => {
+        const raw = window.prompt(
+          'Which Racing Rule? (e.g. 10, 11, 18.2, 44.2)\n\nLeave blank to cancel.'
+        );
+        if (!raw) return null;
+        // Accept "10", "RRS 10", "rule 18.2(b)" etc. Strip the prefix
+        // and any whitespace so we end up with just the number.
+        const n = String(raw).trim().replace(/^(rrs|rule)\s*/i, '').trim();
+        if (!n) return null;
+        return (
+          `Explain RRS ${n} from the Racing Rules of Sailing 2025-2028 ` +
+          `in plain language — what it requires, who it applies to, and ` +
+          `the typical situation. Then walk through this race's ` +
+          `boat_encounters list (and tracks_per_boat where useful) and ` +
+          `identify every moment where RRS ${n} could apply. For each: ` +
+          `cite the moment in HH:MM:SS (t=N) form, name the boats and ` +
+          `their tacks/configuration, and give your read on whether the ` +
+          `rule was followed or potentially infringed.`
+        );
+      },
+    },
   ];
 
   function build(ctx) {
@@ -95,7 +124,7 @@
             <button type="button" class="sf-chat-chip"
                     data-qa="${qa.key}"
                     data-requires-boat="${qa.requiresBoat ? '1' : '0'}"
-                    title="${escapeAttr(qa.prompt)}">${qa.label}</button>
+                    title="${escapeAttr(qa.tooltip || qa.prompt || '')}">${qa.label}</button>
           `).join('')}
         </div>
         <div class="sf-chat-log"></div>
@@ -139,7 +168,11 @@
           flashElement(boatSelectEl);
           return;
         }
-        send(qa.prompt);
+        // promptFn chips compute their prompt at click time (e.g. they
+        // need user input). Returning null cancels.
+        const text = qa.promptFn ? qa.promptFn() : qa.prompt;
+        if (!text) return;
+        send(text);
       });
     });
 
@@ -148,8 +181,9 @@
       const haveBoat = !!boatSelectEl.value;
       root.querySelectorAll('.sf-chat-chip[data-requires-boat="1"]').forEach((chip) => {
         chip.disabled = !haveBoat;
+        const qa = QUICK_ACTIONS.find((x) => x.key === chip.dataset.qa);
         chip.title = haveBoat
-          ? (QUICK_ACTIONS.find((x) => x.key === chip.dataset.qa)?.prompt || '')
+          ? (qa?.tooltip || qa?.prompt || '')
           : 'Pick your boat in the "I\'m" selector to enable coach-mode';
       });
     };
