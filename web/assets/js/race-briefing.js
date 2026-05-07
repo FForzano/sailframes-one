@@ -262,33 +262,36 @@
   }
 
   // GPS track at 1 s cadence (matching the LG290P's native rate).
-  // 1 Hz × 25-min race × 6 boats ≈ 540 KB JSON ≈ 135 K input tokens —
-  // fits in Haiku 4.5's 200 K window with room for the rules cheat-
-  // sheet, conversation history, and ~4 K output. maxPts cap of 2400
-  // covers a 40-minute race; longer races get truncated and the model
-  // is told to mention it.
+  // Returned in a compact "columnar" form to stay inside the model's
+  // 200 K context window: one `fields` declaration + an array of
+  // tuples, instead of repeating "t_sec","lat","lon","cog","sog" keys
+  // on every sample. That cut ~30 chars/sample, which at 6×1500
+  // samples is ~75 K tokens — the difference between fitting in
+  // Haiku 4.5's window and getting "prompt is too long: 207308 > 200000".
+  // The system prompt teaches the model how to read this format.
   function downsampleTrack(gps, startMs, stepSec = 1, maxPts = 2400) {
-    if (!gps || !gps.length) return [];
-    const out = [];
+    const empty = { fields: ['t_sec', 'lat', 'lon', 'cog', 'sog'], samples: [] };
+    if (!gps || !gps.length) return empty;
+    const samples = [];
     let nextT = startMs == null ? null : startMs;
-    let stepMs = stepSec * 1000;
+    const stepMs = stepSec * 1000;
     for (const p of gps) {
       const tMs = new Date(p.t).getTime();
       if (!Number.isFinite(tMs)) continue;
       if (nextT == null) nextT = tMs;
       if (tMs >= nextT) {
-        out.push({
-          t_sec: startMs != null ? Math.max(0, Math.round((tMs - startMs) / 1000)) : null,
-          lat: round(p.lat, 5),
-          lon: round(p.lon, 5),
-          cog: round(p.course, 0),
-          sog: round(p.speed_kn, 1),
-        });
+        samples.push([
+          startMs != null ? Math.max(0, Math.round((tMs - startMs) / 1000)) : null,
+          round(p.lat, 5),
+          round(p.lon, 5),
+          round(p.course, 0),
+          round(p.speed_kn, 1),
+        ]);
         nextT += stepMs;
-        if (out.length >= maxPts) break;
+        if (samples.length >= maxPts) break;
       }
     }
-    return out;
+    return { fields: ['t_sec', 'lat', 'lon', 'cog', 'sog'], samples };
   }
 
   // Per-leg IMU summary — heel pattern is the strongest single
