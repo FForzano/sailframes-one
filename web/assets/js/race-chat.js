@@ -12,15 +12,19 @@
   'use strict';
 
   const NS = (window.SailFramesChat = window.SailFramesChat || {});
-  // Endpoint behind API Gateway. NOTE: API Gateway has a hard 29 s
-  // integration timeout (CLAUDE.md gotcha #10). Long Sonnet / Opus
-  // turns may hit HTTP 503 {"message":"Service Unavailable"}. Until
-  // the chat Lambda's Function URL is unblocked from the account-
-  // level Lambda Public Access Block (AWS Console action), short
-  // turns work fine; the Full Debrief chip may time out.
-  // Override via window.SAILFRAMES_CHAT_URL.
+  // Lambda Function URL — bypasses API Gateway's hard 29 s integration
+  // timeout (CLAUDE.md gotcha #10) so Sonnet / Opus turns with 200 K-
+  // token briefings can complete. Function URLs respect the Lambda's
+  // own timeout (currently 180 s). Override via window.SAILFRAMES_CHAT_URL.
+  //
+  // Note for ops: the function's resource policy needs BOTH a
+  // `lambda:InvokeFunctionUrl` statement (auth gate) AND a
+  // `lambda:InvokeFunction` statement (actual run permission). The
+  // second is normally added automatically when the URL is created
+  // via the AWS console — if you ever recreate the URL via CLI you
+  // have to add it manually or the URL returns 403.
   const ENDPOINT = window.SAILFRAMES_CHAT_URL ||
-    'https://rnngzx7flk.execute-api.us-east-1.amazonaws.com/api/chat';
+    'https://lzhfgt2ae5si3shyc72j2pvu5m0jcqve.lambda-url.us-east-1.on.aws/';
 
   let panelEl = null;
   let logEl = null;
