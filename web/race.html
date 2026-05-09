@@ -24,7 +24,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
-    <link rel="stylesheet" href="./assets/css/race.css?v=21">
+    <link rel="stylesheet" href="./assets/css/race.css?v=30">
     <link rel="stylesheet" href="./assets/css/race-chat.css?v=9">
     <link rel="stylesheet" href="./assets/css/race-start-review.css?v=2">
     <script src="./config.js"></script>
@@ -52,6 +52,7 @@
             <button id="btn-edit-course" class="btn-secondary" title="Edit course on map" disabled>Edit Course</button>
             <button id="btn-leg-summary" class="btn-secondary" title="Leg-by-leg per-boat summary">Legs</button>
             <button id="btn-maneuvers" class="btn-secondary" title="Tacks &amp; gybes comparison">Maneuvers</button>
+            <button id="btn-tack-analysis" class="btn-secondary" title="Overlay every tack in a wind-up frame, color-coded by speed">Tack Analysis</button>
             <button id="btn-charts" class="btn-secondary" title="Open Speed / Heel / Wind charts (Esc to close)">Charts</button>
             <button id="btn-start-review" class="btn-secondary" title="Replay the start sequence with horn signals">Review Start</button>
             <button id="btn-race-coach" class="btn-secondary" title="Ask an AI Coach about this race">Ask an AI Coach</button>
@@ -175,6 +176,18 @@
         </div>
     </div>
 
+    <!-- Tack analysis modal: wind-up overlay of every tack, color = SOG -->
+    <div class="modal" id="tack-analysis-modal" style="display: none;">
+        <div class="modal-backdrop" data-close-modal="tack-analysis-modal"></div>
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>Tack analysis · wind-up overlay</h2>
+                <button class="modal-close" data-close-modal="tack-analysis-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="tack-analysis-modal-body"></div>
+        </div>
+    </div>
+
     <!-- Per-boat detail drawer (slides in from the right) -->
     <aside class="boat-drawer" id="boat-drawer">
         <div class="drawer-header">
@@ -278,6 +291,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=24"></script>
+    <script type="module" src="./assets/js/race-app.js?v=34"></script>
 </body>
 </html>

@@ -248,7 +248,7 @@ async function init() {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             if (drawerDeviceId) closeBoatDrawer();
-            for (const id of ['leg-modal', 'maneuver-modal']) {
+            for (const id of ['leg-modal', 'maneuver-modal', 'tack-analysis-modal']) {
                 const m = document.getElementById(id);
                 if (m && m.style.display !== 'none') m.style.display = 'none';
             }
@@ -277,6 +277,8 @@ async function init() {
     if (legBtn) legBtn.addEventListener('click', openLegModal);
     const manBtn = document.getElementById('btn-maneuvers');
     if (manBtn) manBtn.addEventListener('click', openManeuverModal);
+    const taBtn = document.getElementById('btn-tack-analysis');
+    if (taBtn) taBtn.addEventListener('click', openTackAnalysisModal);
 
     // Mobile UX (only active when viewport ≤ 900 px — see race.css media query)
     setupMobileNav();
@@ -2897,6 +2899,844 @@ function openManeuverModal() {
 
     body.innerHTML = html;
     document.getElementById('maneuver-modal').style.display = 'flex';
+}
+
+// --- Tack analysis (wind-up overlay of every tack, color = SOG) ---
+//
+// For each detected tack we:
+//   1. Take the slice of the boat's GPS track from ~15s before the maneuver
+//      start through ~15s after the maneuver end (or until SOG recovers to
+//      95% of pre-tack speed).
+//   2. Find the apex (lowest SOG inside the maneuver window).
+//   3. Translate so apex is at (0,0) and rotate so true wind is up.
+//      Mirror port-tacks (twaBefore < 0) to the starboard side so all
+//      tacks render as turning the same direction.
+//   4. Compute "time lost (s)" = Σ max(0, speedBefore - speed) * dt /
+//      speedBefore over the whole window.
+//
+// The lowest time-lost tack across the fleet is the "fleet best" reference;
+// each boat also gets a personal-best.
+//
+// Tacks where windAt() returns null at the apex are dropped (we can't
+// align them in a wind-up frame).
+
+const TA_PRE_SEC = 15;          // raw window before tStart (trimmed by distance later)
+const TA_POST_SEC = 30;         // raw window after tEnd (trimmed by distance later)
+const TA_DIST_CAP_M = 20;       // hard cap on cumulative distance from apex, both sides
+const TA_WIDE_TURN_DEG = 95;    // turn angle above this gets a "wide" badge
+
+let tackAnalysisState = null;   // { tacks, selectedDevices: Set, highlightId, fleetBestId, perBoatBestId }
+
+function buildTackTrack(tack, layer) {
+    // Returns { id, deviceId, team, color, points: [{x,y,speed,t}],
+    //   timeLostSec, turnAngle, durationSec, speedBefore, speedMin,
+    //   isPort, twd, isExcluded } or null if essential data missing.
+    const data = layer.data;
+    if (!data || data.length < 5) return null;
+    const tMs = data.map(p => new Date(p.t).getTime());
+
+    const wAtApex = windAt((tack.tStart + tack.tEnd) / 2);
+    if (!wAtApex || wAtApex.twd == null) return null;
+    const twd = wAtApex.twd;
+
+    // Locate the apex (min speed inside [tStart, tEnd]).
+    let apexIdx = -1, apexSpd = Infinity;
+    for (let i = 0; i < data.length; i++) {
+        if (tMs[i] < tack.tStart || tMs[i] > tack.tEnd) continue;
+        const s = data[i].speed_kn ?? 0;
+        if (s < apexSpd) { apexSpd = s; apexIdx = i; }
+    }
+    if (apexIdx < 0) return null;
+
+    // Raw time window — generous; trimmed by cumulative distance later.
+    const winStartMs = tack.tStart - TA_PRE_SEC * 1000;
+    const winEndMs = tack.tEnd + TA_POST_SEC * 1000;
+    const speedBefore = tack.speedBefore || 0;
+
+    // Slice + project to a local east-north meters frame around the apex.
+    const apex = data[apexIdx];
+    const lat0 = apex.lat, lon0 = apex.lon;
+    if (lat0 == null || lon0 == null) return null;
+    const R = 6371000;
+    const mPerDegLat = (Math.PI / 180) * R;
+    const mPerDegLon = (Math.PI / 180) * R * Math.cos(lat0 * Math.PI / 180);
+
+    // Wind-up rotation: rotate by +TWD (CCW) so the "wind from" bearing
+    // maps to +y (up on the math frame; we'll flip y for SVG screen later).
+    const twdRad = twd * Math.PI / 180;
+    const cosT = Math.cos(twdRad), sinT = Math.sin(twdRad);
+
+    // Build raw rotated points first; choose mirror by geometry, not by
+    // the detector's twaBefore sign (which depends on the TWD sample that
+    // was current at the maneuver — and that's the very thing we don't
+    // want to trust here).
+    const ptsRaw = [];
+    for (let i = 0; i < data.length; i++) {
+        if (tMs[i] < winStartMs || tMs[i] > winEndMs) continue;
+        const p = data[i];
+        if (p.lat == null || p.lon == null) continue;
+        const dx_m = (p.lon - lon0) * mPerDegLon;   // east
+        const dy_m = (p.lat - lat0) * mPerDegLat;   // north
+        // Rotate by twdRad CCW: (dx, dy) -> (dx cosT - dy sinT, dx sinT + dy cosT)
+        const x_rot = dx_m * cosT - dy_m * sinT;
+        const y_rot = dx_m * sinT + dy_m * cosT;
+        ptsRaw.push({ x: x_rot, y: y_rot, speed: p.speed_kn ?? 0, t: tMs[i] });
+    }
+    if (ptsRaw.length < 4) return null;
+
+    // Geometry-based mirror: if the rotated cluster lives mostly on the
+    // negative-x side, flip x. This guarantees every clean tack lands in
+    // the +x half-plane, robust to noisy TWD at the apex.
+    let xSum = 0;
+    for (const p of ptsRaw) xSum += p.x;
+    const xSign = xSum < 0 ? -1 : 1;
+    const isPort = (tack.twaBefore != null && tack.twaBefore < 0);  // kept for label only
+
+    const ptsAll = ptsRaw.map(p => ({ x: p.x * xSign, y: p.y, speed: p.speed, t: p.t }));
+
+    // Apex inside the rotated+mirrored cluster: closest point to origin
+    // (origin = apex by construction of lat0/lon0).
+    let apexInAll = 0, apexAllDist = Infinity;
+    for (let i = 0; i < ptsAll.length; i++) {
+        const d = ptsAll[i].x * ptsAll[i].x + ptsAll[i].y * ptsAll[i].y;
+        if (d < apexAllDist) { apexAllDist = d; apexInAll = i; }
+    }
+
+    // Distance-cap trim: bound the visible track to ±TA_DIST_CAP_M of
+    // cumulative path length from the apex. This keeps the visualization
+    // and the time-lost integral consistent across boats with different
+    // recovery profiles, instead of letting slow recoverers run a 75 m+ tail.
+    let preStart = 0, cumPre = 0;
+    for (let i = apexInAll; i > 0; i--) {
+        const dx = ptsAll[i].x - ptsAll[i - 1].x;
+        const dy = ptsAll[i].y - ptsAll[i - 1].y;
+        cumPre += Math.sqrt(dx * dx + dy * dy);
+        if (cumPre > TA_DIST_CAP_M) { preStart = i; break; }
+    }
+    let postEnd = ptsAll.length, cumPost = 0;
+    for (let i = apexInAll; i < ptsAll.length - 1; i++) {
+        const dx = ptsAll[i + 1].x - ptsAll[i].x;
+        const dy = ptsAll[i + 1].y - ptsAll[i].y;
+        cumPost += Math.sqrt(dx * dx + dy * dy);
+        if (cumPost > TA_DIST_CAP_M) { postEnd = i + 1; break; }
+    }
+    const pts = ptsAll.slice(preStart, postEnd);
+
+    // Time-lost integral (uses real dt, doesn't assume 1 Hz).
+    let deficitSum = 0;
+    for (let i = 1; i < pts.length; i++) {
+        const dt = (pts[i].t - pts[i - 1].t) / 1000;
+        if (dt <= 0 || dt > 10) continue;  // skip gaps
+        const s = (pts[i].speed + pts[i - 1].speed) / 2;
+        const def = Math.max(0, speedBefore - s);
+        deficitSum += def * dt;
+    }
+    const timeLostSec = speedBefore > 0.5 ? deficitSum / speedBefore : null;
+
+    // Turn angle: averages of ~5s before tStart vs ~5s after tEnd in COG.
+    function avgCogNear(targetMs, half = 5000) {
+        let sx = 0, sy = 0, n = 0;
+        for (let i = 0; i < data.length; i++) {
+            if (Math.abs(tMs[i] - targetMs) > half) continue;
+            const c = data[i].course;
+            if (c == null) continue;
+            const r = c * Math.PI / 180;
+            sx += Math.sin(r); sy += Math.cos(r); n++;
+        }
+        if (n === 0) return null;
+        return (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
+    }
+    const cogBefore = avgCogNear(tack.tStart - 2500);
+    const cogAfter  = avgCogNear(tack.tEnd + 2500);
+    let turnAngle = null;
+    if (cogBefore != null && cogAfter != null) {
+        turnAngle = Math.abs(((cogAfter - cogBefore + 540) % 360) - 180);
+    }
+
+    // Apex index inside the trimmed `pts`.
+    const apexInPts = apexInAll - preStart;
+    const tApexMs = pts[apexInPts].t;
+
+    // Pre/post mean (x, y) in the wind-up + mirrored frame. A real upwind
+    // tack: pre-window y < 0 (boat was downwind of apex), post-window y > 0
+    // (boat sailed upwind after). Both windows should have x > 0 (in the +x
+    // half-plane after our geometry-based mirror). Combined: catches
+    // mark-rounding misclassifications, gybes-as-tacks, and TWD-was-90°-off
+    // cases that the y-only check missed in the previous iteration.
+    let preXsum = 0, preYsum = 0, preN = 0, postXsum = 0, postYsum = 0, postN = 0;
+    let maxAbsX = 0;
+    for (let i = 0; i < apexInPts; i++) { preXsum += pts[i].x; preYsum += pts[i].y; preN++; if (Math.abs(pts[i].x) > maxAbsX) maxAbsX = Math.abs(pts[i].x); }
+    for (let i = apexInPts + 1; i < pts.length; i++) { postXsum += pts[i].x; postYsum += pts[i].y; postN++; if (Math.abs(pts[i].x) > maxAbsX) maxAbsX = Math.abs(pts[i].x); }
+    const preXmean = preN > 0 ? preXsum / preN : null;
+    const preYmean = preN > 0 ? preYsum / preN : null;
+    const postXmean = postN > 0 ? postXsum / postN : null;
+    const postYmean = postN > 0 ? postYsum / postN : null;
+
+    // Symmetry: where the apex sits inside the maneuver window.
+    //   0.5 = perfectly centred turn (clean execution)
+    //   < 0.5 = apex closer to start (boat stalled entering the tack)
+    //   > 0.5 = apex closer to end (boat dragged through exit)
+    const tWindow = tack.tEnd - tack.tStart;
+    const symmetry = tWindow > 0 ? (tApexMs - tack.tStart) / tWindow : null;
+
+    // Max heel during the maneuver window (IMU). At ~1 Hz on the E-series,
+    // a 6–10 s tack window has 6–10 samples — enough for a max. Top crews
+    // flatten the boat through head-to-wind and don't carry heel into the
+    // new tack, so a low max-heel discriminates execution quality.
+    let maxHeel = null;
+    if (layer.imu?.length) {
+        let mh = 0, found = false;
+        for (const s of layer.imu) {
+            const t = s?.t ? new Date(s.t).getTime() : null;
+            if (t == null) continue;
+            if (t < tack.tStart || t > tack.tEnd) continue;
+            const h = Math.abs(s.heel ?? 0);
+            if (Number.isFinite(h)) { if (h > mh) mh = h; found = true; }
+        }
+        if (found) maxHeel = mh;
+    }
+
+    // Turn-rate σ: standard deviation of dCOG/dt across the maneuver
+    // window. Smooth turn = small σ. Jerky steering = larger σ.
+    const turnRates = [];
+    for (let i = 1; i < data.length; i++) {
+        const t1 = tMs[i - 1], t2 = tMs[i];
+        if (t1 < tack.tStart || t2 > tack.tEnd) continue;
+        const dt = (t2 - t1) / 1000;
+        if (dt <= 0 || dt > 5) continue;
+        const a = data[i - 1].course, b = data[i].course;
+        if (a == null || b == null) continue;
+        const dCog = ((b - a + 540) % 360) - 180;
+        turnRates.push(dCog / dt);
+    }
+    let turnRateStd = null;
+    if (turnRates.length >= 3) {
+        const m = turnRates.reduce((s, v) => s + v, 0) / turnRates.length;
+        const v = turnRates.reduce((s, x) => s + (x - m) ** 2, 0) / turnRates.length;
+        turnRateStd = Math.sqrt(v);
+    }
+
+    // TWA exit-vs-entry: |twaAfter| - |twaBefore|. Positive = exited
+    // wider than entered (sailing below close-hauled to build speed).
+    // Negative = exited tighter (pinching). Close to 0 = symmetric crossing.
+    const twaDelta = (tack.twaBefore != null && tack.twaAfter != null)
+        ? (Math.abs(tack.twaAfter) - Math.abs(tack.twaBefore))
+        : null;
+
+    return {
+        deviceId: tack.deviceId,
+        team: tack.team,
+        color: tack.color,
+        points: pts,
+        apexIdx: apexInPts,
+        tApexMs,
+        timeLostSec,
+        turnAngle,
+        symmetry,
+        maxHeel,
+        turnRateStd,
+        twaDelta,
+        durationSec: tack.durationSec,
+        speedBefore,
+        speedMin: apexSpd,
+        isPort,
+        twd,
+        tStart: tack.tStart,
+        preXmean, preYmean, postXmean, postYmean, maxAbsX,
+    };
+}
+
+// Quality filter: drop the obviously-not-a-tack maneuvers that survive
+// the broad detector (e.g. small course corrections, mark roundings,
+// gybes that got misclassified because TWD was off at the time).
+const TA_MIN_TURN = 70;     // a real tack should be ≥70° (typical 85-110°)
+const TA_MAX_TURN = 150;    // >150° = circling / artifact
+function isCleanTack(t) {
+    if (t.turnAngle == null) return false;
+    if (t.turnAngle < TA_MIN_TURN || t.turnAngle > TA_MAX_TURN) return false;
+    // Geometric sanity in the wind-up + mirrored frame:
+    //  • both pre and post should have y opposite signs (V across wind axis)
+    //  • both should sit on the +x side (V opens to the right)
+    //  • track must extend at least a few meters in x (not a vertical line)
+    if (t.preXmean == null || t.postXmean == null) return false;
+    if (t.preYmean == null || t.postYmean == null) return false;
+    if (t.preYmean >= 0) return false;
+    if (t.postYmean <= 0) return false;
+    if (t.preXmean <= 0) return false;
+    if (t.postXmean <= 0) return false;
+    if (t.maxAbsX < 5) return false;     // <5m horizontal extent — not a real tack
+    return true;
+}
+
+function speedToColor(speed, maxSpeed) {
+    // slow = red, fast = blue. Hue 0 → 240 across [0, maxSpeed].
+    const f = Math.max(0, Math.min(1, speed / Math.max(0.1, maxSpeed)));
+    return `hsl(${(f * 240).toFixed(0)}, 80%, 55%)`;
+}
+
+function fmtTimeOfDay(ms) {
+    const d = new Date(ms);
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+function openTackAnalysisModal() {
+    const body = document.getElementById('tack-analysis-modal-body');
+    const modal = document.getElementById('tack-analysis-modal');
+    if (!body || !modal) return;
+
+    if (!raceData?.boats) {
+        body.innerHTML = '<div class="modal-empty">No race data loaded.</div>';
+        modal.style.display = 'flex';
+        return;
+    }
+
+    // Detect tacks across every boat, build aligned tracks.
+    const raw = [];
+    let droppedNoWind = 0;
+    for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
+        const layer = boatLayers[deviceId];
+        if (!layer?.data?.length) continue;
+        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+        const color = layer.color || '#888';
+        const tacks = detectManeuversForLayer(layer).filter(m => m.type === 'tack');
+        for (const t of tacks) {
+            const built1 = buildTackTrack({ ...t, deviceId, team, color }, layer);
+            if (!built1) { droppedNoWind++; continue; }
+            raw.push(built1);
+        }
+    }
+
+    // Quality filter (turn angle in plausible range + geometric sanity).
+    const built = raw.filter(isCleanTack);
+    const droppedQuality = raw.length - built.length;
+
+    if (!built.length) {
+        body.innerHTML = `<div class="modal-empty">
+            No clean tacks found in this race.
+            ${droppedNoWind ? `<div style="margin-top:0.5rem;font-size:0.8rem;">${droppedNoWind} excluded · no wind data.</div>` : ''}
+            ${droppedQuality ? `<div style="margin-top:0.25rem;font-size:0.8rem;">${droppedQuality} excluded · turn angle or geometry out of range.</div>` : ''}
+        </div>`;
+        modal.style.display = 'flex';
+        return;
+    }
+
+    // Assign IDs after filtering so they're contiguous.
+    built.forEach((t, i) => t.id = `t${i}`);
+
+    // Best (lowest time-lost) overall and per-boat.
+    const valid = built.filter(t => t.timeLostSec != null);
+    const fleetBest = valid.length ? valid.reduce((a, b) => (a.timeLostSec <= b.timeLostSec ? a : b)) : null;
+    const perBoatBest = {};
+    for (const t of valid) {
+        if (!perBoatBest[t.deviceId] || t.timeLostSec < perBoatBest[t.deviceId].timeLostSec) {
+            perBoatBest[t.deviceId] = t;
+        }
+    }
+
+    // Default selection: every boat that has ≥1 tack.
+    const allDevices = Array.from(new Set(built.map(t => t.deviceId)));
+    tackAnalysisState = {
+        tacksThisRace: built,
+        tacksAcrossDay: null,         // populated lazily when user enters "Today" mode
+        crossDayState: 'idle',         // idle | loading | ready | error
+        selectedDevices: new Set(allDevices),
+        highlightId: null,
+        fleetBestId: fleetBest?.id || null,
+        perBoatBestIds: new Set(Object.values(perBoatBest).map(t => t.id)),
+        droppedNoWind,
+        droppedQuality,
+        viewMode: 'teamAvgDay',        // default: pool every team's tacks across the day
+    };
+
+    body.innerHTML = renderTackAnalysisShell(allDevices);
+    wireTackAnalysisInteractions(body);
+    // Kick off the cross-day pool as the default landing view.
+    ensureCrossDayTacks(body).then(() => redrawTackAnalysis());
+    modal.style.display = 'flex';
+}
+
+function renderTackAnalysisShell(allDevices) {
+    const st = tackAnalysisState;
+    const boatsBy = {};
+    for (const t of st.tacksThisRace) {
+        if (!boatsBy[t.deviceId]) boatsBy[t.deviceId] = { team: t.team, color: t.color, count: 0 };
+        boatsBy[t.deviceId].count++;
+    }
+    const boatChips = allDevices.map(dev => {
+        const b = boatsBy[dev];
+        return `<label data-ta-toggle-boat="${dev}">
+            <input type="checkbox" checked>
+            <span class="ta-swatch" style="background:${b.color}"></span>${b.team} <span style="opacity:0.6">(${b.count})</span>
+        </label>`;
+    }).join('');
+
+    const nValid = st.tacksThisRace.length;
+    const drops = [];
+    if (st.droppedNoWind) drops.push(`${st.droppedNoWind} no wind`);
+    if (st.droppedQuality) drops.push(`${st.droppedQuality} bad geometry/angle`);
+    const meta = `${nValid} clean tack${nValid === 1 ? '' : 's'}` +
+        (drops.length ? ` · <span title="Excluded from the overlay">${drops.join(' · ')} excluded</span>` : '');
+
+    return `
+        <div class="ta-toolbar">
+            <div class="ta-segctl" role="tablist" aria-label="View mode">
+                <button data-ta-mode="tacks"      class="ta-seg"        type="button">Per tack</button>
+                <button data-ta-mode="teamAvg"    class="ta-seg"        type="button">Team avg</button>
+                <button data-ta-mode="teamAvgDay" class="ta-seg active" type="button">Team avg · today</button>
+            </div>
+            ${boatChips}
+            <label data-ta-toggle="fleet-best"><input type="checkbox" checked> <span class="ta-badge-best">Fleet best</span></label>
+            <span class="ta-meta" id="ta-meta">${meta}</span>
+        </div>
+        <div class="ta-stack">
+            <div class="ta-plot-wrap">
+                <div class="ta-legend">
+                    <span>SOG (kn):</span>
+                    <span>0</span>
+                    <span class="ta-legend-bar"></span>
+                    <span id="ta-legend-max">—</span>
+                </div>
+                <svg class="ta-plot" id="ta-plot" viewBox="0 0 400 700" preserveAspectRatio="xMidYMid meet" aria-label="Tack overlay, wind up"></svg>
+            </div>
+            <div class="ta-right">
+                <div class="ta-list-wrap">
+                    <table class="ta-list" id="ta-list">
+                        <thead id="ta-list-head"></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <details class="ta-metric-legend" open>
+                    <summary>Reading the metrics &mdash; what to look for</summary>
+                    <div class="ta-metric-grid">
+                        <div><span class="ta-mname">Turn° <span class="ta-arrow">⊙</span></span> Heading change from before to after the tack. <em>~85–110° is typical.</em> Wider = boat wasn't close-hauled before/after.</div>
+                        <div><span class="ta-mname">Lost (s) <span class="ta-arrow">↓</span></span> Time-equivalent of speed loss across the tack window. <em>Lower is better.</em></div>
+                        <div><span class="ta-mname">Δ kn <span class="ta-arrow">↓</span></span> Biggest instantaneous speed drop (speedBefore − speedMin). <em>Lower is better.</em></div>
+                        <div><span class="ta-mname">Heel° <span class="ta-arrow">↓</span></span> Peak heel during the tack (IMU). <em>Lower is better</em> — top crews flatten the boat through head-to-wind.</div>
+                        <div><span class="ta-mname">Turn σ <span class="ta-arrow">↓</span></span> Smoothness of dCOG/dt across the turn. <em>Lower is better</em> (constant turn rate); high values = jerky steering.</div>
+                        <div><span class="ta-mname">ΔTWA <span class="ta-arrow">⊙</span></span> Exit close-hauled angle minus entry. <em>Near 0 is symmetric.</em> Positive = footing for speed; negative = pinching.</div>
+                        <div><span class="ta-mname">Lost (s) ± σ <span class="ta-arrow">↓ ↓</span></span> <em>Team-avg only.</em> Mean ± standard deviation. Two teams with the same mean and different σ are not equal — small σ = consistent crew.</div>
+                    </div>
+                </details>
+            </div>
+        </div>
+    `;
+}
+
+function wireTackAnalysisInteractions(body) {
+    body.addEventListener('change', (e) => {
+        const t = e.target;
+        if (t.matches('[data-ta-toggle-boat] input')) {
+            const dev = t.closest('[data-ta-toggle-boat]').getAttribute('data-ta-toggle-boat');
+            if (t.checked) tackAnalysisState.selectedDevices.add(dev);
+            else            tackAnalysisState.selectedDevices.delete(dev);
+            redrawTackAnalysis();
+        } else if (t.matches('[data-ta-toggle="fleet-best"] input')) {
+            redrawTackAnalysis();
+        }
+    });
+    body.addEventListener('click', async (e) => {
+        const seg = e.target.closest('[data-ta-mode]');
+        if (seg) {
+            const mode = seg.getAttribute('data-ta-mode');
+            if (mode === tackAnalysisState.viewMode) return;
+            tackAnalysisState.viewMode = mode;
+            tackAnalysisState.highlightId = null;
+            for (const b of body.querySelectorAll('[data-ta-mode]')) {
+                b.classList.toggle('active', b.getAttribute('data-ta-mode') === mode);
+            }
+            if (mode === 'teamAvgDay' && tackAnalysisState.crossDayState !== 'ready') {
+                await ensureCrossDayTacks(body);
+            }
+            redrawTackAnalysis();
+            return;
+        }
+        const row = e.target.closest('[data-ta-id]');
+        if (!row) return;
+        const id = row.getAttribute('data-ta-id');
+        tackAnalysisState.highlightId = (tackAnalysisState.highlightId === id) ? null : id;
+        applyTackEmphasis();
+    });
+}
+
+// Lazy-fetch GPS for the other races of the same day, run maneuver
+// detection against the wind data already loaded for the current race
+// window, and accumulate clean tacks into tacksAcrossDay.
+async function ensureCrossDayTacks(body) {
+    const st = tackAnalysisState;
+    const meta = body.querySelector('#ta-meta');
+    if (st.crossDayState === 'loading' || st.crossDayState === 'ready') return;
+    if (!currentRaceDay?.races?.length) {
+        st.tacksAcrossDay = st.tacksThisRace.slice();
+        st.crossDayState = 'ready';
+        return;
+    }
+    st.crossDayState = 'loading';
+    if (meta) meta.innerHTML = '<em>Loading other races…</em>';
+
+    const otherRaces = currentRaceDay.races.filter(r => r.race_id !== currentRace?.race_id);
+    const pool = st.tacksThisRace.slice();           // start with current race
+    let dropNoWind = st.droppedNoWind;
+    let dropQuality = st.droppedQuality;
+
+    await Promise.all(otherRaces.map(async (r) => {
+        try {
+            const resp = await fetch(`${API_BASE}/api/races/${r.race_id}/data?sensors=gps,imu`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            for (const [deviceId, boatData] of Object.entries(data.boats || {})) {
+                const gps = boatData?.sensors?.gps;
+                if (!gps?.length) continue;
+                const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+                // Reuse the current-race color if we have it, else fall back to grey.
+                const color = boatLayers[deviceId]?.color || '#888';
+                const fakeLayer = { data: gps, imu: boatData?.sensors?.imu || [] };
+                const tacks = detectManeuversForLayer(fakeLayer).filter(m => m.type === 'tack');
+                for (const t of tacks) {
+                    const built = buildTackTrack({ ...t, deviceId, team, color }, fakeLayer);
+                    if (!built) { dropNoWind++; continue; }
+                    if (!isCleanTack(built)) { dropQuality++; continue; }
+                    pool.push(built);
+                }
+            }
+        } catch (e) {
+            console.warn('[TackAnalysis] cross-day fetch failed for', r.race_id, e);
+        }
+    }));
+
+    pool.forEach((t, i) => t.id = `td${i}`);  // unique IDs in the day pool
+    st.tacksAcrossDay = pool;
+    st.droppedNoWindDay = dropNoWind;
+    st.droppedQualityDay = dropQuality;
+    st.crossDayState = 'ready';
+}
+
+// Resample tacks onto a uniform time-from-apex grid, then mean (x, y, speed)
+// per team. Returns { deviceId, team, color, points: [{x,y,speed}], count, meanLost, meanTurn }.
+//
+// Edge handling: with the 20m distance cap, individual tacks span ~±8–13 s
+// from the apex (varies with boat speed). At grid edges only a few tacks
+// contribute, which produces noisy/jumpy averages. We require ≥75% of the
+// team's tacks to contribute at each emitted grid point — points with
+// sparse coverage are silently dropped, so the averaged track ends cleanly
+// where it has real support instead of waving around at 15–20 m out.
+function buildTeamAverages(tacks) {
+    const T_MIN = -12, T_MAX = 12, T_STEP = 0.5;  // seconds from apex
+    const MIN_COVERAGE = 0.75;                     // fraction of team's tacks
+    const grid = [];
+    for (let t = T_MIN; t <= T_MAX + 1e-9; t += T_STEP) grid.push(t);
+
+    // Precompute time-from-apex per point for each tack.
+    const byTeam = new Map();
+    for (const t of tacks) {
+        if (!byTeam.has(t.deviceId)) byTeam.set(t.deviceId, { team: t.team, color: t.color, items: [] });
+        const series = t.points.map(p => ({
+            dt: (p.t - t.tApexMs) / 1000,
+            x: p.x, y: p.y, speed: p.speed,
+        })).sort((a, b) => a.dt - b.dt);
+        byTeam.get(t.deviceId).items.push({ tack: t, series });
+    }
+
+    function lerpAt(series, target) {
+        if (target < series[0].dt || target > series[series.length - 1].dt) return null;
+        // Binary search.
+        let lo = 0, hi = series.length - 1;
+        while (lo + 1 < hi) {
+            const mid = (lo + hi) >> 1;
+            if (series[mid].dt <= target) lo = mid; else hi = mid;
+        }
+        const a = series[lo], b = series[hi];
+        const span = b.dt - a.dt;
+        if (span <= 0) return a;
+        const f = (target - a.dt) / span;
+        return {
+            x: a.x + (b.x - a.x) * f,
+            y: a.y + (b.y - a.y) * f,
+            speed: a.speed + (b.speed - a.speed) * f,
+        };
+    }
+
+    const out = [];
+    for (const [deviceId, info] of byTeam.entries()) {
+        const minContrib = Math.max(2, Math.ceil(info.items.length * MIN_COVERAGE));
+        const avgPoints = [];
+        for (const dt of grid) {
+            let sx = 0, sy = 0, sv = 0, n = 0;
+            for (const it of info.items) {
+                const v = lerpAt(it.series, dt);
+                if (!v) continue;
+                sx += v.x; sy += v.y; sv += v.speed; n++;
+            }
+            if (n < minContrib) continue;     // sparse coverage at this grid point — skip
+            avgPoints.push({ x: sx / n, y: sy / n, speed: sv / n, t: dt * 1000 });
+        }
+        if (avgPoints.length < 4) continue;
+        const losses = info.items.map(i => i.tack.timeLostSec).filter(v => v != null);
+        const turns = info.items.map(i => i.tack.turnAngle).filter(v => v != null);
+        const drops = info.items
+            .map(i => (i.tack.speedBefore != null && i.tack.speedMin != null) ? (i.tack.speedBefore - i.tack.speedMin) : null)
+            .filter(v => v != null);
+        const syms = info.items.map(i => i.tack.symmetry).filter(v => v != null);
+        const heels = info.items.map(i => i.tack.maxHeel).filter(v => v != null);
+        const trStds = info.items.map(i => i.tack.turnRateStd).filter(v => v != null);
+        const twaDs = info.items.map(i => i.tack.twaDelta).filter(v => v != null);
+        const mean = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+        const meanLost = mean(losses);
+        // Population std-dev of time-lost. Two teams with the same mean but
+        // different std are NOT the same team — std discriminates consistency.
+        let stdLost = null;
+        if (losses.length > 1 && meanLost != null) {
+            const variance = losses.reduce((s, v) => s + (v - meanLost) ** 2, 0) / losses.length;
+            stdLost = Math.sqrt(variance);
+        }
+        const speedBefore = info.items[0].tack.speedBefore;  // representative
+        out.push({
+            id: `team-${deviceId}`,
+            deviceId, team: info.team, color: info.color,
+            points: avgPoints,
+            count: info.items.length,
+            meanLost, stdLost,
+            meanTurn: mean(turns),
+            meanSpeedDrop: mean(drops),
+            meanSymmetry: mean(syms),
+            meanHeel: mean(heels),
+            meanTurnRateStd: mean(trStds),
+            meanTwaDelta: mean(twaDs),
+            speedBefore,
+        });
+    }
+    out.sort((a, b) => (a.meanLost ?? 99) - (b.meanLost ?? 99));
+    return out;
+}
+
+function redrawTackAnalysis() {
+    const st = tackAnalysisState;
+    if (!st) return;
+
+    let pool;
+    if (st.viewMode === 'teamAvgDay' && st.tacksAcrossDay) pool = st.tacksAcrossDay;
+    else pool = st.tacksThisRace;
+
+    const filteredTacks = pool.filter(t => st.selectedDevices.has(t.deviceId));
+
+    let tracks;
+    let listMode;
+    if (st.viewMode === 'tacks') {
+        tracks = filteredTacks.map(t => ({ ...t, thick: false }));
+        listMode = 'tacks';
+    } else {
+        // Team avg or team avg + day.
+        tracks = buildTeamAverages(filteredTacks).map(t => ({ ...t, thick: true }));
+        listMode = 'teams';
+    }
+
+    drawTackPlot(tracks);
+    drawTackList(filteredTacks, tracks, listMode);
+    applyTackEmphasis();
+
+    // Legend max: from speedBefore of underlying per-tack data (consistent across modes).
+    const maxSpeed = filteredTacks.reduce((m, t) => Math.max(m, t.speedBefore || 0), 0);
+    const lblMax = document.getElementById('ta-legend-max');
+    if (lblMax) lblMax.textContent = maxSpeed > 0 ? maxSpeed.toFixed(1) : '—';
+
+    // Meta count.
+    const meta = document.getElementById('ta-meta');
+    if (meta) {
+        const ndrops = (st.viewMode === 'teamAvgDay' && st.crossDayState === 'ready')
+            ? `${(st.droppedNoWindDay || 0)} no wind · ${(st.droppedQualityDay || 0)} bad geom`
+            : `${st.droppedNoWind} no wind · ${st.droppedQuality} bad geom`;
+        const nLabel = st.viewMode === 'tacks'
+            ? `${filteredTacks.length} clean tack${filteredTacks.length === 1 ? '' : 's'}`
+            : `${tracks.length} team${tracks.length === 1 ? '' : 's'} · ${filteredTacks.length} tacks pooled`;
+        const dayTag = st.viewMode === 'teamAvgDay' ? ' · day pool' : '';
+        meta.innerHTML = `${nLabel}${dayTag} <span title="Excluded">· ${ndrops} excluded</span>`;
+    }
+}
+
+function drawTackPlot(visible) {
+    const svg = document.getElementById('ta-plot');
+    if (!svg) return;
+    const W = 400, H = 700;
+    const margin = 40;
+
+    // Auto-fit to the bounding box of all visible points (always include the
+    // apex at (0,0), and 10% padding so nothing kisses the edge). After the
+    // geometry-based mirror, every clean tack lives in the +x half-plane,
+    // so the bounding box naturally hugs the data and the apex sits on the
+    // left side of the cluster.
+    let minX = 0, maxX = 0, minY = 0, maxY = 0;
+    for (const t of visible) {
+        for (const p of t.points) {
+            if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+        }
+    }
+    // Reserve a strip at the top of the canvas for the wind arrow + label
+    // so it lives above the data area rather than floating inside it.
+    const topReserve = 36;
+    const yExt = Math.max(20, maxY - minY);
+    const padY = yExt * 0.04;
+    // Asymmetric X padding: small fixed gap on both sides — keep apex
+    // off the left margin and the rightmost extent off the right margin.
+    const padXleft = 1.5;
+    const padXright = 1;
+    minX -= padXleft; maxX += padXright; minY -= padY; maxY += padY;
+    const rangeX = maxX - minX, rangeY = maxY - minY;
+    const scale = Math.min((W - 2 * margin) / rangeX, (H - margin - topReserve) / rangeY);
+    // Top-left align the bounding box: top of data sits at topReserve so
+    // the wind arrow has its own strip above. Apex hugs the left margin.
+    const offsetX = margin - minX * scale;
+    const offsetY = topReserve + maxY * scale;
+    const sx = (x) => (offsetX + x * scale).toFixed(1);
+    const sy = (y) => (offsetY - y * scale).toFixed(1);
+    const apexSx = +sx(0), apexSy = +sy(0);
+    const maxSpeed = visible.reduce((m, t) => Math.max(m, t.speedBefore || 0), 1);
+    const maxR = Math.max(maxX, maxY, -minX, -minY);
+
+    const parts = [];
+    // Background axes (cross at the apex).
+    parts.push(`<line class="ta-axis" x1="${margin}" y1="${apexSy}" x2="${W - margin}" y2="${apexSy}"/>`);
+    parts.push(`<line class="ta-axis" x1="${apexSx}" y1="${margin}" x2="${apexSx}" y2="${H - margin}"/>`);
+    // Range rings every N m.
+    const ringStep = maxR < 60 ? 10 : (maxR < 150 ? 25 : 50);
+    for (let r = ringStep; r <= maxR; r += ringStep) {
+        parts.push(`<circle cx="${apexSx}" cy="${apexSy}" r="${(r * scale).toFixed(1)}" fill="none" class="ta-grid-line"/>`);
+        parts.push(`<text class="ta-axis-label" x="${apexSx + 4}" y="${apexSy - r * scale - 2}">${r}m</text>`);
+    }
+    // Ideal close-hauled V at ±42° from the wind axis (J/80 upwind angle):
+    // dashed reference lines from the apex so users can see how their tack
+    // shape compares to a perfect 84° turn.
+    const idealAngleDeg = 42;
+    const refLen = Math.max(maxX, Math.max(-minY, maxY)) * 0.95;
+    const dx = Math.sin(idealAngleDeg * Math.PI / 180) * refLen;
+    const dyUp = Math.cos(idealAngleDeg * Math.PI / 180) * refLen;
+    parts.push(`<line class="ta-ideal" x1="${apexSx}" y1="${apexSy}" x2="${sx(dx)}" y2="${sy(dyUp)}"/>`);
+    parts.push(`<line class="ta-ideal" x1="${apexSx}" y1="${apexSy}" x2="${sx(dx)}" y2="${sy(-dyUp)}"/>`);
+    // Wind arrow pinned to the top reserved strip — above all data.
+    const arrowYTop = 4;
+    const arrowYBot = topReserve - 4;
+    parts.push(`<g class="ta-wind">
+        <line class="ta-wind-arrow" x1="${apexSx}" y1="${arrowYTop}" x2="${apexSx}" y2="${arrowYBot}"/>
+        <polyline class="ta-wind-arrow" points="${apexSx - 6},${arrowYBot - 8} ${apexSx},${arrowYBot} ${apexSx + 6},${arrowYBot - 8}"/>
+        <text class="ta-wind-label" x="${apexSx + 10}" y="${arrowYBot - 6}">wind</text>
+    </g>`);
+    // Direction labels.
+    parts.push(`<text class="ta-axis-label" x="${W - margin - 30}" y="${apexSy + 14}">exit →</text>`);
+    parts.push(`<text class="ta-axis-label" x="${apexSx + 6}" y="${H - margin + 4}">downwind</text>`);
+    parts.push(`<text class="ta-axis-label" x="${sx(dx) - 60}" y="${sy(-dyUp) + 12}" style="opacity:0.5">ideal 42°</text>`);
+    // Apex marker.
+    parts.push(`<circle class="ta-apex-dot" cx="${apexSx}" cy="${apexSy}" r="4"/>`);
+
+    // Each track: split into N short polylines so each segment can have its own color.
+    for (const t of visible) {
+        const pts = t.points;
+        const widthAttr = t.thick ? ' stroke-width="3.5"' : '';
+        // Build per-segment polylines (2-point lines) with color from speed.
+        for (let i = 1; i < pts.length; i++) {
+            const a = pts[i - 1], b = pts[i];
+            const color = speedToColor((a.speed + b.speed) / 2, maxSpeed);
+            parts.push(`<polyline data-ta-id="${t.id}" class="normal" stroke="${color}"${widthAttr} points="${sx(a.x)},${sy(a.y)} ${sx(b.x)},${sy(b.y)}"/>`);
+        }
+    }
+
+    svg.innerHTML = parts.join('');
+}
+
+function drawTackList(filteredTacks, tracks, listMode) {
+    const head = document.getElementById('ta-list-head');
+    const tbody = document.querySelector('#ta-list tbody');
+    if (!head || !tbody) return;
+    const st = tackAnalysisState;
+
+    if (listMode === 'teams') {
+        head.innerHTML = `<tr>
+            <th>Team</th>
+            <th class="num">N</th>
+            <th class="num">Turn°</th>
+            <th class="num metric" title="Mean ± standard deviation of per-tack time-lost. Same mean with smaller σ = more consistent crew.">Lost&nbsp;(s)</th>
+            <th class="num" title="Mean instantaneous speed drop (speedBefore − speedMin) per tack.">Δ&nbsp;kn</th>
+            <th class="num" title="Mean max |heel| during the tack window (degrees, IMU). Lower = boat flattened through head-to-wind better.">Heel°</th>
+            <th class="num" title="Mean σ of dCOG/dt during the maneuver. Lower = smoother turn-rate profile.">Turn&nbsp;σ</th>
+            <th class="num" title="Mean of |TWA_after| − |TWA_before|. Positive = exits wider than entry (footing for speed). Near 0 = symmetric crossing.">ΔTWA</th>
+        </tr>`;
+        const rows = tracks.map(t => {
+            const lost = (t.meanLost != null)
+                ? (t.stdLost != null ? `${t.meanLost.toFixed(1)} ± ${t.stdLost.toFixed(1)}` : t.meanLost.toFixed(1))
+                : '—';
+            return `<tr data-ta-id="${t.id}">
+                <td><span class="ta-row-color" style="background:${t.color}"></span>${t.team}</td>
+                <td class="num">${t.count}</td>
+                <td class="num">${t.meanTurn != null ? t.meanTurn.toFixed(0) + '°' : '—'}</td>
+                <td class="num metric">${lost}</td>
+                <td class="num">${t.meanSpeedDrop != null ? t.meanSpeedDrop.toFixed(1) : '—'}</td>
+                <td class="num">${t.meanHeel != null ? t.meanHeel.toFixed(1) + '°' : '—'}</td>
+                <td class="num">${t.meanTurnRateStd != null ? t.meanTurnRateStd.toFixed(1) : '—'}</td>
+                <td class="num">${t.meanTwaDelta != null ? (t.meanTwaDelta >= 0 ? '+' : '') + t.meanTwaDelta.toFixed(0) + '°' : '—'}</td>
+            </tr>`;
+        }).join('');
+        tbody.innerHTML = rows || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1rem">No teams in current selection.</td></tr>';
+        return;
+    }
+
+    // Per-tack mode (default).
+    head.innerHTML = `<tr>
+        <th>Tack</th>
+        <th class="num">Turn°</th>
+        <th class="num metric" title="Lower = better. Σ(speed deficit · dt) / speedBefore.">Lost&nbsp;(s)</th>
+        <th class="num" title="speedBefore − speedMin · instantaneous worst speed drop.">Δ&nbsp;kn</th>
+        <th class="num" title="Max |heel| during the tack window (degrees, IMU). Lower = boat flattened through head-to-wind better.">Heel°</th>
+        <th class="num" title="σ of dCOG/dt during the maneuver. Lower = smoother turn rate. Higher = jerky steering.">Turn&nbsp;σ</th>
+        <th class="num" title="|TWA_after| − |TWA_before|. Positive = exited wider than entered (footing for speed). Near 0 = symmetric crossing.">ΔTWA</th>
+    </tr>`;
+    const sorted = filteredTacks.slice().sort((a, b) => {
+        if (a.timeLostSec == null) return 1;
+        if (b.timeLostSec == null) return -1;
+        return a.timeLostSec - b.timeLostSec;
+    });
+    const rows = sorted.map(t => {
+        const isFleetBest = (t.id === st.fleetBestId);
+        const isPersonalBest = st.perBoatBestIds.has(t.id);
+        const wide = t.turnAngle != null && t.turnAngle > TA_WIDE_TURN_DEG;
+        const badges = [
+            isFleetBest ? '<span class="ta-badge-best">Fleet</span>' : '',
+            (!isFleetBest && isPersonalBest) ? '<span class="ta-badge-best" style="background:rgba(34,211,238,0.15);color:#22d3ee">Boat</span>' : '',
+            wide ? '<span class="ta-badge-wide">Wide</span>' : '',
+        ].join('');
+        const drop = (t.speedBefore != null && t.speedMin != null) ? (t.speedBefore - t.speedMin) : null;
+        return `<tr data-ta-id="${t.id}" class="${isFleetBest ? 'best' : ''}">
+            <td><span class="ta-row-color" style="background:${t.color}"></span>${t.team}<br><span style="font-size:0.7rem;color:var(--text-secondary)">${fmtTimeOfDay(t.tStart)}${badges}</span></td>
+            <td class="num">${t.turnAngle != null ? t.turnAngle.toFixed(0) + '°' : '—'}</td>
+            <td class="num metric">${t.timeLostSec != null ? t.timeLostSec.toFixed(1) : '—'}</td>
+            <td class="num">${drop != null ? drop.toFixed(1) : '—'}</td>
+            <td class="num">${t.maxHeel != null ? t.maxHeel.toFixed(1) + '°' : '—'}</td>
+            <td class="num">${t.turnRateStd != null ? t.turnRateStd.toFixed(1) : '—'}</td>
+            <td class="num">${t.twaDelta != null ? (t.twaDelta >= 0 ? '+' : '') + t.twaDelta.toFixed(0) + '°' : '—'}</td>
+        </tr>`;
+    }).join('');
+    tbody.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1rem">No tacks match the current selection.</td></tr>';
+}
+
+function applyTackEmphasis() {
+    const st = tackAnalysisState;
+    if (!st) return;
+    const fleetBestToggle = document.querySelector('[data-ta-toggle="fleet-best"] input');
+    const showFleetBest = fleetBestToggle ? fleetBestToggle.checked : true;
+    const highlight = st.highlightId;
+
+    const polys = document.querySelectorAll('#ta-plot polyline[data-ta-id]');
+    for (const el of polys) {
+        const id = el.getAttribute('data-ta-id');
+        let cls = 'normal';
+        if (highlight) {
+            cls = (id === highlight) ? 'emphasis' : 'faded';
+        } else if (showFleetBest && st.fleetBestId) {
+            cls = (id === st.fleetBestId) ? 'emphasis' : 'normal';
+        }
+        el.setAttribute('class', cls);
+    }
+    const rows = document.querySelectorAll('#ta-list tbody tr[data-ta-id]');
+    for (const tr of rows) {
+        tr.classList.toggle('selected', tr.getAttribute('data-ta-id') === highlight);
+    }
 }
 
 // Move the dashed play cursor on each chart without redrawing the data lines.
