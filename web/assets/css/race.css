@@ -1073,9 +1073,14 @@ body.course-editing .boat-legend {
     cursor: pointer;
     transition: opacity 0.15s, stroke-width 0.15s;
 }
-.ta-plot polyline.faded   { opacity: 0.18; stroke-width: 1.4; }
-.ta-plot polyline.normal  { opacity: 0.55; stroke-width: 1.8; }
-.ta-plot polyline.emphasis { opacity: 1;    stroke-width: 3; }
+/* .faded + .emphasis are class-toggled highlight states — they should
+   override per-segment opacity/width set inline. !important needed
+   because the inline `opacity` and `stroke-width` attributes from
+   drawTackPlot() carry SVG-presentation-attribute weight. .normal
+   intentionally has NO opacity / stroke-width so the per-segment
+   speed-encoded values win. */
+.ta-plot polyline.faded    { opacity: 0.18 !important; stroke-width: 1.4 !important; }
+.ta-plot polyline.emphasis { opacity: 1    !important; stroke-width: 3   !important; }
 .ta-plot .ta-axis  { stroke: rgba(255,255,255,0.10); stroke-width: 1; }
 .ta-plot .ta-grid-line { stroke: rgba(255,255,255,0.05); stroke-width: 1; }
 .ta-plot .ta-axis-label { fill: var(--text-secondary); font-size: 14px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
