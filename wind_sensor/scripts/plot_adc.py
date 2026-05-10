@@ -25,9 +25,12 @@ BAUD_RATE = 115200
 ADC_RESOLUTION = 4095  # 12-bit ADC
 VREF = 3.3  # Reference voltage
 
-# Sample rate calibrated from known 5cm distance:
-# At 5cm, ToF should be 146µs. Adjusted to match.
-ESTIMATED_SAMPLE_RATE_HZ = 290000  # ~290kHz calibrated
+# Measured 2026-05-09 via PA1 GPIO-toggle probe in firmware:
+# scope showed 667.97 kHz on the toggle → sample rate = 2 × 667.97 kHz.
+# Matches the theoretical ceiling (80 MHz PCLK / DIV4 / 15 cycles = 1.333 MHz)
+# almost exactly — the polling loop is ADC-bound, not CPU-bound.
+# Earlier 290 kHz / 160 kHz / 50 kHz / 1.2 MHz figures were all wrong.
+ESTIMATED_SAMPLE_RATE_HZ = 1335940  # 1.336 MHz, measured
 
 
 def find_nucleo_port():

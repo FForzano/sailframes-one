@@ -91,10 +91,17 @@ Send a burst of pulses at 40kHz instead of continuous PWM, then listen for the e
 **Implementation notes:**
 - Burst: 8 pulses @ 40kHz (200µs burst duration)
 - Pre-capture delay: 50µs for transducer ringdown
-- ADC sample rate: ~160kHz (measured, slower than theoretical due to register polling overhead)
-- Capture window: 1000 samples ≈ 6.25ms
+- ADC sample rate: **1.336 MHz** (measured 2026-05-09 via PA1 GPIO-toggle
+  probe; matches theoretical 80 MHz / DIV4 / 15-cycle conversion = 1.333 MHz).
+  Earlier 160 kHz / 290 kHz figures in this doc and `plot_adc.py` were both
+  wrong — they confused threshold-crossing time with propagation ToF.
+- Capture window: 1000 samples ≈ 749 µs (≈ 30 cycles of 40 kHz)
+- Maximum measurable distance: ~12 cm one-way (≈ 350 µs ToF leaves headroom
+  for ringup + echo packet duration in the 749 µs buffer)
 - Receiver bias: 10kΩ/10kΩ voltage divider to 1.65V (centers signal at ADC mid-scale)
 - Python plotting: `scripts/plot_adc.py` with auto echo detection
+- Sample-rate verification probe: PA1 (= Nucleo CN8/A1) toggles once per
+  ADC sample. Scope frequency × 2 = sample rate.
 
 ### Phase 2: Single-Channel Time-of-Flight
 Measure the time between pulse transmission and echo reception on one transducer pair.
@@ -223,7 +230,7 @@ Based on QingStation with Same Sky 10mm transducers:
 - **Siglent SDS1104X-E** is fully scriptable via Python/SCPI over Ethernet (port 5025)
 - **Scope probes:** set to 1X for small transducer signals; match probe attenuation setting in scope channel menu
 - **Receiver needs DC bias** — 10kΩ/10kΩ divider to 1.65V prevents signal drift and centers at ADC mid-scale
-- **Direct register ADC polling is ~160kHz** — much slower than theoretical 1.3MHz due to EOC flag checking overhead; DMA needed for faster rates
+- **Direct register ADC polling hits the 1.336 MHz ceiling** — measured via PA1 GPIO-toggle probe; the EOC poll + DR read + ODR XOR all overlap with the next conversion in continuous mode, so the loop is fully ADC-bound, not CPU-bound. No DMA needed for current rates.
 - **8 pulses give 34% stronger signal than 4** — more burst energy improves SNR at distance
 - **HiLetgo TCT40-16R/T are split TX/RX** — use "T" for transmitter, "R" for receiver; they're optimized differently
 
