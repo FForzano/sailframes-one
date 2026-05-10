@@ -125,6 +125,13 @@ let markerOverlays = {
     vmg:      false,
     polarPct: false,
     rank:     false,
+    // Trail is rendered as N short coloured segments per boat instead
+    // of one solid polyline. Hue stays the boat's team colour; per-
+    // segment lightness/opacity/width encode speed within that
+    // boat's recent track (same encoding as the tack-analysis modal,
+    // slow = bright/opaque/thick, fast = dark/faded/thin). Falls
+    // back to the original solid polyline when off.
+    trailSpeedColor: true,
 };
 
 // Auto-follow: keep the map framed on the current race leader and the
@@ -429,11 +436,16 @@ function initMap() {
 
 function clearBoatLayers() {
     for (const deviceId of Object.keys(boatLayers)) {
-        if (boatLayers[deviceId].track) {
-            map.removeLayer(boatLayers[deviceId].track);
-        }
-        if (boatLayers[deviceId].marker) {
-            map.removeLayer(boatLayers[deviceId].marker);
+        const L = boatLayers[deviceId];
+        if (L.track) map.removeLayer(L.track);
+        if (L.marker) map.removeLayer(L.marker);
+        // Speed-colour segment pool — drop everything before the next
+        // race wires up its own pool, otherwise stale boat-coloured
+        // segments would linger on the map.
+        if (L.segPool) {
+            for (const s of L.segPool) {
+                if (map.hasLayer(s)) map.removeLayer(s);
+            }
         }
     }
     boatLayers = {};
@@ -643,13 +655,14 @@ function addMarkerOverlaysMapControl() {
     } catch {}
 
     const items = [
-        { key: 'trail',    label: 'Trail' },
-        { key: 'speed',    label: 'Speed' },
-        { key: 'heel',     label: 'Heel' },
-        { key: 'twa',      label: 'TWA' },
-        { key: 'vmg',      label: 'VMG' },
-        { key: 'polarPct', label: '%pol' },
-        { key: 'rank',     label: 'Rank' },
+        { key: 'trail',           label: 'Trail' },
+        { key: 'trailSpeedColor', label: '🌈 Speed colour' },
+        { key: 'speed',           label: 'Speed' },
+        { key: 'heel',            label: 'Heel' },
+        { key: 'twa',             label: 'TWA' },
+        { key: 'vmg',             label: 'VMG' },
+        { key: 'polarPct',        label: '%pol' },
+        { key: 'rank',            label: 'Rank' },
     ];
 
     const ctl = L.control({ position: 'topright' });
@@ -793,15 +806,89 @@ function refreshAllTrails() {
     }
 }
 
+// Hide every polyline in the layer's segment pool — used when we
+// flip from speed-colour mode back to plain-trail mode, or when the
+// trail toggle goes off.
+function _hideAllSegments(layer) {
+    if (!layer.segPool) return;
+    for (const p of layer.segPool) {
+        if (map.hasLayer(p)) map.removeLayer(p);
+    }
+}
+
+// Per-segment speed-coloured rendering of a trail window. One small
+// L.polyline per segment, drawn into a shared canvas renderer (much
+// faster than SVG when there are thousands of small features).
+// Polylines are reused across frames — we keep a pool per boat and
+// only grow it on demand. Speed normalization is per-WINDOW (not the
+// whole track) so the visible portion stretches the full slow→fast
+// range; that's the change that makes the brightness variation
+// actually pop on a 1-min trail with low absolute variance.
+function _drawSpeedColoredTrail(layer, startIdx, endIdx) {
+    const need = Math.max(0, endIdx - startIdx);  // segment count
+    const renderer = _getSpeedSegRenderer();
+
+    // Speed envelope of the visible window only.
+    let minSpd = Infinity, maxSpd = -Infinity;
+    for (let i = startIdx; i <= endIdx; i++) {
+        const s = layer.data[i]?.speed_kn;
+        if (s == null || !Number.isFinite(s)) continue;
+        if (s < minSpd) minSpd = s;
+        if (s > maxSpd) maxSpd = s;
+    }
+    const span = maxSpd - minSpd;
+
+    // Grow pool on demand (creating a polyline is the slow part —
+    // we only do it once and then reuse forever).
+    while (layer.segPool.length < need) {
+        layer.segPool.push(L.polyline([], {
+            renderer,
+            weight: 3,
+            color: layer.color,
+            opacity: 1,
+            interactive: false,
+            lineCap: 'round',
+        }));
+    }
+
+    // Update active polylines.
+    for (let i = 0; i < need; i++) {
+        const k = startIdx + i;
+        const a = layer.coords[k], b = layer.coords[k + 1];
+        const segSpeed = (layer.data[k].speed_kn + layer.data[k + 1].speed_kn) / 2;
+        const n = span > 0.05 ? (segSpeed - minSpd) / span : 1;
+        const { stroke, opacity, widthBoost } = boatSpeedAttrs(layer.deviceId, n);
+        const w = (1.5 + parseFloat(widthBoost)).toFixed(2);
+        const seg = layer.segPool[i];
+        seg.setLatLngs([a, b]);
+        seg.setStyle({ color: stroke, opacity: parseFloat(opacity), weight: parseFloat(w) });
+        if (!map.hasLayer(seg)) seg.addTo(map);
+    }
+    // Hide unused polylines (don't remove from pool — keep them
+    // around for the next frame which will likely need them again).
+    for (let i = need; i < layer.segPool.length; i++) {
+        if (map.hasLayer(layer.segPool[i])) map.removeLayer(layer.segPool[i]);
+    }
+}
+
 function applyTrailWindow(layer) {
     if (!layer || !layer.track || !layer.coords || !layer.times) return;
-    // The SHOW > Trail toggle hides the polyline entirely. Empty latlngs
-    // keeps the layer registered (so toggleBoatVisibility still works)
-    // but draws nothing.
-    if (!markerOverlays.trail) {
-        layer.track.setLatLngs([]);
+
+    // Boat hidden via toggleBoatVisibility — don't redraw anything.
+    if (layer.visible === false) {
+        _hideAllSegments(layer);
         return;
     }
+
+    // SHOW > Trail off → wipe both the plain track and any speed
+    // segments. Layers stay registered so toggleBoatVisibility
+    // still works.
+    if (!markerOverlays.trail) {
+        layer.track.setLatLngs([]);
+        _hideAllSegments(layer);
+        return;
+    }
+
     const n = layer.coords.length;
     if (n === 0) return;
     const endIdx = Math.min(n - 1, layer.currentIdx ?? (n - 1));
@@ -814,24 +901,32 @@ function applyTrailWindow(layer) {
         raceStartFloor = new Date(currentRace.start_time).getTime();
     }
 
+    // Resolve the start of the visible window.
+    let startIdx;
     if (!Number.isFinite(trailWindowMs)) {
-        // "All" trail window — full track, but still floored at race
-        // start for GPX boats.
-        if (raceStartFloor === -Infinity) {
-            layer.track.setLatLngs(layer.coords);
-            return;
+        // "All" — full track, still floored at race start for GPX.
+        startIdx = 0;
+        if (raceStartFloor !== -Infinity) {
+            while (startIdx < n && layer.times[startIdx] < raceStartFloor) startIdx++;
         }
-        let s = 0;
-        while (s < n && layer.times[s] < raceStartFloor) s++;
-        layer.track.setLatLngs(layer.coords.slice(s, endIdx + 1));
-        return;
+    } else {
+        const windowFloor = layer.times[endIdx] - trailWindowMs;
+        const cutoff = Math.max(windowFloor, raceStartFloor);
+        startIdx = endIdx;
+        while (startIdx > 0 && layer.times[startIdx - 1] >= cutoff) startIdx--;
     }
 
-    const windowFloor = layer.times[endIdx] - trailWindowMs;
-    const cutoff = Math.max(windowFloor, raceStartFloor);
-    let startIdx = endIdx;
-    while (startIdx > 0 && layer.times[startIdx - 1] >= cutoff) startIdx--;
-    layer.track.setLatLngs(layer.coords.slice(startIdx, endIdx + 1));
+    // Branch on speed-colour mode.
+    if (markerOverlays.trailSpeedColor) {
+        // Hide the plain-trail polyline; render coloured segments instead.
+        if (layer.track.getLatLngs().length) layer.track.setLatLngs([]);
+        _drawSpeedColoredTrail(layer, startIdx, endIdx);
+    } else {
+        // Plain mode: reset the polyline + tear down any segments
+        // left over from the previous render.
+        _hideAllSegments(layer);
+        layer.track.setLatLngs(layer.coords.slice(startIdx, endIdx + 1));
+    }
 }
 
 function renderLaylines() {
@@ -1561,6 +1656,19 @@ function progressMetersAt(point, courseSeq, marksById, legsCompleted, startAncho
     return cum;
 }
 
+// Shared canvas renderer for the per-segment speed-coloured trail
+// segments — much faster than SVG when each boat may have 60–600
+// short coloured polylines updated every playback tick. Lazy-init on
+// first use so the map layer doesn't get created before initMap()
+// has run.
+let _speedSegRenderer = null;
+function _getSpeedSegRenderer() {
+    if (!_speedSegRenderer && map) {
+        _speedSegRenderer = L.canvas({ padding: 0.5 });
+    }
+    return _speedSegRenderer;
+}
+
 function addBoatTrack(deviceId, gpsData, boat, imuData = null) {
     const color = colorFor(deviceId);
 
@@ -1602,6 +1710,7 @@ function addBoatTrack(deviceId, gpsData, boat, imuData = null) {
     }
 
     boatLayers[deviceId] = {
+        deviceId,
         track,
         marker,
         data: gpsData,
@@ -1621,6 +1730,13 @@ function addBoatTrack(deviceId, gpsData, boat, imuData = null) {
         // boats are unaffected — auto-recording only kicks on at >2 kt
         // so they don't carry that tail.
         gpxOnly: !!boat?.gpx_path,
+        // Pool of L.polyline objects, one per visible trail segment
+        // when speed-colour mode is on. We REUSE these across frames
+        // (set lat/lngs + style) instead of creating/destroying —
+        // creation is the slow part. Pool grows on demand and shrinks
+        // by hiding (not removing) extras to keep the next render
+        // fast. Lazy-allocated on first speed-colour render.
+        segPool: [],
     };
 }
 
@@ -1887,9 +2003,18 @@ function toggleBoatVisibility(deviceId) {
     if (layer.visible) {
         layer.track.addTo(map);
         layer.marker.addTo(map);
+        // Repaint will rebuild any speed-colour segments via applyTrailWindow.
     } else {
         map.removeLayer(layer.track);
         map.removeLayer(layer.marker);
+        // Hide the per-segment polylines too — applyTrailWindow's
+        // visible-guard upstream handles this for the toggle path,
+        // but the explicit hide here keeps the off state immediate.
+        if (layer.segPool) {
+            for (const s of layer.segPool) {
+                if (map.hasLayer(s)) map.removeLayer(s);
+            }
+        }
     }
 }
 
