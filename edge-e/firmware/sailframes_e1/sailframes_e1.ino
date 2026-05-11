@@ -100,7 +100,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.05.08"
+#define FW_VERSION    "2026.05.11.01"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -2591,17 +2591,27 @@ void updateDisplayD2() {
     tft.setTextSize(1);
   }
 
-  // SOG - Font 8 x2 = 150px
-  // SOG area: 220-440 (190px), center at 315
-  int sogInt = (int)(gps.speed_kts + 0.5);
-  if (sogInt != (int)(prevSOG + 0.5)) {
+  // SOG - Font 8 x2 = 150px. SOG area: 220-440 (190px), centre at 315.
+  // Below 10 kt show one decimal ("8.9") so a tactical helmsman can
+  // see the kn/10 trend; ≥10 kt show integer only ("12") because
+  // three glyphs ("12.x") at this size run past the screen edges.
+  // The narrow "." glyph keeps "9.9" the same effective width as
+  // a two-digit "12", so the font size stays unchanged either way.
+  static char prevSogBuf[8] = "";
+  char newSogBuf[8];
+  if (gps.speed_kts < 10.0f) {
+    snprintf(newSogBuf, sizeof(newSogBuf), "%.1f", gps.speed_kts);
+  } else {
+    snprintf(newSogBuf, sizeof(newSogBuf), "%d", (int)(gps.speed_kts + 0.5f));
+  }
+  if (strcmp(newSogBuf, prevSogBuf) != 0 || forceRedraw) {
+    strcpy(prevSogBuf, newSogBuf);
     prevSOG = gps.speed_kts;
     tft.fillRect(0, 250, SCREEN_WIDTH, 155, COLOR_BG);
     tft.setTextColor(TFT_BLACK, COLOR_BG);
     tft.setTextDatum(MC_DATUM);
     tft.setTextSize(2);
-    snprintf(buf, sizeof(buf), "%d", sogInt);
-    tft.drawString(buf, SCREEN_WIDTH/2, 320, 8);
+    tft.drawString(newSogBuf, SCREEN_WIDTH/2, 320, 8);
     tft.setTextSize(1);
   }
 
