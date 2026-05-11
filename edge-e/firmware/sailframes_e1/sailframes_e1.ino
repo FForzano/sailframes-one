@@ -451,6 +451,15 @@ volatile uint32_t    g_loopIter = 0;
 // hasn't moved for OVER_LOOP_HANG_MS the diag task forces a restart —
 // catches any future hang in any code path, not just OTA.
 volatile unsigned long g_otaDeadlineMs = 0;
+// One-shot guard: auto-OTA runs at most ONCE per boot. The first
+// successful upload cycle (or any other code path that calls
+// performOTAUpdate without manual=true) flips this to true and every
+// subsequent auto-trigger no-ops. The serial / telnet `update`
+// command bypasses this with manual=true so an operator can always
+// force a re-check without rebooting. Simpler model than the prior
+// "OTA after every clean upload" — predictable, less network churn,
+// no surprise reboots mid-day if a new build is published.
+volatile bool g_otaCheckedThisBoot = false;
 static const unsigned long OTA_MAX_MS         = 180UL * 1000UL;  // hard ceiling per OTA cycle
 static const unsigned long OTA_STALL_MS       =  20UL * 1000UL;  // abort if no bytes received for 20 s
 static const unsigned long LOOP_HANG_MS       =  90UL * 1000UL;  // Core 1 must tick at least every 90 s
@@ -2604,7 +2613,7 @@ void updateDisplayD2() {
   } else {
     snprintf(newSogBuf, sizeof(newSogBuf), "%d", (int)(gps.speed_kts + 0.5f));
   }
-  if (strcmp(newSogBuf, prevSogBuf) != 0 || forceRedraw) {
+  if (strcmp(newSogBuf, prevSogBuf) != 0) {
     strcpy(prevSogBuf, newSogBuf);
     prevSOG = gps.speed_kts;
     tft.fillRect(0, 250, SCREEN_WIDTH, 155, COLOR_BG);
@@ -3730,7 +3739,19 @@ static String otaHexDigest(const uint8_t* digest, size_t len) {
   return out;
 }
 
-bool performOTAUpdate() {
+// `manual` = true bypasses the one-shot per-boot guard. The serial
+// `update` command sets it; auto-triggers from the upload task call
+// with the default false, so they no-op after the first run.
+bool performOTAUpdate(bool manual) {
+  if (!manual && g_otaCheckedThisBoot) {
+    Serial.println("[OTA] Already checked this boot — skipping. Use 'update' over serial to force a re-check.");
+    return true;  // not an error; intended one-shot behaviour
+  }
+  // Mark BEFORE doing the work so a partial / failed run also counts
+  // as "checked this boot". Prevents an upload-task retry loop from
+  // hammering the manifest endpoint after every cycle.
+  g_otaCheckedThisBoot = true;
+
   if (logging) {
     Serial.println("[OTA] Refusing: recording active. Stop recording first.");
     return false;
@@ -4175,7 +4196,10 @@ void processCommand(String cmd, bool fromTelnet) {
 
   } else if (cmd == "update" || cmd == "ota") {
     tprintln("Starting OTA update from manifest...");
-    bool ok = performOTAUpdate();
+    // manual=true bypasses the per-boot one-shot guard — operator
+    // explicitly asked, so a re-check is allowed even if the upload
+    // task already ran one this boot.
+    bool ok = performOTAUpdate(true);
     if (!ok) tprintln("OTA: failed (see serial log)");
 
   } else if (cmd == "reboot") {
@@ -5135,12 +5159,16 @@ void uploadTaskFunc(void* param) {
           pendingUploads = (remaining > 0) ? remaining : 0;
 
           if (remaining <= 0) {
-            // Auto-OTA: WiFi is still up, queue empty, recording stopped.
-            // performOTAUpdate() itself gates on HOME_WIFI_SSID and on the
-            // logging/uploading flags, so it's a no-op on hotspots and a
-            // self-reboot on home WiFi when a new build is published.
-            Serial.println("[UPLOAD] Cycle clean — checking OTA manifest");
-            performOTAUpdate();
+            // Auto-OTA: at most ONCE per boot. The first clean upload
+            // cycle on Home-IOT WiFi triggers an OTA manifest check;
+            // every subsequent clean cycle is a no-op (the function's
+            // g_otaCheckedThisBoot flag flips on first entry). Keeps
+            // the day-of-racing behaviour simple — the OTA either
+            // happened at boot or it doesn't happen, no surprise
+            // mid-day reboots if a new build gets published. Operator
+            // can force a re-check via the serial 'update' command.
+            Serial.println("[UPLOAD] Cycle clean — checking OTA manifest (one-shot per boot)");
+            performOTAUpdate(false);
 
             // All done — request WiFi teardown. We do NOT tear down here on
             // Core 0: ArduinoOTA.handle()/handleTelnet() run on Core 1 in the
