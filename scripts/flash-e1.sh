@@ -165,7 +165,20 @@ flash_one() {
         0x8000  "$PART_BIN" \
         0x10000 "$APP_BIN"
   else
-    echo "    Mode: app only (0x10000)"
+    # Always wipe otadata before an app-only flash. Background:
+    # the firmware uses the min_spiffs partition layout (ota_0 at
+    # 0x10000, ota_1 at 0x1F0000, otadata at 0xe000). When the
+    # auto-OTA pull runs, it writes the new build to the OTHER
+    # slot and updates otadata to point there. A subsequent
+    # serial flash to 0x10000 lands the bytes correctly but the
+    # bootloader still reads otadata, sees "boot ota_1", and
+    # boots the OLD firmware sitting in ota_1. Clearing otadata
+    # forces a fall-back to ota_0 — exactly where we just wrote.
+    # Two consecutive serial flashes have always bit this without
+    # the erase, hence "always do it" instead of guessing.
+    echo "    Mode: app only (0x10000) + otadata erase (0xe000 / 0x2000)"
+    esptool --chip esp32 --port "$port" --baud "$BAUD" \
+      erase-region 0xe000 0x2000
     esptool --chip esp32 --port "$port" --baud "$BAUD" \
       write-flash 0x10000 "$APP_BIN"
   fi
