@@ -155,7 +155,13 @@ Freerouting + manual cleanup.
 - TFT: speed/COG huge, status bar, Vakaros-style white background
 - Battery monitoring (GPIO34 ADC + voltage divider)
 - Wi-Fi auto-upload to S3 over plain HTTP on yacht-club / Home-IOT detection
-- GPS-speed-triggered auto-recording (start >2 kt, stop after sustained <0.5 kt)
+- GPS-speed-triggered auto-start (>1.5 kt sustained ≥10 s). **No auto-stop** —
+  recording continues until the operator powers off via the SPDT slide
+  switch or sends `stoprec` over serial/telnet. Speed-based auto-stop was
+  removed 2026-05-12 because boats routinely sit at low speed (tactics,
+  pre-start, between starts) and the 3-minute sustained-<0.5-kt stop was
+  chopping sessions mid-race. Pending files upload on next boot via the
+  stationary-upload path (which fires while `!logging`)
 - Power-button toggle of recording
 - Configuration via SD `config.txt`
 
