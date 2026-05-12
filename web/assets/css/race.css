@@ -87,6 +87,45 @@
     display: none;
 }
 
+/* Leaderboard hide/show toggles. The "›" button in the panel header
+   collapses the right column; a floating "‹ Leaderboard" pill at the
+   right edge brings it back. */
+.btn-collapse {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    margin-left: 0.5rem;
+}
+.btn-collapse:hover { color: var(--text-primary); border-color: var(--accent); }
+.btn-show-lb {
+    position: fixed;
+    top: 72px;
+    right: 0;
+    z-index: 1500;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    color: var(--text-primary);
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    display: none;
+    font-family: inherit;
+}
+.btn-show-lb:hover { color: var(--accent); border-color: var(--accent); }
+/* body itself carries the .race-dashboard class — descendant selectors
+   that nest .leaderboard-hidden under .race-dashboard never match. Just
+   target the body directly. */
+body.leaderboard-hidden .btn-show-lb { display: block; }
+body.leaderboard-hidden .race-main { grid-template-columns: 1fr !important; }
+body.leaderboard-hidden .race-panel { display: none !important; }
+
 .race-dashboard.map-expanded .header {
     z-index: 1600;
 }
@@ -755,8 +794,8 @@ body.course-editing .boat-legend {
 .wind-dropdown-option,
 .wind-dropdown-header {
     display: grid;
-    /* dot · station name · source pill · stats · sample count */
-    grid-template-columns: 14px 80px 80px 1fr 36px;
+    /* dot · station name · source pill · stats · sample count · admin slot */
+    grid-template-columns: 14px 80px 80px 1fr 36px 110px;
     align-items: center;
     gap: 0.5rem;
     width: 100%;
@@ -818,6 +857,62 @@ body.course-editing .boat-legend {
     text-align: center;
 }
 .wind-option-stats { font-size: 0.7rem; color: var(--text-secondary); white-space: nowrap; }
+
+/* Right-side admin slot: shows "📌 Default" badge on the active override
+   row, and "📌 Set default" buttons on other rows when a coach is signed
+   in. Hidden entirely otherwise (slot is empty). */
+.wind-option-right { display: flex; justify-content: flex-end; }
+.wind-option-default-badge {
+    font-size: 0.6rem;
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.14);
+    border: 1px solid rgba(52, 211, 153, 0.40);
+    border-radius: 3px;
+    padding: 2px 6px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+.wind-option-set-default {
+    background: rgba(34, 211, 238, 0.10);
+    color: #22d3ee;
+    border: 1px solid rgba(34, 211, 238, 0.35);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 0.6rem;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    text-transform: uppercase;
+    font-weight: 600;
+    font-family: inherit;
+}
+.wind-option-set-default:hover { background: rgba(34, 211, 238, 0.22); }
+.wind-option-set-default:disabled { opacity: 0.5; cursor: wait; }
+.wind-dropdown-option.is-default { background: rgba(52, 211, 153, 0.06); }
+
+.wind-dropdown-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+    font-size: 0.66rem;
+    color: var(--text-secondary);
+}
+.wind-clear-default {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 0.66rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+.wind-clear-default:hover { color: var(--danger); border-color: var(--danger); }
 .wind-option-count { font-size: 0.7rem; color: #e2e8f0; text-align: right; font-weight: 600; }
 
 @media (max-width: 700px) {
@@ -917,6 +1012,24 @@ body.course-editing .boat-legend {
     padding: 1px 4px;
     cursor: pointer;
 }
+/* Compact (collapsed) state: hide everything except the header row + button. */
+.marker-overlays-control .legend-collapse-btn {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    padding: 0 4px;
+    font-size: 0.85rem;
+    line-height: 1;
+    align-self: flex-end;
+    margin: -2px -4px 0 0;
+}
+.marker-overlays-control .legend-collapse-btn:hover { color: #22d3ee; }
+.marker-overlays-control.collapsed { padding: 2px 6px; gap: 0; }
+.marker-overlays-control.collapsed .legend-body { display: none; }
+.marker-overlays-control.collapsed .trail-window-label { border-bottom: none; margin: 0; padding: 0 18px 0 0; }
+.marker-overlays-control.collapsed .legend-collapse-btn { position: absolute; right: 4px; top: 2px; align-self: auto; margin: 0; }
+.marker-overlays-control { position: relative; }
 .marker-overlays-control .trail-window-select:hover { border-color: #22d3ee; }
 .marker-overlays-control .trail-window-select:focus { outline: 1px solid #22d3ee; outline-offset: 1px; }
 

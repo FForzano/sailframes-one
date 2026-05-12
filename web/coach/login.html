@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in &middot; SailFrames Coach</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>*</text></svg>">
+    <link rel="stylesheet" href="./coach.css?v=4">
+    <script src="../config.js"></script>
+    <script src="./coach.js?v=4"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <main>
+        <div class="login-card">
+            <h1>SailFrames Coach</h1>
+            <p>Sign in with your authorized Google account to review and approve race briefings.</p>
+
+            <div id="g_id_onload"
+                 data-callback="handleSignIn"
+                 data-auto_select="true"
+                 data-context="signin"></div>
+            <div class="g_id_signin" data-type="standard" data-size="large" data-shape="rectangular" data-text="signin_with"></div>
+
+            <div class="login-error" id="login-error"></div>
+        </div>
+    </main>
+    <script>
+        // Bind the client_id once we know it (config.js loaded above).
+        (function () {
+            const cid = window.SAILFRAMES_GOOGLE_CLIENT_ID || '';
+            if (!cid) {
+                document.getElementById('login-error').textContent =
+                    'Google Client ID not configured. Set window.SAILFRAMES_GOOGLE_CLIENT_ID in /config.js.';
+                return;
+            }
+            document.getElementById('g_id_onload').setAttribute('data-client_id', cid);
+        })();
+
+        function handleSignIn(response) {
+            const errEl = document.getElementById('login-error');
+            errEl.textContent = '';
+            const token = response && response.credential;
+            if (!token) {
+                errEl.textContent = 'No credential returned by Google.';
+                return;
+            }
+            const claims = SailFramesCoach.decodeIdToken(token);
+            if (!claims || !claims.email) {
+                errEl.textContent = 'Could not read email from Google credential.';
+                return;
+            }
+            // Verify via the API on landing — the coach Lambda will
+            // reject non-allowlisted emails with 401, which clears the
+            // session. We trust the token here only for redirect.
+            SailFramesCoach.setSession(token, claims.email);
+            window.location.href = './index.html';
+        }
+    </script>
+</body>
+</html>

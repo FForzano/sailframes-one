@@ -23,8 +23,12 @@
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/duration.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.10/plugin/utc.js"></script>
 
+    <!-- html2canvas: lets the coach app (which iframes this page) capture
+         the live Leaflet map as a PNG via window.captureMapPng(). -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
-    <link rel="stylesheet" href="./assets/css/race.css?v=33">
+    <link rel="stylesheet" href="./assets/css/race.css?v=36">
     <link rel="stylesheet" href="./assets/css/race-chat.css?v=9">
     <link rel="stylesheet" href="./assets/css/race-start-review.css?v=2">
     <script src="./config.js"></script>
@@ -100,11 +104,14 @@
             <div class="panel-header">
                 <h2>Leaderboard</h2>
                 <div class="elapsed-time" id="elapsed-time">00:00:00</div>
+                <button id="btn-hide-leaderboard" class="btn-collapse" title="Hide leaderboard (frees the column)">›</button>
             </div>
             <div class="leaderboard" id="leaderboard">
                 <div class="leaderboard-empty">Select a race to view standings</div>
             </div>
         </section>
+        <!-- Floating button to bring the leaderboard back when hidden. -->
+        <button id="btn-show-leaderboard" class="btn-show-lb" title="Show leaderboard">‹ Leaderboard</button>
     </main>
 
     <!-- Charts overlay: full-screen Speed / Heel / Wind, opened via the
@@ -291,6 +298,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=38"></script>
+    <script type="module" src="./assets/js/race-app.js?v=51"></script>
 </body>
 </html>

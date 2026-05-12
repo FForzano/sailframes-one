@@ -83,6 +83,10 @@ let visibleStationIds = new Set();
 // Castle Island (CSIM3) are fallbacks when 44013 has dropouts.
 const PRIMARY_WIND_STATIONS = ['44013', 'KBOS', 'CSIM3'];
 let selectedWindStationId = null;  // user-selected wind source (null = auto-pick)
+// Race-level wind-station override set by a coach via the wind picker's
+// "Set as default" button. `{race_id, station_id, set_by, set_at}` once
+// fetched from the coach Lambda's public GET endpoint; null if no override.
+let windDefaultOverride = null;
 
 // User-controlled visibility toggles. Defaults are ON so the dashboard
 // shows everything on first load; per-user overrides persist through
@@ -298,11 +302,271 @@ async function init() {
         if (map) map.invalidateSize();
     });
 
+    // Deep-link support: ?race=<race_id> loads that specific race instead
+    // of the auto-pick. Used by the coach app, which iframes this page.
+    const params = new URLSearchParams(location.search);
+    const raceParam = params.get('race');
+    if (raceParam) {
+        try {
+            const r = await fetch(`${API_BASE}/api/races/${raceParam}`);
+            if (r.ok) {
+                const race = await r.json();
+                const regattaId = race.regatta_id || '__all__';
+                const regSel = document.getElementById('regatta-select');
+                if (regSel) regSel.value = regattaId;
+                await loadRaceDays(regattaId);
+                const daySel = document.getElementById('raceday-select');
+                if (daySel) daySel.value = race.date;
+                loadRacesForDay(race.date);
+                const raceSel = document.getElementById('race-select');
+                if (raceSel) raceSel.value = raceParam;
+                await loadRaceData(raceParam);
+                console.log('[Race] Dashboard ready (deep-link to', raceParam, ')');
+                return;
+            }
+            console.warn('[Race] Deep-link race not found, falling back to latest:', raceParam);
+        } catch (err) {
+            console.warn('[Race] Deep-link load failed, falling back to latest:', err);
+        }
+    }
+
     // Auto-load the most recent race with boat data
     await loadLatestRaceWithData();
 
     console.log('[Race] Dashboard ready');
 }
+
+// ---------------------------------------------------------------------------
+// Leaderboard hide/show — toggle button + URL param + persisted setting.
+// Hidden state collapses the right column so the map fills the whole row.
+//
+// Critical: the body class must be applied BEFORE init() runs so that
+// Leaflet sizes the map for the wider (leaderboard-hidden) container at
+// creation time. If we wait for DOMContentLoaded the map is already
+// sized for the narrow layout and the captured screenshots show the
+// boats clustered in a quarter of the canvas with empty area to the
+// right. Doing it synchronously at script-parse time fixes that.
+// ---------------------------------------------------------------------------
+(function applyLayoutFromUrl() {
+    try {
+        const params = new URLSearchParams(location.search);
+        const urlHidden = params.get('leaderboard_hidden') === '1';
+        let hidden = urlHidden;
+        if (!urlHidden) {
+            try { hidden = localStorage.getItem('sf-leaderboard-hidden') === '1'; } catch {}
+        }
+        if (hidden && document.body) document.body.classList.add('leaderboard-hidden');
+    } catch {}
+})();
+
+function setLeaderboardHidden(hidden) {
+    document.body.classList.toggle('leaderboard-hidden', !!hidden);
+    try { localStorage.setItem('sf-leaderboard-hidden', hidden ? '1' : '0'); } catch {}
+    // Tell Leaflet the container resized; then refit bounds so the map
+    // fills the new area instead of staying zoomed for the old size.
+    setTimeout(() => {
+        if (typeof map !== 'undefined' && map) {
+            map.invalidateSize();
+            if (typeof fitMapToBounds === 'function') fitMapToBounds();
+        }
+    }, 50);
+}
+document.addEventListener('DOMContentLoaded', () => {
+    const hideBtn = document.getElementById('btn-hide-leaderboard');
+    const showBtn = document.getElementById('btn-show-leaderboard');
+    if (hideBtn) hideBtn.addEventListener('click', () => setLeaderboardHidden(true));
+    if (showBtn) showBtn.addEventListener('click', () => setLeaderboardHidden(false));
+});
+
+// ---------------------------------------------------------------------------
+// Coach-app integration. Same-origin iframes (the coach review page is on
+// sailframes.com too) call these to drive the live race page.
+//
+//   window.seekTo(timeSecondsFromRaceStart)
+//     → moves the playback cursor to that moment so capture grabs that view
+//
+//   window.captureMapPng()
+//     → snapshots the Leaflet map as a PNG dataURL using html2canvas.
+//
+// Note: tile layers must be created with `crossOrigin: 'anonymous'` or the
+// canvas gets tainted (and html2canvas with allowTaint:false silently
+// produces an empty image). Set as the default for all L.TileLayer instances
+// via mergeOptions so every basemap option is screenshot-safe.
+// ---------------------------------------------------------------------------
+if (typeof L !== 'undefined' && L.TileLayer && L.TileLayer.mergeOptions) {
+    L.TileLayer.mergeOptions({ crossOrigin: 'anonymous' });
+}
+
+window.seekTo = function (timeSecondsFromRaceStart) {
+    if (typeof updateBoatPositions !== 'function') return false;
+    if (typeof updatePlayCursor !== 'function') return false;
+    const t = Math.max(0, +timeSecondsFromRaceStart || 0);
+    updateBoatPositions(t);
+    updatePlayCursor(t);
+    const slider = document.getElementById('timeline-slider');
+    if (slider) slider.value = String(t);
+    return true;
+};
+
+// Re-fit the map to the race's primary view (start line + first mark, then
+// fallback to all boat coordinates). Coach app calls this after seeking to
+// make sure the screenshot frames the action tightly instead of inheriting
+// a zoom from earlier panning.
+window.fitMapToRace = function () {
+    if (typeof fitMapToBounds !== 'function') return false;
+    if (typeof map !== 'undefined' && map) map.invalidateSize();
+    fitMapToBounds();
+    return true;
+};
+
+// True once the map has tiles, the race data is loaded, and at least one
+// boat marker has been placed. The coach app polls this before capturing.
+window.captureReady = function () {
+    if (typeof map === 'undefined' || !map) return false;
+    const el = document.getElementById('race-map');
+    if (!el || el.clientWidth === 0 || el.clientHeight === 0) return false;
+    if (typeof boatLayers !== 'object' || !Object.keys(boatLayers).length) return false;
+    return true;
+};
+
+// Capture engine version. Bump when the pipeline changes meaningfully so
+// the coach app can auto-replace stale captures stored from older code.
+window.CAPTURE_ENGINE_VERSION = 6;
+
+// Wait until every visible Leaflet tile has the .leaflet-tile-loaded class
+// (Leaflet adds it once the <img> finishes loading). Polls every 80 ms.
+// Times out after 5 s so a stuck CDN tile doesn't hold up the sweep.
+async function _waitTilesLoaded(timeoutMs = 5000) {
+    const el = document.getElementById('race-map');
+    if (!el) return;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+        const tiles = el.querySelectorAll('.leaflet-tile-pane img.leaflet-tile');
+        if (!tiles.length) return;
+        const loaded = el.querySelectorAll('.leaflet-tile-pane img.leaflet-tile-loaded');
+        if (loaded.length === tiles.length) {
+            // One extra frame so the tile fade-in CSS animation settles.
+            await new Promise(r => requestAnimationFrame(r));
+            return;
+        }
+        await new Promise(r => setTimeout(r, 80));
+    }
+}
+
+// Quick "is this canvas mostly empty?" check — guards against html2canvas
+// returning a blank PNG when something went sideways.
+function _canvasHasContent(canvas) {
+    try {
+        const w = Math.min(canvas.width, 100), h = Math.min(canvas.height, 100);
+        const ctx = canvas.getContext('2d');
+        const data = ctx.getImageData(0, 0, w, h).data;
+        // Non-trivial if any pixel deviates from the seed color by ≥ 8/channel.
+        const r0 = data[0], g0 = data[1], b0 = data[2];
+        for (let i = 4; i < data.length; i += 4) {
+            if (Math.abs(data[i] - r0) > 8) return true;
+            if (Math.abs(data[i + 1] - g0) > 8) return true;
+            if (Math.abs(data[i + 2] - b0) > 8) return true;
+        }
+        return false;
+    } catch { return true; }   // assume content if we can't check
+}
+
+window.captureMapPng = async function () {
+    const el = document.getElementById('race-map');
+    if (!el) throw new Error('Map element not in DOM');
+    if (el.clientWidth === 0 || el.clientHeight === 0) throw new Error('Map has zero size');
+    if (typeof html2canvas !== 'function') throw new Error('html2canvas not loaded');
+
+    // Always tell Leaflet "your container may have resized" before we snap.
+    // Without this, captures inherit a tile layout that was sized for an
+    // older container width — and you get tiles in only a quarter of the
+    // canvas with empty area filling the rest.
+    if (typeof map !== 'undefined' && map) {
+        map.invalidateSize({ animate: false, pan: false });
+    }
+    // Wait for tile fetches in flight to complete (after a recent seek/fit).
+    await _waitTilesLoaded();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    // FORCEFULLY remove controls from the DOM during capture. `display:none`
+    // wasn't being honored in some cases (the SHOW legend kept appearing
+    // in the captures despite the inline style) — physically detaching the
+    // nodes and re-attaching them in the `finally` is unambiguous.
+    const HIDE_SELECTORS = [
+        '.marker-overlays-control',
+        '.leaflet-control-layers',
+        '.leaflet-control-zoom',
+        '.leaflet-control-attribution',
+    ];
+    const detached = [];
+    for (const sel of HIDE_SELECTORS) {
+        for (const node of Array.from(el.querySelectorAll(sel))) {
+            detached.push({ node, parent: node.parentNode, next: node.nextSibling });
+            node.parentNode.removeChild(node);
+        }
+    }
+
+    // The coach iframe explicitly requests `?basemap=ESRI Ocean` (a natively
+    // light, blue-water-themed tile set with no CSS filter dependency). So
+    // a single straightforward html2canvas pass is enough — what the coach
+    // sees in the iframe is what the screenshot is.
+    // scale: 1 keeps captured PNGs under the Lambda 6 MB PUT limit. On
+    // retina (devicePixelRatio=2) we'd otherwise produce 4× pixels per
+    // capture and a 6-paragraph briefing's attachments would silently
+    // fail to save. 1100×720 → ~250 KB JPEG is plenty for the PDF.
+    const baseOpts = {
+        useCORS: true, allowTaint: false,
+        logging: false, scale: 1,
+    };
+    // Final dataURL format: JPEG at 0.85 keeps the per-capture payload
+    // ~5× smaller than PNG. Map screenshots tolerate JPEG fine; the
+    // foreground vectors are anti-aliased before composite anyway.
+    const toDataUrl = (canvas) => canvas.toDataURL('image/jpeg', 0.85);
+
+
+    try {
+        const canvas = await html2canvas(el, { ...baseOpts, backgroundColor: '#0f1419' });
+        return toDataUrl(canvas);
+    } finally {
+        // Re-attach controls in their original positions.
+        for (const { node, parent, next } of detached) {
+            try {
+                if (next && next.parentNode === parent) parent.insertBefore(node, next);
+                else parent.appendChild(node);
+            } catch {}
+        }
+    }
+};
+
+// Fit the map to the bounding box of all boat positions in a specific time
+// window. Coach app calls this so each per-paragraph capture frames the
+// section being discussed (instead of the static race-wide bounds).
+window.fitToTimeRange = function (tStartSecondsFromRaceStart, tEndSecondsFromRaceStart) {
+    if (typeof map === 'undefined' || !map) return false;
+    if (typeof currentRace === 'undefined' || !currentRace || !currentRace.start_time) return false;
+    const raceStart = new Date(currentRace.start_time).getTime();
+    const tStart = raceStart + Math.max(0, +tStartSecondsFromRaceStart || 0) * 1000;
+    const tEnd = raceStart + Math.max(0, +tEndSecondsFromRaceStart || 0) * 1000;
+    if (tEnd <= tStart) return false;
+    const coords = [];
+    if (typeof boatLayers === 'object' && boatLayers) {
+        for (const layer of Object.values(boatLayers)) {
+            if (!layer || !Array.isArray(layer.data)) continue;
+            for (const p of layer.data) {
+                if (!p || p.lat == null || p.lon == null || !p.t) continue;
+                const t = new Date(p.t).getTime();
+                if (t >= tStart && t <= tEnd) coords.push([p.lat, p.lon]);
+            }
+        }
+    }
+    if (coords.length < 2) return false;
+    map.invalidateSize();
+    // Tighter framing for per-section captures: maxZoom 18 lets
+    // tightly-clustered boats fill the canvas; padding 20 px gives just
+    // enough breathing room without empty space.
+    map.fitBounds(L.latLngBounds(coords), { padding: [20, 20], maxZoom: 18 });
+    return true;
+};
 
 async function loadLatestRaceWithData() {
     try {
@@ -389,6 +653,16 @@ function initMap() {
             maxZoom: 19,
             className: 'tile-light-blue',
         }),
+        // Carto Voyager (no labels) — natively light, soft blue water,
+        // beige land. Tonally close to Light Blue but rendered without
+        // a CSS filter, so it captures cleanly via html2canvas. The coach
+        // iframe loads with `?basemap=Voyager` so screenshots match the
+        // iframe view (Light Blue's CSS invert+hue filter doesn't survive
+        // browser-side capture).
+        'Voyager': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap, &copy; CARTO',
+            maxZoom: 19,
+        }),
         'OSM': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
             maxZoom: 19,
@@ -421,11 +695,16 @@ function initMap() {
         }),
     };
 
-    // "Light Blue" (Carto dark_all + invert/hue-rotate filter) is the
-    // default basemap. Soft sky-blue water under colored boat tracks
-    // gives the highest contrast for race replay; ESRI Ocean / NOAA
-    // Charts / OSM / Satellite stay available in the layers control.
-    baseLayers['Light Blue'].addTo(map);
+    // Default basemap is Light Blue (Carto dark_all + CSS invert filter).
+    // The CSS-filter approach ISN'T rasterized by html2canvas, so when the
+    // coach app screenshots the iframe the saved PNG shows the raw dark
+    // tiles without the blue inversion. The coach iframe overrides via
+    // `?basemap=ESRI Ocean` (natively-rendered light blue ocean tiles)
+    // so the screenshot matches what the coach sees.
+    const requestedBasemap = new URLSearchParams(location.search).get('basemap');
+    const initialBasemap = (requestedBasemap && baseLayers[requestedBasemap])
+        ? requestedBasemap : 'Light Blue';
+    baseLayers[initialBasemap].addTo(map);
 
     // Add layer control
     L.control.layers(baseLayers, overlayLayers, {
@@ -665,16 +944,30 @@ function addMarkerOverlaysMapControl() {
         { key: 'rank',            label: 'Rank' },
     ];
 
+    // Initial collapsed state: URL param `legend_compact=1` (set by the
+    // coach iframe) wins over localStorage; otherwise hydrate from prior
+    // session, default expanded.
+    const urlCompact = new URLSearchParams(location.search).get('legend_compact') === '1';
+    let collapsed = urlCompact;
+    try {
+        if (!urlCompact) collapsed = localStorage.getItem('sf-marker-legend-collapsed') === '1';
+    } catch {}
+
     const ctl = L.control({ position: 'topright' });
     ctl.onAdd = function () {
         const div = L.DomUtil.create('div', 'leaflet-bar map-toggle-control marker-overlays-control');
+        if (collapsed) div.classList.add('collapsed');
         div.title = 'Boat-cursor overlays — toggle each piece of info';
         const optionsHtml = TRAIL_WINDOW_OPTIONS.map(o => {
             const v = (o.ms === Infinity) ? 'Infinity' : String(o.ms);
             const sel = (o.ms === trailWindowMs) ? ' selected' : '';
             return `<option value="${v}"${sel}>${o.label}</option>`;
         }).join('');
-        div.innerHTML = `<span class="trail-window-label">SHOW</span>` +
+        div.innerHTML =
+            `<button class="legend-collapse-btn" type="button" title="Collapse / expand"
+                     aria-label="Collapse legend">${collapsed ? '▸' : '▾'}</button>` +
+            `<span class="trail-window-label">SHOW</span>` +
+            `<div class="legend-body">` +
             items.map(it => {
                 const cb = `<label><input type="checkbox" data-key="${it.key}" ${markerOverlays[it.key] ? 'checked' : ''}> ${it.label}`;
                 if (it.key === 'trail') {
@@ -682,9 +975,17 @@ function addMarkerOverlaysMapControl() {
                                      title="How much past track to draw">${optionsHtml}</select></label>`;
                 }
                 return `${cb}</label>`;
-            }).join('');
+            }).join('') +
+            `</div>`;
         L.DomEvent.disableClickPropagation(div);
         L.DomEvent.disableScrollPropagation(div);
+
+        const collapseBtn = div.querySelector('.legend-collapse-btn');
+        if (collapseBtn) collapseBtn.addEventListener('click', () => {
+            const isCollapsed = div.classList.toggle('collapsed');
+            collapseBtn.textContent = isCollapsed ? '▸' : '▾';
+            try { localStorage.setItem('sf-marker-legend-collapsed', isCollapsed ? '1' : '0'); } catch {}
+        });
 
         div.querySelectorAll('input[type="checkbox"]').forEach(cb => {
             cb.addEventListener('change', () => {
@@ -1235,8 +1536,26 @@ async function loadRaceWindData(startTime, endTime) {
             raceBuoyData[sid]?.data_points?.some(d =>
                 d.wind_dir != null && d.wind_speed_kts != null
             );
-        for (const sid of PRIMARY_WIND_STATIONS) {
-            if (usableId(sid)) { selectedWindStationId = sid; break; }
+
+        // Admin override: a coach can pin a specific wind station as the
+        // default for a race via the wind picker's "Set as default"
+        // button. The coach Lambda exposes it at
+        // GET /race-wind-default/{race_id} (public). If present AND that
+        // station has usable samples, honor it before the auto-pick.
+        if (currentRace && currentRace.race_id) {
+            try {
+                const ov = await _fetchWindDefaultOverride(currentRace.race_id);
+                if (ov && ov.station_id && usableId(ov.station_id)) {
+                    selectedWindStationId = ov.station_id;
+                    windDefaultOverride = ov;
+                }
+            } catch {}
+        }
+
+        if (!selectedWindStationId) {
+            for (const sid of PRIMARY_WIND_STATIONS) {
+                if (usableId(sid)) { selectedWindStationId = sid; break; }
+            }
         }
         if (!selectedWindStationId) {
             for (const sid of Object.keys(raceBuoyData)) {
@@ -1248,6 +1567,57 @@ async function loadRaceWindData(startTime, endTime) {
     } catch (e) {
         console.error('[Wind] load failed', e);
     }
+}
+
+// ---- Admin wind-station override helpers ------------------------------
+// The coach app stores per-race wind-station defaults in S3 via the coach
+// Lambda. These helpers read/write that store. Read is public (any
+// race-page visitor); write requires a valid coach Google ID token from
+// localStorage (`sf-coach-id-token` — same key the coach app uses).
+
+const _COACH_API_URL = (window.SAILFRAMES_COACH_API || '').replace(/\/+$/, '');
+
+function _coachToken() {
+    try { return localStorage.getItem('sf-coach-id-token') || ''; } catch { return ''; }
+}
+function _isCoachLoggedIn() { return !!_coachToken(); }
+
+async function _fetchWindDefaultOverride(raceId) {
+    if (!_COACH_API_URL) return null;
+    try {
+        const r = await fetch(`${_COACH_API_URL}/race-wind-default/${encodeURIComponent(raceId)}`);
+        if (!r.ok) return null;
+        return await r.json();
+    } catch { return null; }
+}
+
+async function setRaceWindDefault(raceId, stationId) {
+    if (!_COACH_API_URL) throw new Error('Coach API not configured');
+    const token = _coachToken();
+    if (!token) throw new Error('Sign in to the coach app first');
+    const r = await fetch(`${_COACH_API_URL}/race-wind-default/${encodeURIComponent(raceId)}`, {
+        method: 'PUT',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ station_id: stationId }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || data.error || `HTTP ${r.status}`);
+    return data;
+}
+
+async function clearRaceWindDefault(raceId) {
+    if (!_COACH_API_URL) throw new Error('Coach API not configured');
+    const token = _coachToken();
+    if (!token) throw new Error('Sign in to the coach app first');
+    const r = await fetch(`${_COACH_API_URL}/race-wind-default/${encodeURIComponent(raceId)}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.detail || data.error || `HTTP ${r.status}`);
+    }
+    return true;
 }
 
 // Rebuild weatherWindSamples/raceAvgTWD/weatherWindSource from the
@@ -1502,18 +1872,38 @@ function renderWindSourcePicker() {
             <span>MEAN DIR · SPEED</span>
             <span class="wind-dropdown-header-n" title="Sample count during race window">N</span>
         </div>
-        ${stations.map(s => `
-          <button class="wind-dropdown-option ${s.id === selectedWindStationId ? 'active' : ''}"
-                  data-station="${s.id}" role="option"
-                  aria-selected="${s.id === selectedWindStationId}"
-                  title="${shortStationLabel(s.id, s.name)} · ${s.source} · ${s.stats.sampleCount} samples during race">
-            <span class="wind-option-dot" style="background:${s.color}"></span>
-            <span class="wind-option-name">${shortStationLabel(s.id, s.name)}</span>
-            <span class="wind-option-source">${s.source}</span>
-            <span class="wind-option-stats">${fmtStationStats(s.stats)}</span>
-            <span class="wind-option-count">${s.stats.sampleCount}</span>
-          </button>
-        `).join('')}
+        ${stations.map(s => {
+            const isOverride = windDefaultOverride && windDefaultOverride.station_id === s.id;
+            const showAdmin = _isCoachLoggedIn();
+            // Two affordances per row, both shown only when the row is
+            // NOT the active override:
+            //   • "📌 Default" badge on the override row itself
+            //   • "Set as default" button on the others (admin only)
+            const rightSlot = isOverride
+                ? '<span class="wind-option-default-badge" title="Race default — every visitor sees this station">📌 Default</span>'
+                : (showAdmin
+                    ? `<button class="wind-option-set-default" data-set-default="${s.id}" title="Make this the default wind station for this race for all visitors">📌 Set default</button>`
+                    : '');
+            return `
+              <button class="wind-dropdown-option ${s.id === selectedWindStationId ? 'active' : ''} ${isOverride ? 'is-default' : ''}"
+                      data-station="${s.id}" role="option"
+                      aria-selected="${s.id === selectedWindStationId}"
+                      title="${shortStationLabel(s.id, s.name)} · ${s.source} · ${s.stats.sampleCount} samples during race">
+                <span class="wind-option-dot" style="background:${s.color}"></span>
+                <span class="wind-option-name">${shortStationLabel(s.id, s.name)}</span>
+                <span class="wind-option-source">${s.source}</span>
+                <span class="wind-option-stats">${fmtStationStats(s.stats)}</span>
+                <span class="wind-option-count">${s.stats.sampleCount}</span>
+                <span class="wind-option-right">${rightSlot}</span>
+              </button>
+            `;
+        }).join('')}
+        ${windDefaultOverride && _isCoachLoggedIn()
+            ? `<div class="wind-dropdown-footer">
+                 Default set by <strong>${(windDefaultOverride.set_by || '').replace(/[<>"]/g,'')}</strong>
+                 <button class="wind-clear-default" id="wind-clear-default" title="Remove the race-level default; revert to auto-pick">Clear default</button>
+               </div>`
+            : ''}
       </div>
     `;
 
@@ -1543,11 +1933,49 @@ function renderWindSourcePicker() {
 
     for (const opt of menu.querySelectorAll('.wind-dropdown-option')) {
         opt.addEventListener('click', (e) => {
+            // If the user clicked the inline "Set default" button, don't
+            // also fire the row's "pick this station" handler.
+            if (e.target.closest('[data-set-default]')) return;
             e.stopPropagation();
             close();
             setWindStation(opt.dataset.station);
         });
     }
+    for (const btn of menu.querySelectorAll('[data-set-default]')) {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const sid = btn.getAttribute('data-set-default');
+            btn.disabled = true;
+            btn.textContent = 'saving…';
+            try {
+                const saved = await setRaceWindDefault(currentRace.race_id, sid);
+                windDefaultOverride = saved;
+                setWindStation(sid);   // also switches the active station + re-renders picker
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = '📌 Set default';
+                alert(`Could not save default: ${err.message || err}`);
+            }
+        });
+    }
+    const clearBtn = menu.querySelector('#wind-clear-default');
+    if (clearBtn) clearBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (!confirm('Clear the race default wind station? Future visitors will see the auto-pick.')) return;
+        clearBtn.disabled = true;
+        clearBtn.textContent = 'clearing…';
+        try {
+            await clearRaceWindDefault(currentRace.race_id);
+            windDefaultOverride = null;
+            renderWindSourcePicker();
+        } catch (err) {
+            clearBtn.disabled = false;
+            clearBtn.textContent = 'Clear default';
+            alert(`Could not clear default: ${err.message || err}`);
+        }
+    });
 }
 
 function setWindStation(stationId) {

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Briefings &middot; SailFrames Coach</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>*</text></svg>">
+    <link rel="stylesheet" href="./coach.css?v=9">
+    <script src="../config.js"></script>
+    <script src="./coach.js?v=9"></script>
+</head>
+<body>
+    <div id="nav-host"></div>
+    <main class="coach-container">
+        <h1>Briefings</h1>
+        <p class="muted">All race briefings generated for coach review. Click any row to open it.</p>
+
+        <div class="dash-actions">
+            <select id="gen-race-id" disabled>
+                <option value="">Loading races…</option>
+            </select>
+            <select id="gen-device-id" disabled>
+                <option value="">Pick a race first…</option>
+            </select>
+            <button class="primary" id="gen-btn" disabled>Generate briefing</button>
+            <span class="muted" id="gen-status"></span>
+        </div>
+
+        <div id="list-host">
+            <div class="empty-state"><span class="spinner"></span> Loading…</div>
+        </div>
+    </main>
+
+    <script>
+        if (!SailFramesCoach.requireAuth()) { /* redirected */ }
+        document.getElementById('nav-host').innerHTML = SailFramesCoach.nav('Briefings');
+        SailFramesCoach.wireNav();
+
+        async function loadList() {
+            const host = document.getElementById('list-host');
+            try {
+                const data = await SailFramesCoach.api('/briefings');
+                const items = data.briefings || [];
+                if (!items.length) {
+                    host.innerHTML = '<div class="empty-state">No briefings yet. Generate one above to start.</div>';
+                    return;
+                }
+                let html = `<table class="dash-table">
+                    <thead><tr>
+                        <th>Race</th>
+                        <th>Date</th>
+                        <th>Boat</th>
+                        <th>Status</th>
+                        <th class="num">Approved / Total</th>
+                        <th>Reviewer activity</th>
+                        <th></th>
+                    </tr></thead><tbody>`;
+                for (const b of items) {
+                    const status = (b.status || 'draft').replace(/[^a-z_]/g, '');
+                    html += `<tr data-href="./review.html?race=${encodeURIComponent(b.race_id)}&boat=${encodeURIComponent(b.device_id)}"
+                                 data-race="${escapeHtml(b.race_id)}" data-boat="${escapeHtml(b.device_id)}"
+                                 data-label="${escapeHtml((b.team_name || b.device_id) + ' — ' + (b.race_name || b.race_id))}">
+                        <td>${escapeHtml(b.race_name || b.race_id)}</td>
+                        <td>${escapeHtml(b.race_date || '—')}</td>
+                        <td>${escapeHtml(b.team_name || b.device_id)}</td>
+                        <td><span class="status-badge status-${status}">${status.replace('_', ' ')}</span></td>
+                        <td class="num">${b.approved_count}/${b.total_count}</td>
+                        <td class="muted">${SailFramesCoach.fmtDate(b.last_modified_at)}</td>
+                        <td class="num"><button class="del-btn" data-del title="Delete this report">✕</button></td>
+                    </tr>`;
+                }
+                html += '</tbody></table>';
+                host.innerHTML = html;
+                for (const tr of host.querySelectorAll('tr[data-href]')) {
+                    tr.addEventListener('click', (e) => {
+                        if (e.target.closest('[data-del]')) return;     // don't navigate when clicking the delete button
+                        window.location.href = tr.getAttribute('data-href');
+                    });
+                }
+                for (const btn of host.querySelectorAll('button[data-del]')) {
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const tr = btn.closest('tr');
+                        const race = tr.getAttribute('data-race');
+                        const boat = tr.getAttribute('data-boat');
+                        const label = tr.getAttribute('data-label');
+                        if (!race || !boat) return;
+                        if (!window.confirm(`Delete the report for ${label}?\n\nThis cannot be undone.`)) return;
+                        btn.disabled = true;
+                        try {
+                            await SailFramesCoach.api(
+                                `/briefings/${encodeURIComponent(race)}/${encodeURIComponent(boat)}`,
+                                { method: 'DELETE' }
+                            );
+                            tr.remove();
+                            SailFramesCoach.toast('Report deleted', 'success', 1800);
+                        } catch (err) {
+                            btn.disabled = false;
+                            SailFramesCoach.toast(`Delete failed: ${err.message}`, 'error', 5000);
+                        }
+                    });
+                }
+            } catch (e) {
+                host.innerHTML = `<div class="empty-state" style="color:var(--danger)">Failed to load: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function escapeHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c =>
+                ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+        }
+
+        // ---- Race + boat dropdowns (populated from the public race API) ----
+
+        const RACE_API = (window.SAILFRAMES_API_URL || '').replace(/\/+$/, '');
+        const raceSel = document.getElementById('gen-race-id');
+        const boatSel = document.getElementById('gen-device-id');
+        const genBtn = document.getElementById('gen-btn');
+
+        function refreshGenButton() {
+            genBtn.disabled = !(raceSel.value && boatSel.value);
+        }
+
+        async function loadRaces() {
+            try {
+                const resp = await fetch(`${RACE_API}/api/races`);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                // The race API returns a flat {races: [...]} array. Some
+                // newer responses may group by day under race_days; handle both.
+                let allRaces = [];
+                if (Array.isArray(data.races)) {
+                    allRaces = data.races;
+                } else if (Array.isArray(data.race_days || data.raceDays)) {
+                    for (const d of (data.race_days || data.raceDays)) {
+                        for (const r of (d.races || [])) {
+                            allRaces.push({ ...r, date: r.date || d.date });
+                        }
+                    }
+                }
+                // Group by date, then sort each day by start_time, days newest first.
+                const byDate = new Map();
+                for (const r of allRaces) {
+                    const d = r.date || (r.start_time || '').slice(0, 10) || 'unknown';
+                    if (!byDate.has(d)) byDate.set(d, []);
+                    byDate.get(d).push(r);
+                }
+                const days = [...byDate.entries()]
+                    .map(([date, races]) => ({ date, races }))
+                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+                let html = '<option value="">Pick a race…</option>';
+                for (const d of days) {
+                    const races = d.races.slice().sort((a, b) =>
+                        (a.start_time || '').localeCompare(b.start_time || ''));
+                    if (!races.length) continue;
+                    html += `<optgroup label="${escapeHtml(d.date)}">`;
+                    for (const r of races) {
+                        let label = r.name || r.race_id;
+                        if (r.start_time) {
+                            try {
+                                const t = new Date(r.start_time).toLocaleTimeString('en-US',
+                                    { hour: '2-digit', minute: '2-digit', hour12: false });
+                                label += ` @ ${t}`;
+                            } catch {}
+                        }
+                        if (r.boat_count) label += ` · ${r.boat_count} boat${r.boat_count === 1 ? '' : 's'}`;
+                        html += `<option value="${escapeHtml(r.race_id)}">${escapeHtml(label)}</option>`;
+                    }
+                    html += '</optgroup>';
+                }
+                raceSel.innerHTML = html;
+                raceSel.disabled = false;
+            } catch (e) {
+                raceSel.innerHTML = `<option value="">Failed to load races</option>`;
+                SailFramesCoach.toast(`Race list failed: ${e.message}`, 'error', 5000);
+            }
+        }
+
+        async function loadBoats(raceId) {
+            boatSel.innerHTML = '<option value="">Loading boats…</option>';
+            boatSel.disabled = true;
+            refreshGenButton();
+            if (!raceId) {
+                boatSel.innerHTML = '<option value="">Pick a race first…</option>';
+                return;
+            }
+            try {
+                const resp = await fetch(`${RACE_API}/api/races/${encodeURIComponent(raceId)}/data?sensors=gps`);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                const entries = Object.entries(data.boats || {})
+                    .map(([dev, b]) => ({
+                        device: dev,
+                        team: (b.boat && (b.boat.team_name || b.boat.boat_name)) || dev,
+                    }))
+                    .sort((a, b) => a.team.localeCompare(b.team));
+                let html = '<option value="">Pick a boat…</option>';
+                // First entry: race-wide overview (all boats together).
+                html += '<option value="_race">🏁 Race overview (all boats)</option>';
+                if (!entries.length) {
+                    boatSel.innerHTML = html + '<option value="" disabled>(no per-boat data)</option>';
+                    boatSel.disabled = false;
+                    return;
+                }
+                for (const e of entries) {
+                    html += `<option value="${escapeHtml(e.device)}">${escapeHtml(e.team)} (${escapeHtml(e.device)})</option>`;
+                }
+                boatSel.innerHTML = html;
+                boatSel.disabled = false;
+            } catch (e) {
+                boatSel.innerHTML = '<option value="">Failed to load boats</option>';
+                SailFramesCoach.toast(`Boat list failed: ${e.message}`, 'error', 5000);
+            }
+        }
+
+        raceSel.addEventListener('change', () => { loadBoats(raceSel.value); });
+        boatSel.addEventListener('change', refreshGenButton);
+
+        genBtn.addEventListener('click', async () => {
+            const raceId = raceSel.value;
+            const deviceId = boatSel.value;
+            const status = document.getElementById('gen-status');
+            if (!raceId || !deviceId) {
+                SailFramesCoach.toast('Pick a race and a boat', 'error');
+                return;
+            }
+            genBtn.disabled = true;
+            status.innerHTML = '<span class="spinner"></span> Generating with Opus (60–90 s)…';
+            try {
+                const briefing = await SailFramesCoach.api('/generate', {
+                    method: 'POST',
+                    body: JSON.stringify({ race_id: raceId, device_id: deviceId }),
+                });
+                status.textContent = '';
+                SailFramesCoach.toast('Briefing generated. Opening review…', 'success');
+                window.location.href = `./review.html?race=${encodeURIComponent(briefing.race_id)}&boat=${encodeURIComponent(briefing.device_id)}`;
+            } catch (e) {
+                status.textContent = '';
+                SailFramesCoach.toast(`Generation failed: ${e.message}`, 'error', 6000);
+                genBtn.disabled = false;
+            }
+        });
+
+        loadRaces();
+        loadList();
+    </script>
+</body>
+</html>
