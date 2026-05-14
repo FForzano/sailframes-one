@@ -6,6 +6,15 @@
  * and playback controls.
  */
 
+import {
+    DEFAULT_BOAT_LOA_M,
+    DEFAULT_BOAT_BEAM_M,
+    DEFAULT_BOW_OFFSET_M,
+    populateBoatClassDropdown as bcPopulateDropdown,
+    setBoatClassInForm as bcSetInForm,
+    getBoatClassFromForm as bcGetFromForm,
+} from './boat-classes.js?v=2';
+
 // Check if user is authenticated via Cloudflare Access
 function isAdmin() {
     return document.cookie.includes('CF_Authorization');
@@ -35,6 +44,67 @@ function colorFor(deviceId) {
 // Fleet configuration - COURAGEOUS J80 Spring Racing Series 2026
 const FLEET_BOATS = ['Wizard', 'Fins', 'Doc Buck', 'Katu', 'Bliss & Ella', 'Amigo'];
 const FLEET_TEAMS = ['Vela Veloce', 'Seadogs', 'Mystic Mutiny', 'Rooster Alumni Club', 'Anchor Management', 'Team 6'];
+
+// Persisted catalog of team / boat names this browser has seen.
+// Auto-populated from every race load (so anyone who's browsed a
+// regatta gets those teams in their autocomplete) and after every
+// save. Lives in localStorage so it survives page reloads.
+const TEAM_STORE_KEY = 'sf-known-teams';
+const BOAT_STORE_KEY = 'sf-known-boats';
+
+function _readLocalSet(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        return new Set(Array.isArray(arr) ? arr.filter(s => typeof s === 'string' && s.trim()) : []);
+    } catch { return new Set(); }
+}
+function _writeLocalSet(key, set) {
+    try { localStorage.setItem(key, JSON.stringify(Array.from(set))); } catch {}
+}
+function _attrEsc(s) {
+    return String(s).replace(/[&"<>]/g, c =>
+        ({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+// Merge the built-in fleet list with anything stored locally and
+// anything already on the currently-loaded race. Returns a sorted,
+// de-duped array.
+function knownTeamNames() {
+    const s = new Set([...FLEET_TEAMS, ..._readLocalSet(TEAM_STORE_KEY)]);
+    if (currentRace?.boats) for (const b of currentRace.boats) {
+        if (b?.team_name) s.add(String(b.team_name).trim());
+    }
+    s.delete('');
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+}
+function knownBoatNames() {
+    const s = new Set([...FLEET_BOATS, ..._readLocalSet(BOAT_STORE_KEY)]);
+    if (currentRace?.boats) for (const b of currentRace.boats) {
+        if (b?.boat_name) s.add(String(b.boat_name).trim());
+    }
+    s.delete('');
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+}
+
+// Harvest team / boat names from any race object (just-saved race
+// or the race that loadRaceData() returned) and append them to the
+// local store so they appear in future autocomplete dropdowns.
+function rememberRaceNames(race) {
+    if (!race?.boats) return;
+    const teams = _readLocalSet(TEAM_STORE_KEY);
+    const boats = _readLocalSet(BOAT_STORE_KEY);
+    let tDirty = false, bDirty = false;
+    for (const b of race.boats) {
+        const t = (b?.team_name || '').trim();
+        const n = (b?.boat_name || '').trim();
+        if (t && !FLEET_TEAMS.includes(t) && !teams.has(t)) { teams.add(t); tDirty = true; }
+        if (n && !FLEET_BOATS.includes(n) && !boats.has(n)) { boats.add(n); bDirty = true; }
+    }
+    if (tDirty) _writeLocalSet(TEAM_STORE_KEY, teams);
+    if (bDirty) _writeLocalSet(BOAT_STORE_KEY, boats);
+}
 
 // State
 let regattas = [];
@@ -76,12 +146,15 @@ let _windDropdownOutsideListener = null;  // ref-tracked so re-renders don't lea
 let visibleStationIds = new Set();
 // Preferred-first ordering for the auto-pick. Synoptic SYN_* stations
 // are added dynamically below if/when they appear in the API response.
-// Order matters: the auto-pick at race load walks this list and takes the
-// first station with usable samples. Boston 16NM (NDBC 44013) is the
-// operational default for the Boston Harbor fleet — open-ocean buoy with
-// the cleanest signal (no land/airport interference); Logan (KBOS) and
-// Castle Island (CSIM3) are fallbacks when 44013 has dropouts.
-const PRIMARY_WIND_STATIONS = ['44013', 'KBOS', 'CSIM3'];
+// Order matters: the auto-pick at race load walks this list and takes
+// the first station with usable samples.
+//
+// Castle Island (CSIM3) is the operational default for the Boston
+// Harbor fleet — it's right at the start area, so its TWD reflects
+// what the boats actually see. Boston 16NM (NDBC 44013, ocean buoy)
+// and Logan Airport (KBOS, METAR) stay as fallbacks for the rare
+// race window where CSIM3 has no usable samples.
+const PRIMARY_WIND_STATIONS = ['CSIM3', '44013', 'KBOS'];
 let selectedWindStationId = null;  // user-selected wind source (null = auto-pick)
 // Race-level wind-station override set by a coach via the wind picker's
 // "Set as default" button. `{race_id, station_id, set_by, set_at}` once
@@ -170,7 +243,13 @@ const J80_BEAT_ANGLE = [45.2, 41.4, 40.4, 40.0, 39.8, 39.9, 39.9];
 const J80_BEAT_VMG   = [3.550, 4.224, 4.561, 4.765, 4.880, 4.951, 4.960];
 
 // Bilinear-interp target boat speed for given TWA (signed) and TWS.
+// The lookup table is hard-coded for the J/80 — when the race uses any
+// other class, return null so every consumer (chart polar overlay,
+// %polar in the leaderboard / marker label / drawer / briefing / legs
+// table) short-circuits and the polar metric is hidden rather than
+// shown with bogus J/80-derived numbers.
 function polarTargetSpeed(twaSigned, tws) {
+    if (!polarSupportedForCurrentRace()) return null;
     if (twaSigned == null || tws == null || !Number.isFinite(tws) || tws <= 0) return null;
     // Polar is symmetric port/starboard
     let a = Math.abs(twaSigned);
@@ -210,7 +289,26 @@ function polarTargetSpeed(twaSigned, tws) {
     return sLo * (1 - twsF) + sHi * twsF;
 }
 
+// True when the loaded race uses the J/80 — the only class for which
+// we ship a polar table. Any other class would pull bogus targets
+// from the J/80 lookup, so all polar-derived metrics (target speed,
+// %polar, on-chart polar overlay) are short-circuited downstream.
+// Legacy races with no boat_class set are treated as J/80 (the
+// historical default), preserving every old dashboard view.
+function polarSupportedForCurrentRace() {
+    const cls = currentRace?.boat_class;
+    if (cls == null) return true;
+    if (typeof cls === 'string') {
+        const s = cls.trim();
+        return !s || s === 'J/80';
+    }
+    return cls.id === 'j80';
+}
+
 function polarPercent(sog, twaSigned, tws) {
+    // Class gate is enforced inside polarTargetSpeed — calling it
+    // here returns null for non-J/80 races, which cascades through
+    // and skips the %polar display everywhere it's used.
     const target = polarTargetSpeed(twaSigned, tws);
     if (!target || target <= 0.1) return null;
     return (sog / target) * 100;
@@ -327,6 +425,31 @@ async function init() {
             console.warn('[Race] Deep-link race not found, falling back to latest:', raceParam);
         } catch (err) {
             console.warn('[Race] Deep-link load failed, falling back to latest:', err);
+        }
+    }
+
+    // ?regatta=<id> — landing-page deep link. Pre-set the regatta
+    // dropdown and auto-load the latest race within that regatta
+    // (instead of the global latest). Falls through to the unfiltered
+    // auto-pick if the regatta is unknown or has no races with data.
+    const regattaParam = params.get('regatta');
+    if (regattaParam) {
+        try {
+            const reg = (regattas || []).find(r => r.regatta_id === regattaParam);
+            if (reg) {
+                const regSel = document.getElementById('regatta-select');
+                if (regSel) regSel.value = regattaParam;
+                await loadRaceDays(regattaParam);
+                if (await loadLatestRaceWithData(regattaParam)) {
+                    console.log('[Race] Dashboard ready (deep-link to regatta', regattaParam, ')');
+                    return;
+                }
+                console.log('[Race] Regatta', regattaParam, 'has no races with data; showing day picker.');
+                return;
+            }
+            console.warn('[Race] Deep-link regatta not found, falling back to latest:', regattaParam);
+        } catch (err) {
+            console.warn('[Race] Regatta deep-link failed, falling back to latest:', err);
         }
     }
 
@@ -568,10 +691,14 @@ window.fitToTimeRange = function (tStartSecondsFromRaceStart, tEndSecondsFromRac
     return true;
 };
 
-async function loadLatestRaceWithData() {
+async function loadLatestRaceWithData(regattaFilter = null) {
     try {
-        // Fetch all races
-        const resp = await fetch(`${API_BASE}/api/races`);
+        // Fetch races, optionally scoped to a single regatta when called
+        // from the ?regatta=<id> deep-link path.
+        const url = regattaFilter
+            ? `${API_BASE}/api/races?regatta_id=${encodeURIComponent(regattaFilter)}`
+            : `${API_BASE}/api/races`;
+        const resp = await fetch(url);
         const data = await resp.json();
         const allRaces = data.races || [];
 
@@ -586,21 +713,26 @@ async function loadLatestRaceWithData() {
             });
 
         if (racesWithBoats.length === 0) {
-            console.log('[Race] No past races with boats found');
-            return;
+            console.log('[Race] No past races with boats found' + (regattaFilter ? ` for regatta ${regattaFilter}` : ''));
+            return false;
         }
 
-        // Pick the latest race DAY, then load its 2nd race (Race 2 by
-        // convention — racers asked for this as the default landing
-        // race; Race 1 has the most variable course-setup churn, Race
-        // 2 is usually the cleanest "real race" to debrief). Falls
-        // back to Race 1 if the day only has one race.
+        // Pick the latest race DAY, then pick a race within it.
+        //
+        // - Unfiltered auto-pick (no regatta): Race 2 by convention —
+        //   Race 1 has the most variable course-setup churn, Race 2
+        //   is usually the cleanest "real race" to debrief. Falls
+        //   back to Race 1 if the day only has one race.
+        // - Regatta deep-link (?regatta=<id> from the landing page):
+        //   Race 1 instead — when a visitor clicks into a series they
+        //   want the natural starting point of that day's racing,
+        //   not to land mid-card.
         const latestDate = racesWithBoats[0].date;
         const dayRaces = racesWithBoats
             .filter(r => r.date === latestDate)
             .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
-        const targetRace = dayRaces[1] || dayRaces[0];
-        console.log('[Race] Auto-loading Race 2 of latest day:', targetRace.name, targetRace.date, targetRace.race_id);
+        const targetRace = regattaFilter ? dayRaces[0] : (dayRaces[1] || dayRaces[0]);
+        console.log(`[Race] Auto-loading ${targetRace.name} of ${targetRace.date} (regattaFilter=${regattaFilter || 'none'}):`, targetRace.race_id);
 
         // Set the regatta dropdown (use __all__ for races without regatta)
         const regattaId = targetRace.regatta_id || '__all__';
@@ -616,9 +748,11 @@ async function loadLatestRaceWithData() {
 
         // Load the race data
         await loadRaceData(targetRace.race_id);
+        return true;
 
     } catch (err) {
         console.error('[Race] Failed to auto-load latest race:', err);
+        return false;
     }
 }
 
@@ -630,6 +764,10 @@ function initMap() {
         zoom: 14,
         zoomControl: true,
         maxZoom: 20,  // Allow deep zoom regardless of tile layer limits
+        // Disable Leaflet's built-in arrow-key panning so ←/→ are
+        // reserved for the timeline scrubber (1 s nudges, 10 s with
+        // Shift). The user can still drag/zoom the map with mouse.
+        keyboard: false,
     });
 
     // Base layers
@@ -718,6 +856,8 @@ function clearBoatLayers() {
         const L = boatLayers[deviceId];
         if (L.track) map.removeLayer(L.track);
         if (L.marker) map.removeLayer(L.marker);
+        if (L.hull) map.removeLayer(L.hull);
+        if (L.boom) map.removeLayer(L.boom);
         // Speed-colour segment pool — drop everything before the next
         // race wires up its own pool, otherwise stale boat-coloured
         // segments would linger on the map.
@@ -976,6 +1116,12 @@ function addMarkerOverlaysMapControl() {
                 }
                 return `${cb}</label>`;
             }).join('') +
+            // Keyboard hint row — also reminds the user that arrow
+            // keys scrub the timeline (and only the timeline; map
+            // arrow-panning is intentionally disabled).
+            `<div class="legend-kbd-hint">
+                <kbd>←</kbd>/<kbd>→</kbd> ±1 s · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> ±10 s · <kbd>Space</kbd> ▶ / ⏸
+            </div>` +
             `</div>`;
         L.DomEvent.disableClickPropagation(div);
         L.DomEvent.disableScrollPropagation(div);
@@ -1346,13 +1492,13 @@ function teamInitials(name) {
 // can be hidden via the top-right SHOW legend (markerOverlays). The
 // initials chip stays so boats are always identifiable; only the
 // numeric stats can be turned off.
-function createBoatIcon(color, rotation = 0, initials = '', stats = {}) {
-    const svg = `
-        <svg class="boat-marker-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"
-             style="transform: rotate(${rotation}deg);">
-            <path d="M12 2 L20 20 L12 16 L4 20 Z"
-                  fill="${color}" stroke="white" stroke-width="1.5"/>
-        </svg>`;
+function createBoatIcon(color, rotation = 0, initials = '', stats = {}, sailNumber = '') {
+    // The directional arrow used to live here. It's been replaced by
+    // a real-scale hull polygon (`hullPolygonLatLngs`) drawn directly
+    // on the map per boat — sized to the actual LOA, oriented along
+    // COG, with a mainsail boom showing tack. The marker now renders
+    // only the label (team initials, sail #, optional stat line) so
+    // each boat stays identifiable at every zoom level.
     const ovr = markerOverlays || {};
     const parts = [];
     // Rank (#1..#6) — current leaderboard position.
@@ -1379,14 +1525,18 @@ function createBoatIcon(color, rotation = 0, initials = '', stats = {}) {
         parts.push(`${Math.round(stats.polarPct)}%pol`);
     }
     const statsHtml = parts.length ? `<span class="bml-stats">${parts.join(' ')}</span>` : '';
-    const label = (initials || parts.length)
-        ? `<span class="boat-marker-label"><span class="bml-init" style="color:${color}">${initials}</span>${statsHtml ? ' ' + statsHtml : ''}</span>`
+    // Sail number rides next to the team-initials chip in the same
+    // dark pill — slightly de-emphasized (lighter weight, dimmer
+    // colour) so the initials still scan first.
+    const sailHtml = sailNumber ? `<span class="bml-sail">${sailNumber}</span>` : '';
+    const label = (initials || sailNumber || parts.length)
+        ? `<span class="boat-marker-label"><span class="bml-init" style="color:${color}">${initials}</span>${sailHtml}${statsHtml ? ' ' + statsHtml : ''}</span>`
         : '';
     return L.divIcon({
-        html: `<div class="boat-marker-wrap">${svg}${label}</div>`,
+        html: `<div class="boat-marker-wrap">${label}</div>`,
         className: 'boat-marker',
         iconSize: null,
-        iconAnchor: [12, 12],
+        iconAnchor: [0, 0],
     });
 }
 
@@ -1517,6 +1667,11 @@ async function loadRaceWindData(startTime, endTime) {
     raceAvgTWD = null;
     raceBuoyData = {};
     selectedWindStationId = null;
+    // Per-race admin override is per-race-id. Reset on every wind
+    // reload so an override set on the previous race doesn't leak
+    // forward and make a different race look like it inherited the
+    // same default for the whole day.
+    windDefaultOverride = null;
     if (!startTime || !endTime) return;
     try {
         const startTs = new Date(startTime).getTime() / 1000;
@@ -1545,9 +1700,16 @@ async function loadRaceWindData(startTime, endTime) {
         if (currentRace && currentRace.race_id) {
             try {
                 const ov = await _fetchWindDefaultOverride(currentRace.race_id);
-                if (ov && ov.station_id && usableId(ov.station_id)) {
-                    selectedWindStationId = ov.station_id;
+                if (ov && ov.station_id) {
+                    // Remember the override even when its station has
+                    // no usable samples for this window — the picker
+                    // should still surface the "📌 Default" badge so
+                    // the coach knows the intent is persisted. Only
+                    // the *active* station selection gates on data.
                     windDefaultOverride = ov;
+                    if (usableId(ov.station_id)) {
+                        selectedWindStationId = ov.station_id;
+                    }
                 }
             } catch {}
         }
@@ -1582,6 +1744,56 @@ function _coachToken() {
 }
 function _isCoachLoggedIn() { return !!_coachToken(); }
 
+// Decode the `exp` claim from a Google ID token. JWTs are base64url
+// JSON; we only need the payload (middle segment) to read exp.
+function _coachTokenExpMs() {
+    const t = _coachToken();
+    if (!t) return 0;
+    try {
+        const payload = t.split('.')[1];
+        const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        const claims = JSON.parse(decodeURIComponent(escape(json)));
+        return claims && claims.exp ? claims.exp * 1000 : 0;
+    } catch { return 0; }
+}
+
+// True when a token exists AND has >30 s of life left. The 30 s grace
+// matches the coach app so the two stay in sync.
+function _coachTokenIsValid() {
+    const exp = _coachTokenExpMs();
+    return !!exp && exp > Date.now() + 30_000;
+}
+
+// Sentinel marker on errors so call sites can distinguish "expired"
+// from a generic API failure and offer a re-sign-in prompt.
+const COACH_SESSION_EXPIRED = 'COACH_SESSION_EXPIRED';
+
+function _makeSessionExpiredError() {
+    const err = new Error('Coach session expired. Sign in again to save race defaults.');
+    err.code = COACH_SESSION_EXPIRED;
+    return err;
+}
+
+// Bounce to the coach login page with a `next` param so the browser
+// returns to the current race page after sign-in.
+function _redirectToCoachLogin() {
+    const here = window.location.pathname + window.location.search + window.location.hash;
+    const url = `/coach/login.html?next=${encodeURIComponent(here)}`;
+    window.location.href = url;
+}
+
+// Centralized handler for the wind-default action errors. Shows a
+// re-sign-in confirm() on expiry, plain alert() otherwise. Returns
+// true if it handled the error (caller may skip further reporting).
+function _handleCoachActionError(err) {
+    if (err && err.code === COACH_SESSION_EXPIRED) {
+        const go = confirm('Your coach sign-in has expired. Sign in again now?');
+        if (go) _redirectToCoachLogin();
+        return true;
+    }
+    return false;
+}
+
 async function _fetchWindDefaultOverride(raceId) {
     if (!_COACH_API_URL) return null;
     try {
@@ -1593,13 +1805,13 @@ async function _fetchWindDefaultOverride(raceId) {
 
 async function setRaceWindDefault(raceId, stationId) {
     if (!_COACH_API_URL) throw new Error('Coach API not configured');
-    const token = _coachToken();
-    if (!token) throw new Error('Sign in to the coach app first');
+    if (!_coachTokenIsValid()) throw _makeSessionExpiredError();
     const r = await fetch(`${_COACH_API_URL}/race-wind-default/${encodeURIComponent(raceId)}`, {
         method: 'PUT',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': 'Bearer ' + _coachToken(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ station_id: stationId }),
     });
+    if (r.status === 401) throw _makeSessionExpiredError();
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || data.error || `HTTP ${r.status}`);
     return data;
@@ -1607,12 +1819,12 @@ async function setRaceWindDefault(raceId, stationId) {
 
 async function clearRaceWindDefault(raceId) {
     if (!_COACH_API_URL) throw new Error('Coach API not configured');
-    const token = _coachToken();
-    if (!token) throw new Error('Sign in to the coach app first');
+    if (!_coachTokenIsValid()) throw _makeSessionExpiredError();
     const r = await fetch(`${_COACH_API_URL}/race-wind-default/${encodeURIComponent(raceId)}`, {
         method: 'DELETE',
-        headers: { 'Authorization': 'Bearer ' + token },
+        headers: { 'Authorization': 'Bearer ' + _coachToken() },
     });
+    if (r.status === 401) throw _makeSessionExpiredError();
     if (!r.ok) {
         const data = await r.json().catch(() => ({}));
         throw new Error(data.detail || data.error || `HTTP ${r.status}`);
@@ -1951,11 +2163,20 @@ function renderWindSourcePicker() {
             try {
                 const saved = await setRaceWindDefault(currentRace.race_id, sid);
                 windDefaultOverride = saved;
-                setWindStation(sid);   // also switches the active station + re-renders picker
+                // setWindStation re-renders the picker — but it
+                // early-returns when sid already matches the active
+                // station (the most common case after picking "Set
+                // default" on the station you're already viewing).
+                // Force a re-render so the 📌 Default badge appears
+                // regardless of whether the active station changed.
+                setWindStation(sid);
+                renderWindSourcePicker();
             } catch (err) {
                 btn.disabled = false;
                 btn.textContent = '📌 Set default';
-                alert(`Could not save default: ${err.message || err}`);
+                if (!_handleCoachActionError(err)) {
+                    alert(`Could not save default: ${err.message || err}`);
+                }
             }
         });
     }
@@ -1973,7 +2194,9 @@ function renderWindSourcePicker() {
         } catch (err) {
             clearBtn.disabled = false;
             clearBtn.textContent = 'Clear default';
-            alert(`Could not clear default: ${err.message || err}`);
+            if (!_handleCoachActionError(err)) {
+                alert(`Could not clear default: ${err.message || err}`);
+            }
         }
     });
 }
@@ -2109,14 +2332,39 @@ function addBoatTrack(deviceId, gpsData, boat, imuData = null) {
         opacity: 0.8,
     }).addTo(map);
 
-    // Create boat marker (triangle pointing in direction of travel + label).
+    // Boat label marker (team initials + sail # + optional stat line).
     const initials = teamInitials(boat?.team_name || boat?.boat_name || '');
+    const sailNumber = (boat?.sail_number || '').toString().trim();
     const initialCourse = gpsData[0]?.course || 0;
     const marker = L.marker([0, 0], {
-        icon: createBoatIcon(color, initialCourse, initials),
+        icon: createBoatIcon(color, initialCourse, initials, {}, sailNumber),
         rotationOrigin: 'center center',
     }).addTo(map);
     marker.on('click', () => openBoatDrawer(deviceId));
+
+    // Real-scale sailboat hull, sized to the race's boat_class. Drawn
+    // in metres so it stays correct at every zoom; visible-as-a-shape
+    // only when zoomed in enough to resolve a few metres per pixel,
+    // which is exactly the mark-rounding zoom range where it matters.
+    const hull = L.polygon([], {
+        color: '#ffffff',
+        weight: 1,
+        opacity: 0.9,
+        fillColor: color,
+        fillOpacity: 0.55,
+        interactive: false,
+    }).addTo(map);
+
+    // Mainsail boom — straight line from the mast (≈ antenna position)
+    // aft-and-out to the side OPPOSITE the wind. Acts as a tack
+    // indicator: boom on port = starboard tack, boom on stbd = port
+    // tack. Hidden when no per-boat TWA is available.
+    const boom = L.polyline([], {
+        color: '#ffffff',
+        weight: 2,
+        opacity: 0.85,
+        interactive: false,
+    }).addTo(map);
 
     // Pre-compute cumulative distance (meters) per GPS sample so the
     // leaderboard can sort by progress rather than instantaneous speed.
@@ -2141,6 +2389,8 @@ function addBoatTrack(deviceId, gpsData, boat, imuData = null) {
         deviceId,
         track,
         marker,
+        hull,
+        boom,
         data: gpsData,
         coords,
         times,
@@ -2148,6 +2398,7 @@ function addBoatTrack(deviceId, gpsData, boat, imuData = null) {
         boat,
         color,
         initials,
+        sailNumber,
         imu: imuData || [],   // for per-frame heel readout on the marker label
         visible: true,
         // GPX-backup boats (no E1 device on the day → user uploaded a
@@ -2195,6 +2446,10 @@ function updateBoatPositions(timeSeconds) {
         }
     }
 
+    // RRS 18 zone — fade in/out the 3-boat-length circles around each
+    // mark based on whether any visible boat is currently inside.
+    updateMarkZoneCircles();
+
     // Compute the leaderboard once so per-boat stats (vmg / polarPct /
     // rank) are available to the marker labels and don't get
     // recomputed downstream.
@@ -2221,7 +2476,18 @@ function updateBoatPositions(timeSeconds) {
             vmg: lbStats?.vmg ?? null,
             polarPct: lbStats?.polarPct ?? null,
             rank: lbStats?.rank ?? null,
-        }));
+        }, layer.sailNumber));
+
+        // Real-scale hull polygon + mainsail boom. Both anchored to
+        // the antenna fix; hull rotates with COG, boom rotates with
+        // COG and swings to the side opposite the wind.
+        if (layer.hull) {
+            layer.hull.setLatLngs(hullPolygonLatLngs(closest.lat, closest.lon, course));
+        }
+        if (layer.boom) {
+            const bm = boomLatLngs(closest.lat, closest.lon, course, twaSigned);
+            layer.boom.setLatLngs(bm || []);
+        }
     }
 
     // Refresh leaderboard + chart play cursors + drawer at playback time.
@@ -2431,10 +2697,14 @@ function toggleBoatVisibility(deviceId) {
     if (layer.visible) {
         layer.track.addTo(map);
         layer.marker.addTo(map);
+        if (layer.hull) layer.hull.addTo(map);
+        if (layer.boom) layer.boom.addTo(map);
         // Repaint will rebuild any speed-colour segments via applyTrailWindow.
     } else {
         map.removeLayer(layer.track);
         map.removeLayer(layer.marker);
+        if (layer.hull) map.removeLayer(layer.hull);
+        if (layer.boom) map.removeLayer(layer.boom);
         // Hide the per-segment polylines too — applyTrailWindow's
         // visible-guard upstream handles this for the toggle path,
         // but the explicit hide here keeps the off state immediate.
@@ -2638,9 +2908,29 @@ function calculatePositions() {
             }
         }
 
-        // Display team name if available, else boat name, else device ID
-        const displayName = boat?.team_name || boat?.boat_name || deviceId;
-        const subtitle = boat?.team_name && boat?.boat_name ? boat.boat_name : deviceId;
+        // Identity priority: team_name → boat_name → sail# → device ID.
+        // Device ID (E1..E6) is only shown when literally nothing else
+        // identifies the boat — once any of team/boat/sail is set,
+        // E# disappears from the row.
+        const team = (boat?.team_name || '').trim();
+        const boatName = (boat?.boat_name || '').trim();
+        const sailNumber = (boat?.sail_number != null ? String(boat.sail_number) : '').trim();
+
+        let displayName;
+        const idBits = [];
+        if (team) {
+            displayName = team;
+            if (boatName) idBits.push(boatName);
+            if (sailNumber) idBits.push(`#${sailNumber}`);
+        } else if (boatName) {
+            displayName = boatName;
+            if (sailNumber) idBits.push(`#${sailNumber}`);
+        } else if (sailNumber) {
+            displayName = `#${sailNumber}`;
+        } else {
+            displayName = deviceId;
+        }
+        const subtitle = idBits.join(' · ');
 
         // True Wind Angle (signed, port = negative). Requires NOAA wind.
         let twa = null;
@@ -3089,12 +3379,30 @@ function updateBoatDrawer() {
     }
 
     const boat = boatData.boat;
-    const team = boat?.team_name;
-    const boatName = boat?.boat_name;
+    const team = (boat?.team_name || '').trim();
+    const boatName = (boat?.boat_name || '').trim();
+    const sailNumber = (boat?.sail_number != null ? String(boat.sail_number) : '').trim();
+    // Same identity priority as the leaderboard: team → boat → sail#
+    // → device ID. The trailing chip carries whichever secondary bits
+    // are present (boat name + sail #), comma-separated.
+    let titleMain;
+    const titleBits = [];
+    if (team) {
+        titleMain = team;
+        if (boatName) titleBits.push(boatName);
+        if (sailNumber) titleBits.push(`#${sailNumber}`);
+    } else if (boatName) {
+        titleMain = boatName;
+        if (sailNumber) titleBits.push(`#${sailNumber}`);
+    } else if (sailNumber) {
+        titleMain = `#${sailNumber}`;
+    } else {
+        titleMain = drawerDeviceId;
+    }
     document.getElementById('drawer-title').innerHTML = `
         <span class="drawer-color-bar" style="background:${BOAT_COLORS[drawerDeviceId] || '#888'}"></span>
-        <span class="drawer-team">${team || boatName || drawerDeviceId}</span>
-        ${(team && boatName) ? `<span class="drawer-boat">${boatName}</span>` : ''}
+        <span class="drawer-team">${titleMain}</span>
+        ${titleBits.length ? `<span class="drawer-boat">${titleBits.join(' · ')}</span>` : ''}
         <span class="drawer-device">(${drawerDeviceId})</span>
     `;
 
@@ -3186,6 +3494,23 @@ function updateBoatDrawer() {
     `;
 }
 
+// --- Report-table helpers ---
+
+// Resolve a boat's sail number from the currently-loaded race.
+// Returned as a printable string, or '' when no number is on file.
+// Used by Legs / Maneuvers / Tack-Analysis tables to fill the
+// "Sail #" column with a consistent value sourced from one place.
+function sailNumberFor(deviceId) {
+    if (!deviceId) return '';
+    const sn = raceData?.boats?.[deviceId]?.boat?.sail_number;
+    if (sn == null) return '';
+    return String(sn).trim();
+}
+
+function sailNumberCell(deviceId) {
+    return sailNumberFor(deviceId) || '—';
+}
+
 // --- Leg summary ---
 
 function computeLegSummary() {
@@ -3271,13 +3596,14 @@ function openLegModal() {
             html += `<h3 class="leg-section-title">Leg ${leg}</h3>
                 <table class="data-table">
                     <thead>
-                        <tr><th>#</th><th>Team</th><th>Time</th><th>Δ leader</th><th>Avg SOG</th><th>Avg %pol</th><th>Distance</th></tr>
+                        <tr><th>#</th><th>Team</th><th>Sail #</th><th>Time</th><th>Δ leader</th><th>Avg SOG</th><th>Avg %pol</th><th>Distance</th></tr>
                     </thead><tbody>`;
             group.forEach((r, i) => {
                 const delta = r.durationSec - fastest;
                 html += `<tr class="${i === 0 ? 'leg-leader' : ''}">
                     <td>${i + 1}</td>
                     <td><span class="lb-color" style="background:${BOAT_COLORS[r.deviceId] || '#888'}"></span>${r.team}</td>
+                    <td>${sailNumberCell(r.deviceId)}</td>
                     <td>${fmtMMSS(r.durationSec)}</td>
                     <td>${i === 0 ? '—' : '+' + fmtMMSS(delta)}</td>
                     <td>${r.avgSog.toFixed(1)} kn</td>
@@ -3400,13 +3726,14 @@ function openManeuverModal() {
     let html = `<h3 class="maneuver-section-title">Per-team summary (sorted by tack loss)</h3>
         <table class="data-table">
             <thead>
-                <tr><th>Team</th>
+                <tr><th>Team</th><th>Sail #</th>
                     <th>Tacks</th><th>Avg loss</th><th>Avg dur</th>
                     <th>Gybes</th><th>Avg loss</th><th>Avg dur</th></tr>
             </thead><tbody>`;
     for (const s of summary) {
         html += `<tr>
             <td><span class="lb-color" style="background:${BOAT_COLORS[s.deviceId] || '#888'}"></span>${s.team}</td>
+            <td>${sailNumberCell(s.deviceId)}</td>
             <td>${s.tacksCount}</td>
             <td>${s.tacksAvgLoss != null ? s.tacksAvgLoss.toFixed(2) + ' kn' : '—'}</td>
             <td>${s.tacksAvgDur != null ? s.tacksAvgDur.toFixed(1) + ' s' : '—'}</td>
@@ -3423,7 +3750,7 @@ function openManeuverModal() {
         html += `<h3 class="maneuver-section-title" style="margin-top:1.5rem">Every maneuver, in order</h3>
             <table class="data-table">
                 <thead>
-                    <tr><th>Time</th><th>Team</th><th>Type</th>
+                    <tr><th>Time</th><th>Team</th><th>Sail #</th><th>Type</th>
                         <th>Δ heading</th><th>TWA in → out</th>
                         <th>SOG before</th><th>min</th><th>after</th>
                         <th>Loss</th><th>Duration</th></tr>
@@ -3437,6 +3764,7 @@ function openManeuverModal() {
             html += `<tr>
                 <td>${fmtMMSS(elapsed)}</td>
                 <td><span class="lb-color" style="background:${BOAT_COLORS[m.deviceId] || '#888'}"></span>${m.team}</td>
+                <td>${sailNumberCell(m.deviceId)}</td>
                 <td><span class="${typeClass}">${m.type}</span></td>
                 <td>${m.headingChange.toFixed(0)}°</td>
                 <td>${twaIn} → ${twaOut}</td>
@@ -4306,6 +4634,7 @@ function drawTackList(filteredTacks, tracks, listMode) {
     if (listMode === 'teams') {
         head.innerHTML = `<tr>
             <th>Team</th>
+            <th>Sail #</th>
             <th class="num">N</th>
             <th class="num">Turn°</th>
             <th class="num metric" title="Mean ± standard deviation of per-tack time-lost. Same mean with smaller σ = more consistent crew.">Lost&nbsp;(s)</th>
@@ -4320,6 +4649,7 @@ function drawTackList(filteredTacks, tracks, listMode) {
                 : '—';
             return `<tr data-ta-id="${t.id}">
                 <td><span class="ta-row-color" style="background:${t.color}"></span>${t.team}</td>
+                <td>${sailNumberCell(t.deviceId)}</td>
                 <td class="num">${t.count}</td>
                 <td class="num">${t.meanTurn != null ? t.meanTurn.toFixed(0) + '°' : '—'}</td>
                 <td class="num metric">${lost}</td>
@@ -4329,13 +4659,14 @@ function drawTackList(filteredTacks, tracks, listMode) {
                 <td class="num">${t.meanTwaDelta != null ? (t.meanTwaDelta >= 0 ? '+' : '') + t.meanTwaDelta.toFixed(0) + '°' : '—'}</td>
             </tr>`;
         }).join('');
-        tbody.innerHTML = rows || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1rem">No teams in current selection.</td></tr>';
+        tbody.innerHTML = rows || '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1rem">No teams in current selection.</td></tr>';
         return;
     }
 
     // Per-tack mode (default).
     head.innerHTML = `<tr>
         <th>Tack</th>
+        <th>Sail #</th>
         <th class="num">Turn°</th>
         <th class="num metric" title="Lower = better. Σ(speed deficit · dt) / speedBefore.">Lost&nbsp;(s)</th>
         <th class="num" title="speedBefore − speedMin · instantaneous worst speed drop.">Δ&nbsp;kn</th>
@@ -4360,6 +4691,7 @@ function drawTackList(filteredTacks, tracks, listMode) {
         const drop = (t.speedBefore != null && t.speedMin != null) ? (t.speedBefore - t.speedMin) : null;
         return `<tr data-ta-id="${t.id}" class="${isFleetBest ? 'best' : ''}">
             <td><span class="ta-row-color" style="background:${t.color}"></span>${t.team}<br><span style="font-size:0.7rem;color:var(--text-secondary)">${fmtTimeOfDay(t.tStart)}${badges}</span></td>
+            <td>${sailNumberCell(t.deviceId)}</td>
             <td class="num">${t.turnAngle != null ? t.turnAngle.toFixed(0) + '°' : '—'}</td>
             <td class="num metric">${t.timeLostSec != null ? t.timeLostSec.toFixed(1) : '—'}</td>
             <td class="num">${drop != null ? drop.toFixed(1) : '—'}</td>
@@ -4368,7 +4700,7 @@ function drawTackList(filteredTacks, tracks, listMode) {
             <td class="num">${t.twaDelta != null ? (t.twaDelta >= 0 ? '+' : '') + t.twaDelta.toFixed(0) + '°' : '—'}</td>
         </tr>`;
     }).join('');
-    tbody.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text-secondary);padding:1rem">No tacks match the current selection.</td></tr>';
+    tbody.innerHTML = rows || '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:1rem">No tacks match the current selection.</td></tr>';
 }
 
 function applyTackEmphasis() {
@@ -4428,10 +4760,15 @@ function setupPlaybackControls() {
         if (e.code === 'Space') {
             e.preventDefault();
             togglePlayback();
-        } else if (e.code === 'ArrowLeft') {
-            seekTo(Math.max(0, currentTime / raceDuration - 0.01));
-        } else if (e.code === 'ArrowRight') {
-            seekTo(Math.min(1, currentTime / raceDuration + 0.01));
+        } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+            // ←/→ = 1 second nudge for precise frame-by-frame review.
+            // Shift+← / Shift+→ = 10 s for faster scanning. raceDuration
+            // is in seconds; seekTo() takes a 0..1 fraction.
+            if (!raceDuration) return;
+            e.preventDefault();
+            const step = (e.shiftKey ? 10 : 1) * (e.code === 'ArrowRight' ? 1 : -1);
+            const newSec = Math.max(0, Math.min(raceDuration, currentTime + step));
+            seekTo(newSec / raceDuration);
         }
     });
 }
@@ -4487,6 +4824,21 @@ function updatePlaybackPosition() {
     document.getElementById('time-current').textContent = formatTime(currentTime);
     document.getElementById('elapsed-time').textContent = formatTime(currentTime);
 
+    // Wall-clock time at the cursor (race.start_time + elapsed). Shown
+    // next to the elapsed counter so coaches can correlate with on-
+    // water observations / videos that carry absolute timestamps.
+    const wallEl = document.getElementById('time-wall');
+    if (wallEl) {
+        if (currentRace?.start_time) {
+            const wallMs = new Date(currentRace.start_time).getTime() + currentTime * 1000;
+            wallEl.textContent = new Date(wallMs).toLocaleTimeString('en-US', {
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+            });
+        } else {
+            wallEl.textContent = '';
+        }
+    }
+
     // Update boat positions on map
     updateBoatPositions(currentTime);
 
@@ -4502,6 +4854,31 @@ function formatTime(seconds) {
 }
 
 // --- Data Loading ---
+
+// Show / hide the NOR / SI / Website anchors in the toolbar based on
+// whether the loaded race's regatta carries each URL. Each anchor
+// already has `target="_blank" rel="noopener"`, so a single href set
+// is enough.
+function updateRegattaDocsBar(regattaId) {
+    const slots = [
+        { id: 'regatta-doc-nor', field: 'nor_url' },
+        { id: 'regatta-doc-si',  field: 'si_url' },
+        { id: 'regatta-doc-web', field: 'website_url' },
+    ];
+    const regatta = regattaId ? (regattas || []).find(r => r.regatta_id === regattaId) : null;
+    for (const slot of slots) {
+        const el = document.getElementById(slot.id);
+        if (!el) continue;
+        const url = regatta && regatta[slot.field];
+        if (url) {
+            el.href = url;
+            el.style.display = '';
+        } else {
+            el.removeAttribute('href');
+            el.style.display = 'none';
+        }
+    }
+}
 
 async function loadRegattas() {
     try {
@@ -4622,14 +4999,29 @@ async function loadRaceData(raceId) {
         const raceResp = await fetch(`${API_BASE}/api/races/${raceId}`);
         currentRace = await raceResp.json();
 
+        // Stash any new team / boat names from this race so the
+        // race-edit autocomplete picks them up on subsequent edits,
+        // even if the user is just browsing (didn't open the modal).
+        rememberRaceNames(currentRace);
+
         // Update UI with local time
         document.getElementById('race-name').textContent = currentRace.name;
         const startLocal = new Date(currentRace.start_time);
         const localTimeStr = startLocal.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
         document.getElementById('race-time').textContent = `${currentRace.date} ${localTimeStr}`;
         document.getElementById('btn-edit-race').disabled = false;
+        document.getElementById('btn-duplicate-race').disabled = false;
         const editCourseBtn = document.getElementById('btn-edit-course');
         if (editCourseBtn) editCourseBtn.disabled = false;
+        // Copy-course-to-next button: requires a next race on this
+        // day AND a course on the current race to copy. Recomputed
+        // here on every race load.
+        updateCopyCourseButton();
+
+        // Surface the regatta's public docs (NOR / SI / Website) in
+        // the toolbar — read from the in-memory `regattas` list that
+        // loadRegattas() populated at app start.
+        updateRegattaDocsBar(currentRace.regatta_id);
 
         // Load sensor data for all boats
         const dataResp = await fetch(`${API_BASE}/api/races/${raceId}/data?sensors=gps,imu,wind`);
@@ -4676,6 +5068,11 @@ async function loadRaceData(raceId) {
 
         // Render course (marks + start/finish lines) if present
         renderCourseViewLayer(currentRace);
+
+        // Apply race-level boat class (3 × LOA → mark-zone radius). Must
+        // run after renderCourseViewLayer so the freshly-built zone
+        // circles are resized in place.
+        applyRaceBoatClass();
 
         // Pre-compute course progress (mark roundings + leg lengths) per
         // boat. Cheap to do once, drives the leaderboard ranking and VMG.
@@ -4805,7 +5202,13 @@ async function loadAvailableSessions() {
     }
 }
 
-async function openRaceModal(race = null) {
+// `isDuplicatingRace` flag rides through saveRace so the modal's PATCH
+// vs POST decision honors a duplicate intent even though currentRace
+// still has the original race_id. Reset on close + after each save.
+let isDuplicatingRace = false;
+
+async function openRaceModal(race = null, opts = {}) {
+    const duplicate = !!opts.duplicate;
     const modal = document.getElementById('race-modal');
     const title = document.getElementById('modal-title');
     const deleteBtn = document.getElementById('btn-delete-race');
@@ -4816,7 +5219,14 @@ async function openRaceModal(race = null) {
     // Load available sessions for dropdown
     await loadAvailableSessions();
 
-    if (race) {
+    // Build the boat-class dropdown once per page lifetime.
+    populateBoatClassDropdown();
+
+    if (race && duplicate) {
+        title.textContent = 'Duplicate Race';
+        populateRaceForm(race);
+        deleteBtn.style.display = 'none';   // No delete on a not-yet-saved race
+    } else if (race) {
         title.textContent = 'Edit Race';
         populateRaceForm(race);
         deleteBtn.style.display = IS_ADMIN ? 'block' : 'none';  // Show delete button for admins only
@@ -4829,8 +5239,32 @@ async function openRaceModal(race = null) {
     modal.style.display = 'flex';
 }
 
+// Open the modal pre-filled with currentRace's data, but treat the
+// save as a fresh POST. Copies: name (suffixed), date, regatta,
+// boat_class, boats (with their session_path / gpx_path), start/finish
+// lines, marks, course. Skips: race_id, start_time, end_time,
+// finish_order, results — race-instance state that must be set fresh
+// for the new race.
+async function duplicateRace() {
+    if (!currentRace?.race_id) {
+        alert('Load a race first to duplicate it.');
+        return;
+    }
+    const draft = JSON.parse(JSON.stringify(currentRace));
+    delete draft.race_id;
+    draft.start_time = null;
+    draft.end_time = null;
+    draft.finish_order = [];
+    draft.results = null;
+    draft.name = `${currentRace.name || 'Race'} (copy)`;
+
+    isDuplicatingRace = true;
+    await openRaceModal(draft, { duplicate: true });
+}
+
 function closeRaceModal() {
     document.getElementById('race-modal').style.display = 'none';
+    isDuplicatingRace = false;
 }
 
 function handleGpxFileSelect(event, deviceId) {
@@ -4890,7 +5324,20 @@ function clearRaceForm() {
     document.getElementById('race-date-input').value = new Date().toISOString().split('T')[0];
     document.getElementById('start-time-input').value = '18:00';
     document.getElementById('end-time-input').value = '18:30';
-    document.getElementById('regatta-input').value = '';
+
+    // Pre-fill the regatta from the toolbar selection so "+ New Race"
+    // under a chosen regatta carries the context across; boat_class
+    // then inherits from that regatta. Setting .value programmatically
+    // does NOT fire `change`, so this won't loop with the change
+    // listener we wire below.
+    const toolbarRegatta = document.getElementById('regatta-select')?.value || '';
+    const initialRegattaId = (toolbarRegatta && toolbarRegatta !== '__all__') ? toolbarRegatta : '';
+    document.getElementById('regatta-input').value = initialRegattaId;
+
+    const seedRegatta = initialRegattaId
+        ? (regattas || []).find(r => r.regatta_id === initialRegattaId)
+        : null;
+    setBoatClassInForm(seedRegatta?.boat_class || null);   // defaults to J/80 if none
 
     // Default boat assignments (6 boats)
     renderBoatAssignments([
@@ -4925,6 +5372,7 @@ function populateRaceForm(race) {
     }
 
     document.getElementById('regatta-input').value = race.regatta_id || '';
+    setBoatClassInForm(race.boat_class || null);
 
     renderBoatAssignments(race.boats || []);
     renderFinishOrder(race.finish_order || [], race.boats || []);
@@ -4940,9 +5388,13 @@ function renderBoatAssignments(boats) {
         boatMap[b.device_id] = b;
     }
 
-    // Build datalist options for autocomplete
-    const boatOptions = FLEET_BOATS.map(b => `<option value="${b}">`).join('');
-    const teamOptions = FLEET_TEAMS.map(t => `<option value="${t}">`).join('');
+    // Build datalist options for autocomplete. Sources: hard-coded
+    // fleet roster + everything this browser has saved (auto-harvested
+    // from past race loads + saves) + the currently-loaded race's own
+    // assignments. Lets a coach add a new team once and have it
+    // suggested forever after.
+    const boatOptions = knownBoatNames().map(b => `<option value="${_attrEsc(b)}">`).join('');
+    const teamOptions = knownTeamNames().map(t => `<option value="${_attrEsc(t)}">`).join('');
 
     container.innerHTML = `
         <datalist id="boat-names">${boatOptions}</datalist>
@@ -4972,6 +5424,7 @@ function renderBoatAssignments(boats) {
                 </div>
                 <input type="text" placeholder="Team" value="${boat.team_name || ''}" data-field="team_name" list="team-names">
                 <input type="text" placeholder="Boat" value="${boat.boat_name || ''}" data-field="boat_name" list="boat-names">
+                <input type="text" placeholder="Sail #" value="${boat.sail_number || ''}" data-field="sail_number" class="sail-number-input">
                 <div class="session-or-gpx">
                     <select data-field="session_path" class="session-select${gpxActive ? ' hidden' : ''}">
                         <option value="">Select session...</option>
@@ -5111,17 +5564,19 @@ function getFormData() {
         const deviceId = row.dataset.device;
         const teamName = row.querySelector('[data-field="team_name"]')?.value || '';
         const boatName = row.querySelector('[data-field="boat_name"]')?.value || '';
+        const sailNumber = row.querySelector('[data-field="sail_number"]')?.value?.trim() || '';
         const gpxPath = row.dataset.gpxPath || null;
         const hasPendingGpx = !!pendingGpxFiles[deviceId];
         const isGpxActive = hasPendingGpx || !!gpxPath;
         // When GPX is active, clear session; when session active, clear gpx_path
         const sessionPath = isGpxActive ? null : (row.querySelector('[data-field="session_path"]')?.value || null);
 
-        if (teamName || boatName || sessionPath || isGpxActive) {
+        if (teamName || boatName || sailNumber || sessionPath || isGpxActive) {
             boats.push({
                 device_id: deviceId,
                 team_name: teamName,
                 boat_name: boatName,
+                sail_number: sailNumber,
                 session_path: sessionPath,
                 gpx_path: isGpxActive ? gpxPath : null,
             });
@@ -5134,12 +5589,15 @@ function getFormData() {
         finishOrder.push(item.dataset.device);
     });
 
+    const boatClass = getBoatClassFromForm();   // may throw
+
     return {
         name: document.getElementById('race-name-input').value,
         date: date,
         start_time: startUTC,
         end_time: endUTC,
         regatta_id: document.getElementById('regatta-input').value || null,
+        boat_class: boatClass,
         boats,
         finish_order: finishOrder,
     };
@@ -5156,7 +5614,11 @@ async function saveRace() {
 
     try {
         let resp;
-        if (currentRace?.race_id) {
+        // Duplicate flow leaves currentRace.race_id pointing at the
+        // source race; the flag forces a POST so we don't accidentally
+        // overwrite the original.
+        const isUpdate = currentRace?.race_id && !isDuplicatingRace;
+        if (isUpdate) {
             // Update existing
             resp = await fetch(`${API_BASE}/api/races/${currentRace.race_id}`, {
                 method: 'PATCH',
@@ -5180,6 +5642,11 @@ async function saveRace() {
 
         const savedRace = await resp.json();
         console.log('[Race] Saved race:', savedRace);
+
+        // Persist any newly-typed team / boat names so they appear
+        // in the autocomplete the next time this browser opens a
+        // race-edit modal.
+        rememberRaceNames(savedRace);
 
         // Upload any GPX tracks staged for this race
         if (Object.keys(pendingGpxFiles).length > 0) {
@@ -5272,6 +5739,9 @@ async function deleteRace() {
         document.getElementById('race-name').textContent = 'No race selected';
         document.getElementById('race-time').textContent = '';
         document.getElementById('btn-edit-race').disabled = true;
+        document.getElementById('btn-duplicate-race').disabled = true;
+        document.getElementById('btn-copy-course-next').disabled = true;
+        document.getElementById('btn-copy-course-all').disabled = true;
 
         // Reload race days and races for current regatta
         if (regattaId) {
@@ -5299,6 +5769,158 @@ let courseEditLayer = null;
 let courseViewLayer = null;
 let markEditors = {};
 let lineEditors = {};
+
+// Mark-room "zone" circles: RRS 18 says boats acquire mark-room when
+// they enter a circle of THREE BOAT-LENGTHS centred on the mark. For
+// the J/80 (LOA 8 m) that's 24 m. Each mark gets a translucent dashed
+// Mark-zone circle that fades in when any visible boat is inside, fades
+// out otherwise — gives the coach a live visual cue for who's "in the
+// zone" during roundings. Radius is 3 × LOA, derived from the race's
+// boat_class (defaults to J/80 / 24 m when no class is set).
+let MARK_ZONE_RADIUS_M = DEFAULT_BOAT_LOA_M * 3;
+let markZoneCircles = [];     // [{ mark, circle, active }] — rebuilt by renderCourseViewLayer
+
+// Live bow-offset for the currently-loaded race. Updated by
+// applyRaceBoatClass() and read by zone / OCS code.
+let BOW_OFFSET_M = DEFAULT_BOW_OFFSET_M;
+
+// Live hull dimensions for the boats on this race — drives the
+// real-scale hull polygon and mainsail boom drawn on the map. Falls
+// back to J/80 numbers when the race has no boat_class set.
+let HULL_LOA_M  = DEFAULT_BOAT_LOA_M;
+let HULL_BEAM_M = DEFAULT_BOAT_BEAM_M;
+
+// Pre-computed unit-LOA hull outline in (x_aft, y_starboard / half_beam)
+// — a 9-vertex sailboat profile with pointy bow and small flat transom.
+// Multiply x by LOA and y by half_beam at draw time.
+const _HULL_OUTLINE = [
+    [0.00,  0.00],   // bow tip
+    [0.18,  0.55],   // forward shoulder port
+    [0.42,  1.00],   // beam max port (amidships)
+    [0.92,  0.55],   // stern quarter port
+    [1.00,  0.30],   // transom port corner
+    [1.00, -0.30],   // transom starboard corner
+    [0.92, -0.55],
+    [0.42, -1.00],
+    [0.18, -0.55],
+];
+
+// Push the current race's boat_class into the live map state: zone
+// radius, bow offset, and hull dimensions used to draw real-scale
+// boat polygons. Cheap and idempotent; safe to call after every
+// race load or save.
+function applyRaceBoatClass() {
+    const cls = currentRace?.boat_class || null;
+    const loa = cls?.loa_m;
+    const bow = cls?.bow_offset_m;
+    const beam = cls?.beam_m;
+    HULL_LOA_M = (loa && loa > 0) ? loa : DEFAULT_BOAT_LOA_M;
+    // Custom-class fallback: ~32% of LOA matches J/80, Sonar 23,
+    // Rhodes 19, and 420 within ±0.02 m.
+    HULL_BEAM_M = (beam && beam > 0) ? beam : HULL_LOA_M * 0.32;
+    BOW_OFFSET_M = (bow != null && bow >= 0) ? bow : DEFAULT_BOW_OFFSET_M;
+    MARK_ZONE_RADIUS_M = HULL_LOA_M * 3;
+    for (const entry of markZoneCircles) {
+        entry.circle.setRadius(MARK_ZONE_RADIUS_M);
+    }
+
+    // Hide the chart's polar-overlay toggle when polar isn't
+    // supported for this class — keeping a no-op button visible
+    // would just confuse the user.
+    const polTog = document.getElementById('polar-overlay-toggle');
+    if (polTog) polTog.style.display = polarSupportedForCurrentRace() ? '' : 'none';
+}
+
+// Project a GPS (antenna) fix forward by BOW_OFFSET_M metres along the
+// boat's course-over-ground, giving an estimated bow position. Used to
+// correct zone-entry and OCS detection for the fact that the antenna
+// sits at the mast, not at the bow. Equirectangular small-angle
+// approximation — accurate to mm at the scales we use (offsets ≤ 5 m).
+function projectBowPosition(lat, lon, cog_deg) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || BOW_OFFSET_M <= 0
+        || cog_deg == null || !Number.isFinite(cog_deg)) {
+        return { lat, lon };
+    }
+    const R = 6371000;
+    const rad = cog_deg * Math.PI / 180;
+    const dN = BOW_OFFSET_M * Math.cos(rad);   // metres north
+    const dE = BOW_OFFSET_M * Math.sin(rad);   // metres east
+    const dLat = (dN / R) * 180 / Math.PI;
+    const dLon = (dE / (R * Math.cos(lat * Math.PI / 180))) * 180 / Math.PI;
+    return { lat: lat + dLat, lon: lon + dLon };
+}
+
+// Project a point in boat-frame (forwardM = metres along COG, starboardM
+// = metres to the right of bow when looking forward) onto the geographic
+// frame as a [lat, lon] pair offset from a reference point. Equi-
+// rectangular approximation — fine at the scales we use (≤ ~15 m
+// from the antenna).
+function _offsetLatLng(refLat, refLon, forwardM, starboardM, cogDeg) {
+    if (cogDeg == null || !Number.isFinite(cogDeg)) cogDeg = 0;
+    const cog = cogDeg * Math.PI / 180;
+    // COG measured clockwise from north → forward unit vector in
+    // (north, east) basis = (cos(COG), sin(COG)). Starboard unit
+    // vector = forward rotated 90° clockwise = (-sin(COG), cos(COG)).
+    const north = forwardM * Math.cos(cog) + starboardM * (-Math.sin(cog));
+    const east  = forwardM * Math.sin(cog) + starboardM *  Math.cos(cog);
+    const R = 6371000;
+    const dLat = (north / R) * 180 / Math.PI;
+    const dLon = (east  / (R * Math.cos(refLat * Math.PI / 180))) * 180 / Math.PI;
+    return [refLat + dLat, refLon + dLon];
+}
+
+// Real-scale sailboat hull polygon for the currently-loaded boat class.
+// Returns an array of [lat, lon] vertices that closes into a hull
+// shape sized to the actual LOA / beam, oriented along COG, anchored
+// at the antenna fix. Falls back to an empty polygon when COG is
+// missing — better to draw nothing than spin a degenerate hull at
+// dock-still speeds.
+function hullPolygonLatLngs(antennaLat, antennaLon, cogDeg) {
+    if (cogDeg == null || !Number.isFinite(cogDeg)) return [];
+    const halfBeam = HULL_BEAM_M / 2;
+    return _HULL_OUTLINE.map(([xAft, yScaled]) => {
+        // Convert (x_aft from bow, y_scaled where ±1 = ±half_beam) to
+        // antenna-relative (forwardM, starboardM). Bow is BOW_OFFSET_M
+        // forward of antenna; x_aft grows away from the bow.
+        const forwardM   = BOW_OFFSET_M - xAft * HULL_LOA_M;
+        const starboardM = yScaled * halfBeam;
+        return _offsetLatLng(antennaLat, antennaLon, forwardM, starboardM, cogDeg);
+    });
+}
+
+// Mainsail boom line. The boom hangs aft from the mast (≈ antenna
+// position) on the side OPPOSITE the wind:
+//   - starboard tack (twa > 0, wind from starboard) → boom on port side
+//   - port tack      (twa < 0, wind from port)      → boom on starboard
+// Boom angle from centerline ≈ |TWA| − 5°, clamped to [0°, 85°]:
+// close-hauled ⇒ near-centerline; running ⇒ ~90° to one side.
+// Returns [[mast lat,lon], [boom-tip lat,lon]] or null when TWA is
+// unavailable.
+function boomLatLngs(antennaLat, antennaLon, cogDeg, twaSigned) {
+    if (twaSigned == null || !Number.isFinite(twaSigned)) return null;
+    const boomLen = HULL_LOA_M * 0.45;
+    const angleDeg = Math.min(85, Math.max(0, Math.abs(twaSigned) - 5));
+    const angleRad = angleDeg * Math.PI / 180;
+    const sideSign = twaSigned > 0 ? -1 : 1;
+    // Mast sits roughly at the antenna position (the antenna is on the
+    // stern face of the mast, so this is within centimetres for our
+    // purposes). Boom tip is `boomLen` from the mast at `angleDeg`
+    // off the aft centerline.
+    const aftDist  = -boomLen * Math.cos(angleRad);   // negative forward = aft
+    const sideDist = sideSign * boomLen * Math.sin(angleRad);
+    const mast = [antennaLat, antennaLon];
+    const tip  = _offsetLatLng(antennaLat, antennaLon, aftDist, sideDist, cogDeg);
+    return [mast, tip];
+}
+
+// ---- Boat-class dropdown wiring for the race-setup modal ---------------
+// Thin wrappers around the shared `boat-classes.js` module so the race
+// form keeps its un-prefixed IDs while sharing the catalogue and
+// helpers with events.html's regatta modal.
+
+function populateBoatClassDropdown() { bcPopulateDropdown(''); }
+function setBoatClassInForm(boatClass) { bcSetInForm(boatClass, ''); }
+function getBoatClassFromForm() { return bcGetFromForm(''); }
 
 const MARK_TYPE_COLORS = {
     windward: '#f4212e',
@@ -5376,10 +5998,60 @@ function renderCourseViewLayer(race) {
             .bindTooltip(`${tip} committee`).addTo(courseViewLayer);
     }
 
+    // Rebuild the zone-circle registry. Each mark gets a 24 m circle
+    // sitting on the courseViewLayer (under boats). Starts fully
+    // transparent; updateMarkZoneCircles() fades it in/out per frame.
+    markZoneCircles = [];
     for (const m of (race.marks || [])) {
         L.marker([m.lat, m.lon], { icon: markIcon(m.mark_type) })
             .bindTooltip(m.name || m.mark_type, { permanent: false })
             .addTo(courseViewLayer);
+        if (m.lat == null || m.lon == null) continue;
+        const circle = L.circle([m.lat, m.lon], {
+            radius: MARK_ZONE_RADIUS_M,
+            color: '#fbbf24',
+            weight: 1.5,
+            opacity: 0,
+            fillColor: '#fbbf24',
+            fillOpacity: 0,
+            dashArray: '5 5',
+            interactive: false,
+        });
+        circle.addTo(courseViewLayer);
+        markZoneCircles.push({ mark: m, circle, active: false });
+    }
+}
+
+// Per-frame: fade each mark's 3-boat-length zone circle in when any
+// visible boat is currently inside it, fade out otherwise. Only writes
+// `setStyle` on transitions (one boolean per mark per frame), so this
+// is cheap to call from updateBoatPositions every cursor tick.
+function updateMarkZoneCircles() {
+    if (!markZoneCircles.length) return;
+    for (const entry of markZoneCircles) {
+        const { mark, circle } = entry;
+        let inZone = false;
+        for (const layer of Object.values(boatLayers)) {
+            if (!layer.visible || !layer.current) continue;
+            const c = layer.current;
+            if (c.lat == null || c.lon == null) continue;
+            // Test the BOW position, not the antenna. The boat enters
+            // the zone when any part of the hull crosses 3 × LOA from
+            // the mark; the antenna is bow_offset_m aft of the bow,
+            // so we project the antenna fix forward along COG first.
+            const bow = projectBowPosition(c.lat, c.lon, c.course);
+            if (haversineMeters(bow.lat, bow.lon, mark.lat, mark.lon) <= MARK_ZONE_RADIUS_M) {
+                inZone = true;
+                break;
+            }
+        }
+        if (inZone !== entry.active) {
+            entry.active = inZone;
+            circle.setStyle({
+                opacity: inZone ? 0.75 : 0,
+                fillOpacity: inZone ? 0.08 : 0,
+            });
+        }
     }
 }
 
@@ -5678,9 +6350,183 @@ async function saveCourseDraft() {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
         currentRace = await resp.json();
         exitCourseEditMode();
+        // currentRace.marks / course / lines have changed → recompute
+        // whether Copy-Course-Next can fire.
+        updateCopyCourseButton();
     } catch (err) {
         console.error('[Race] Failed to save course:', err);
         alert(`Failed to save course: ${err.message}`);
+    }
+}
+
+// ---- Copy Course → Next Race ------------------------------------------
+// Propagate this race's course (start/finish lines, marks, course
+// sequence) to the next race on the same day. Useful when the RC
+// repositions a mark mid-day — set up the new layout on Race 2 and
+// push it to Race 3 with one click. Boats, times, and finish order
+// on the target race are intentionally NOT touched.
+
+function getRemainingRacesOfDay() {
+    if (!currentRace || !Array.isArray(races) || !races.length) return [];
+    const sorted = [...races].sort((a, b) =>
+        (a.start_time || '').localeCompare(b.start_time || ''));
+    const idx = sorted.findIndex(r => r.race_id === currentRace.race_id);
+    if (idx < 0) return [];
+    return sorted.slice(idx + 1);
+}
+
+function getNextRaceOfDay() {
+    return getRemainingRacesOfDay()[0] || null;
+}
+
+function currentRaceHasCourse() {
+    if (!currentRace) return false;
+    const hasStart  = !!(currentRace.start_line && currentRace.start_line.pin_lat != null);
+    const hasFinish = !!(currentRace.finish_line && currentRace.finish_line.pin_lat != null);
+    const hasMarks  = Array.isArray(currentRace.marks) && currentRace.marks.length > 0;
+    return hasStart || hasFinish || hasMarks;
+}
+
+function updateCopyCourseButton() {
+    const nextBtn = document.getElementById('btn-copy-course-next');
+    const allBtn  = document.getElementById('btn-copy-course-all');
+    const remaining = getRemainingRacesOfDay();
+    const hasCourse = currentRaceHasCourse();
+
+    if (nextBtn) {
+        const next = remaining[0] || null;
+        const ready = !!(next && hasCourse);
+        nextBtn.disabled = !ready;
+        if (!currentRace) {
+            nextBtn.title = 'Load a race first';
+        } else if (!next) {
+            nextBtn.title = 'No next race on this day to copy the course to';
+        } else if (!hasCourse) {
+            nextBtn.title = 'This race has no marks or start/finish lines yet';
+        } else {
+            nextBtn.title = `Copy this race's course to "${next.name}"`;
+        }
+    }
+
+    if (allBtn) {
+        const ready = !!(remaining.length && hasCourse);
+        allBtn.disabled = !ready;
+        if (!currentRace) {
+            allBtn.title = 'Load a race first';
+        } else if (!remaining.length) {
+            allBtn.title = 'This is the last race of the day — nothing later to copy to';
+        } else if (!hasCourse) {
+            allBtn.title = 'This race has no marks or start/finish lines yet';
+        } else {
+            const names = remaining.map(r => `"${r.name}"`).join(', ');
+            allBtn.title = `Copy this race's course to ${remaining.length} later race${remaining.length !== 1 ? 's' : ''}: ${names}`;
+        }
+    }
+}
+
+function _courseBodyFromCurrentRace() {
+    return {
+        start_line:  currentRace.start_line  || null,
+        finish_line: currentRace.finish_line || null,
+        marks:       currentRace.marks       || [],
+        course:      currentRace.course      || [],
+    };
+}
+
+function _courseSummaryLine() {
+    const markCount = (currentRace.marks || []).length;
+    const courseLen = (currentRace.course || []).length;
+    const hasStart  = !!(currentRace.start_line  && currentRace.start_line.pin_lat  != null);
+    const hasFinish = !!(currentRace.finish_line && currentRace.finish_line.pin_lat != null);
+    const parts = [];
+    if (hasStart)  parts.push('start line');
+    if (hasFinish) parts.push('finish line');
+    if (markCount) parts.push(`${markCount} mark${markCount !== 1 ? 's' : ''}`);
+    if (courseLen) parts.push(`${courseLen}-leg sequence`);
+    return parts.join(', ') || '(empty)';
+}
+
+async function copyCourseToNextRace() {
+    const next = getNextRaceOfDay();
+    if (!next || !currentRace) return;
+    const ok = confirm(
+        `Copy this race's course to "${next.name}"?\n\n` +
+        `Will replace any existing course on "${next.name}" with:\n` +
+        `  ${_courseSummaryLine()}\n\n` +
+        `Boats, times, and finish order on "${next.name}" stay unchanged.`
+    );
+    if (!ok) return;
+
+    const btn = document.getElementById('btn-copy-course-next');
+    const origLabel = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Copying…'; }
+    try {
+        const resp = await fetch(`${API_BASE}/api/races/${next.race_id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_courseBodyFromCurrentRace()),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+        alert(`Course copied to "${next.name}".`);
+    } catch (err) {
+        console.error('[Race] Copy course failed:', err);
+        alert(`Failed to copy course: ${err.message || err}`);
+    } finally {
+        if (btn) { btn.textContent = origLabel; }
+        updateCopyCourseButton();
+    }
+}
+
+async function copyCourseToAllRemainingRaces() {
+    const targets = getRemainingRacesOfDay();
+    if (!targets.length || !currentRace) return;
+    const names = targets.map(t => `"${t.name}"`).join(', ');
+    const ok = confirm(
+        `Copy this race's course to ${targets.length} later race${targets.length !== 1 ? 's' : ''} today?\n\n` +
+        `Targets: ${names}\n\n` +
+        `Will replace any existing course on each with:\n` +
+        `  ${_courseSummaryLine()}\n\n` +
+        `Boats, times, and finish order on each target stay unchanged.`
+    );
+    if (!ok) return;
+
+    const btn = document.getElementById('btn-copy-course-all');
+    const origLabel = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Copying…'; }
+
+    const body = _courseBodyFromCurrentRace();
+    const succeeded = [];
+    const failed = [];
+    // Sequential PATCHes: keeps error reporting clean and avoids
+    // hammering the Lambda with a parallel burst. The race count
+    // for a single day is small (typically 2–6) so latency stays
+    // under a couple of seconds.
+    for (const target of targets) {
+        try {
+            const resp = await fetch(`${API_BASE}/api/races/${target.race_id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (!resp.ok) {
+                failed.push({ name: target.name, detail: `HTTP ${resp.status}` });
+            } else {
+                succeeded.push(target.name);
+            }
+        } catch (err) {
+            failed.push({ name: target.name, detail: err.message || String(err) });
+        }
+    }
+
+    if (btn) { btn.textContent = origLabel; }
+    updateCopyCourseButton();
+
+    if (failed.length === 0) {
+        alert(`Course copied to ${succeeded.length} race${succeeded.length !== 1 ? 's' : ''}: ${succeeded.join(', ')}`);
+    } else {
+        const failedStr = failed.map(f => `  • ${f.name}: ${f.detail}`).join('\n');
+        const okStr = succeeded.length ? `\n\nSucceeded:\n  ${succeeded.join(', ')}` : '';
+        alert(`Copied to ${succeeded.length} of ${targets.length} races.${okStr}\n\nFailed:\n${failedStr}`);
     }
 }
 
@@ -5717,6 +6563,15 @@ function setupEventListeners() {
         }
     });
 
+    // Duplicate race button — opens the modal pre-filled with a copy
+    // of the current race; saving POSTs a new race rather than
+    // PATCHing the source.
+    document.getElementById('btn-duplicate-race').addEventListener('click', duplicateRace);
+
+    // Copy-course buttons (next race + all remaining races on the day).
+    document.getElementById('btn-copy-course-next').addEventListener('click', copyCourseToNextRace);
+    document.getElementById('btn-copy-course-all').addEventListener('click', copyCourseToAllRemainingRaces);
+
     // Edit course button (toggles on-map editing)
     const btnEditCourse = document.getElementById('btn-edit-course');
     if (btnEditCourse) {
@@ -5742,6 +6597,17 @@ function setupEventListeners() {
     document.getElementById('btn-save-race').addEventListener('click', saveRace);
     document.getElementById('btn-match-sessions').addEventListener('click', matchSessions);
     document.getElementById('btn-delete-race').addEventListener('click', deleteRace);
+
+    // Regatta picker inside the race-edit modal: when the user
+    // flips it, inherit the new regatta's boat_class into the
+    // boat-class control. Only fires on user interaction (setting
+    // .value programmatically does not dispatch `change`), so the
+    // edit-existing-race flow is unaffected.
+    document.getElementById('regatta-input').addEventListener('change', (e) => {
+        const rid = e.target.value;
+        const reg = rid ? (regattas || []).find(r => r.regatta_id === rid) : null;
+        setBoatClassInForm(reg?.boat_class || null);
+    });
 
     // Close modal on backdrop click
     document.querySelector('.modal-backdrop').addEventListener('click', closeRaceModal);

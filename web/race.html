@@ -5,6 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SailFrames - Race Dashboard</title>
 
+    <!--
+      Bare /race.html (no ?race= or ?regatta= deep link) sends visitors
+      to the Series & Races browse page instead of auto-loading
+      whatever the latest race happens to be. Done synchronously
+      before any heavy assets (Leaflet, Chart.js, race-app.js) load
+      so we don't pay for a render that never happens.
+    -->
+    <script>
+        (function () {
+            try {
+                var p = new URLSearchParams(location.search);
+                if (!p.get('race') && !p.get('regatta')) {
+                    location.replace('/races.html');
+                }
+            } catch (e) { /* ignore — fall through to normal load */ }
+        })();
+    </script>
+
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
@@ -28,12 +46,12 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
-    <link rel="stylesheet" href="./assets/css/race.css?v=36">
+    <link rel="stylesheet" href="./assets/css/race.css?v=43">
     <link rel="stylesheet" href="./assets/css/race-chat.css?v=9">
     <link rel="stylesheet" href="./assets/css/race-start-review.css?v=2">
     <script src="./config.js"></script>
     <script src="./assets/js/analytics.js"></script>
-    <script src="./assets/js/race-briefing.js?v=9"></script>
+    <script src="./assets/js/race-briefing.js?v=11"></script>
     <script src="./assets/js/race-chat.js?v=16"></script>
     <script src="./assets/js/race-start-review.js?v=3"></script>
 </head>
@@ -53,13 +71,24 @@
             </select>
             <button id="btn-new-race" class="btn-primary" title="Create new race">+ New Race</button>
             <button id="btn-edit-race" class="btn-secondary" title="Edit race" disabled>Edit</button>
+            <button id="btn-duplicate-race" class="btn-secondary" title="Duplicate race (copy boats, date, course; times left blank)" disabled>Duplicate</button>
             <button id="btn-edit-course" class="btn-secondary" title="Edit course on map" disabled>Edit Course</button>
+            <button id="btn-copy-course-next" class="btn-secondary" title="Copy this race's marks, start/finish lines, and course sequence to the next race of the day" disabled>Copy Course →</button>
+            <button id="btn-copy-course-all" class="btn-secondary" title="Copy this race's course to every later race on the same day" disabled>Copy → All</button>
             <button id="btn-leg-summary" class="btn-secondary" title="Leg-by-leg per-boat summary">Legs</button>
             <button id="btn-maneuvers" class="btn-secondary" title="Tacks &amp; gybes comparison">Maneuvers</button>
             <button id="btn-tack-analysis" class="btn-secondary" title="Overlay every tack in a wind-up frame, color-coded by speed">Tack Analysis</button>
             <button id="btn-charts" class="btn-secondary" title="Open Speed / Heel / Wind charts (Esc to close)">Charts</button>
             <button id="btn-start-review" class="btn-secondary" title="Replay the start sequence with horn signals">Review Start</button>
             <button id="btn-race-coach" class="btn-secondary" title="Ask an AI Coach about this race">Ask an AI Coach</button>
+            <!-- Regatta-level public docs (NOR / SI / Website). Each
+                 anchor opens in a new tab; hidden when the loaded
+                 race's regatta has no link for that slot. -->
+            <span class="regatta-docs" id="regatta-docs">
+                <a id="regatta-doc-nor" class="btn-doc" target="_blank" rel="noopener" style="display:none" title="Notice of Race">NOR</a>
+                <a id="regatta-doc-si"  class="btn-doc" target="_blank" rel="noopener" style="display:none" title="Sailing Instructions">SI</a>
+                <a id="regatta-doc-web" class="btn-doc" target="_blank" rel="noopener" style="display:none" title="Regatta Website">Website</a>
+            </span>
         </div>
         <a href="./sessions.html" class="nav-link">Sessions</a>
         <a href="./session.html" class="nav-link">Timeline</a>
@@ -229,6 +258,7 @@
         </div>
         <div class="timeline">
             <span class="time-label" id="time-current">00:00:00</span>
+            <span class="time-wall" id="time-wall" title="Local wall-clock time at the cursor"></span>
             <input type="range" id="timeline-slider" min="0" max="1000" value="0" step="1">
             <span class="time-label" id="time-total">00:00:00</span>
             <button id="btn-share-moment" class="btn-share-moment"
@@ -239,7 +269,7 @@
     <!-- Race Editor Modal -->
     <div class="modal" id="race-modal" style="display: none;">
         <div class="modal-backdrop"></div>
-        <div class="modal-content">
+        <div class="modal-content modal-race">
             <div class="modal-header">
                 <h2 id="modal-title">New Race</h2>
                 <button class="modal-close" id="modal-close">&times;</button>
@@ -271,6 +301,21 @@
                         <input type="time" id="end-time-input" step="1">
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="boat-class-input">Boat Class</label>
+                        <select id="boat-class-input"></select>
+                        <div class="form-hint" id="boat-class-hint"></div>
+                    </div>
+                    <div class="form-group" id="boat-class-custom-group" style="display:none">
+                        <label for="boat-class-custom-name">Custom Class Name</label>
+                        <input type="text" id="boat-class-custom-name" placeholder="e.g. Snipe">
+                        <label for="boat-class-custom-loa" style="margin-top:8px">LOA (meters)</label>
+                        <input type="number" step="0.01" min="0" id="boat-class-custom-loa" placeholder="4.72">
+                        <label for="boat-class-custom-offset" style="margin-top:8px">GPS antenna → bow (meters)</label>
+                        <input type="number" step="0.01" min="0" id="boat-class-custom-offset" placeholder="auto: 38% of LOA">
+                    </div>
+                </div>
 
                 <!-- Boat Assignments -->
                 <div class="form-section">
@@ -298,6 +343,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=51"></script>
+    <script type="module" src="./assets/js/race-app.js?v=73"></script>
 </body>
 </html>

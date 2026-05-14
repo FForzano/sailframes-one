@@ -170,11 +170,28 @@ def find_session_to_merge(bucket: str, device_id: str, date: str, new_start_time
                 # New session starts after existing session ends
                 gap = new_start_dt - end_dt
             elif start_dt and new_start_dt < start_dt:
-                # New session starts before existing session starts — check gap from new end to existing start
-                # We don't know the new session's end, so use the gap from new start to existing start
+                # New session starts before existing session starts —
+                # check gap from new start to existing start (we don't
+                # know the new session's end yet)
                 gap = start_dt - new_start_dt
             else:
-                # New data overlaps with existing session time range — definitely merge
+                # New data overlaps the existing session's time range
+                # — e.g., a non-GPS file uploaded after its paired GPS
+                # file. Genuine merge candidate.
+                #
+                # BUT only if the existing manifest's window is
+                # credible. A bogus full-day window (start=00:00:00 /
+                # end=23:59:59, seen when process_gps mis-dated rows
+                # across UTC midnight) would otherwise swallow every
+                # later upload that day. Skip the candidate when
+                # start_dt is missing or the window spans more than
+                # 12 hours.
+                if start_dt is None:
+                    logger.info(f"Skipping {folder}: existing manifest missing start_time")
+                    continue
+                if (end_dt - start_dt) > timedelta(hours=12):
+                    logger.info(f"Skipping {folder}: existing window > 12h (likely bogus)")
+                    continue
                 gap = timedelta(seconds=0)
 
             logger.info(f"Session {folder}: end={end_time_str}, new_start={new_start_time}, gap={gap}")
@@ -386,9 +403,15 @@ def process_file(bucket: str, key: str):
         update_manifest_rtcm3(bucket, device_id, output_folder, key, source_session_id)
         return
 
-    # Download CSV (only for text-based sensor files)
+    # Download CSV (only for text-based sensor files). Decode with
+    # `errors='replace'` because we have seen SD-card or firmware
+    # corruption occasionally inject a single non-UTF8 byte (e.g.
+    # 0x89) mid-file. A strict decode aborts the entire session
+    # silently; replacing the bad byte with U+FFFD only loses the
+    # one row whose float()/int() parse then fails inside the
+    # per-row try/except, which is the right outcome.
     response = s3.get_object(Bucket=bucket, Key=key)
-    csv_content = response['Body'].read().decode('utf-8')
+    csv_content = response['Body'].read().decode('utf-8', errors='replace')
 
     # Parse and downsample (pass date and start_time for E1 timestamp generation)
     data_10hz = None  # Only populated for GPS
@@ -582,6 +605,25 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             utc_raw = row.get('utc', '')
             if not utc_raw:
                 continue
+
+            # Per-row date. UTC midnight rollover inside a single
+            # session would otherwise mis-date the post-midnight rows
+            # back to the start-of-session day — that bug stamped the
+            # 2026-05-12 235632 session with start=00:00:00 /
+            # end=23:59:59, which then silently swallowed every later
+            # upload via the session-merge overlap path.
+            row_gps_date = row.get('gps_date', '')
+            row_date = actual_date
+            if row_gps_date and len(row_gps_date) == 6:
+                try:
+                    d = int(row_gps_date[:2])
+                    m = int(row_gps_date[2:4])
+                    y = 2000 + int(row_gps_date[4:6])
+                    if 1 <= d <= 31 and 1 <= m <= 12:
+                        row_date = f"{y}-{m:02d}-{d:02d}"
+                except ValueError:
+                    pass
+
             try:
                 # Parse HHMMSS.mmm format
                 utc_float = float(utc_raw)
@@ -590,9 +632,9 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 seconds = int(utc_float % 100)
                 millis = int((utc_float % 1) * 1000)
                 # Full timestamp with milliseconds for 10Hz
-                full_ts = f"{actual_date}T{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}Z"
+                full_ts = f"{row_date}T{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}Z"
                 # Second-only timestamp for grouping
-                second = f"{actual_date}T{hours:02d}:{minutes:02d}:{seconds:02d}"
+                second = f"{row_date}T{hours:02d}:{minutes:02d}:{seconds:02d}"
             except ValueError:
                 continue
 

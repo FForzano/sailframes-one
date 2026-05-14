@@ -3,6 +3,12 @@
  * Manages the three-level hierarchy: Regattas → Race Days → Races
  */
 
+import {
+    populateBoatClassDropdown as bcPopulateDropdown,
+    setBoatClassInForm as bcSetInForm,
+    getBoatClassFromForm as bcGetFromForm,
+} from './boat-classes.js?v=2';
+
 function isAdmin() {
     return document.cookie.includes('CF_Authorization');
 }
@@ -141,7 +147,12 @@ function renderRegattas() {
         const dateRange = r.start_date
             ? `${fmtDate(r.start_date)}${r.end_date ? ' – ' + fmtDate(r.end_date) : ''}`
             : '';
-        const meta = [r.venue, r.boat_class].filter(Boolean).join(' · ');
+        // boat_class may be a legacy string ("J/80") or the structured
+        // object {id, name, loa_m, bow_offset_m}.
+        const className = (r.boat_class && typeof r.boat_class === 'object')
+            ? r.boat_class.name
+            : r.boat_class;
+        const meta = [r.venue, className].filter(Boolean).join(' · ');
         const actions = IS_ADMIN ? `
             <div class="event-item-actions">
                 <button class="btn-item-action" data-action="edit-regatta" data-id="${r.regatta_id}" title="Edit">✎</button>
@@ -304,9 +315,17 @@ function openRegattaModal(regatta = null) {
     document.getElementById('regatta-modal-title').textContent = regatta ? 'Edit Regatta' : 'New Regatta';
     document.getElementById('regatta-name').value = regatta?.name || '';
     document.getElementById('regatta-venue').value = regatta?.venue || '';
-    document.getElementById('regatta-boat-class').value = regatta?.boat_class || '';
     document.getElementById('regatta-start-date').value = regatta?.start_date || '';
     document.getElementById('regatta-end-date').value = regatta?.end_date || '';
+    document.getElementById('regatta-nor-url').value = regatta?.nor_url || '';
+    document.getElementById('regatta-si-url').value = regatta?.si_url || '';
+    document.getElementById('regatta-website-url').value = regatta?.website_url || '';
+
+    // Boat class — same dropdown as the race-setup form, prefixed
+    // with `regatta-` to keep the two modals' IDs unique.
+    bcPopulateDropdown('regatta-');
+    bcSetInForm(regatta?.boat_class || null, 'regatta-');
+
     document.getElementById('btn-delete-regatta').style.display = (regatta && IS_ADMIN) ? 'block' : 'none';
     document.getElementById('regatta-modal').style.display = 'flex';
     document.getElementById('regatta-name').focus();
@@ -318,12 +337,19 @@ function closeRegattaModal() {
 }
 
 async function saveRegatta() {
+    let boatClass;
+    try { boatClass = bcGetFromForm('regatta-'); }
+    catch (err) { alert(err.message); return; }
+
     const body = {
         name: document.getElementById('regatta-name').value.trim(),
         venue: document.getElementById('regatta-venue').value.trim(),
-        boat_class: document.getElementById('regatta-boat-class').value.trim(),
+        boat_class: boatClass,
         start_date: document.getElementById('regatta-start-date').value,
         end_date: document.getElementById('regatta-end-date').value,
+        nor_url: document.getElementById('regatta-nor-url').value.trim() || null,
+        si_url: document.getElementById('regatta-si-url').value.trim() || null,
+        website_url: document.getElementById('regatta-website-url').value.trim() || null,
     };
     if (!body.name) { alert('Name is required'); return; }
 

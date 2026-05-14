@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SailFrames — Series & Races</title>
+    <meta name="description" content="Browse sailing series and races on SailFrames — six-boat fleet tracking with PPK GNSS, NOAA wind, and per-tack analysis.">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>*</text></svg>">
+
+    <link rel="stylesheet" href="./assets/css/main.css?v=10">
+    <link rel="stylesheet" href="./assets/css/races.css?v=5">
+    <script src="./config.js"></script>
+    <script src="./assets/js/analytics.js"></script>
+</head>
+<body class="races-landing-page">
+    <header class="rl-nav">
+        <a href="/" class="rl-nav-logo">SailFrames</a>
+        <nav class="rl-nav-links">
+            <a href="./race.html">Race Dashboard</a>
+            <a href="./sessions.html">Sessions</a>
+            <a href="./session.html">Timeline</a>
+            <a href="./events.html" class="rl-nav-admin">Manage</a>
+        </nav>
+    </header>
+
+    <main class="rl-main">
+        <section class="rl-hero">
+            <h1>Series &amp; Races</h1>
+            <p class="rl-hero-sub">Every regatta and standalone race we've tracked. Click a series to open its races in the dashboard.</p>
+            <div class="rl-toolbar">
+                <input type="search" id="rl-search" placeholder="Search series, venue, boat class…" autocomplete="off">
+                <select id="rl-sort">
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="name">By name</option>
+                </select>
+            </div>
+        </section>
+
+        <section id="rl-regattas-section">
+            <h2 class="rl-section-title">Series</h2>
+            <div id="rl-regattas-grid" class="rl-grid">
+                <div class="rl-loading">Loading series…</div>
+            </div>
+        </section>
+
+        <section id="rl-orphan-section" hidden>
+            <h2 class="rl-section-title">Standalone races</h2>
+            <p class="rl-section-sub">Races that aren't tied to a series.</p>
+            <div id="rl-orphan-list" class="rl-list"></div>
+        </section>
+
+        <footer class="rl-footer">
+            <p>SailFrames is open source · Apache 2.0 · <a href="https://github.com/sailframes/core" target="_blank" rel="noopener">github.com/sailframes/core</a></p>
+        </footer>
+    </main>
+
+    <script type="module" src="./assets/js/races-page.js?v=6"></script>
+</body>
+</html>

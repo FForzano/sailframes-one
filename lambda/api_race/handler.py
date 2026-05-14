@@ -5,6 +5,7 @@ and GPX track uploads as a GPS source for boats without E1 devices.
 """
 
 import base64
+import gzip
 import json
 import logging
 import math
@@ -25,6 +26,7 @@ DATA_BUCKET = os.environ.get('DATA_BUCKET', 'sailframes-fleet-data-prod')
 # S3 paths for race data
 RACES_INDEX_KEY = "races/races.json"
 REGATTAS_INDEX_KEY = "regattas/regattas.json"
+RACEDAYS_INDEX_KEY = "racedays/racedays.json"
 
 CORS_HEADERS = {
     'Content-Type': 'application/json',
@@ -60,6 +62,23 @@ def lambda_handler(event, context):
                 return update_regatta(path_params['regatta_id'], json.loads(event.get('body', '{}')))
             elif http_method == 'DELETE':
                 return delete_regatta(path_params['regatta_id'])
+
+        # Race Days — MUST be checked before /api/races because the
+        # string '/api/races' is a substring of '/api/racedays', so the
+        # race branch would otherwise swallow these requests.
+        elif '/api/racedays' in path:
+            raceday_id = path_params.get('raceday_id')
+            if http_method == 'GET' and not raceday_id:
+                qs = event.get('queryStringParameters', {}) or {}
+                return list_racedays(qs.get('regatta_id'), qs.get('date'))
+            elif http_method == 'GET':
+                return get_raceday(raceday_id)
+            elif http_method == 'POST':
+                return create_raceday(json.loads(event.get('body', '{}')))
+            elif http_method == 'PATCH':
+                return update_raceday(raceday_id, json.loads(event.get('body', '{}')))
+            elif http_method == 'DELETE':
+                return delete_raceday(raceday_id)
 
         # Races
         elif '/api/races' in path:
@@ -117,11 +136,35 @@ def lambda_handler(event, context):
         return response(500, {'error': str(e)})
 
 
+# API Gateway / Lambda enforces a hard 6 MB synchronous response body
+# limit. The /races/{id}/data endpoint returns GPS+IMU+wind for all
+# boats in the race window — for a J/80 fleet of 6 over an 80-minute
+# race that's ~8 MB of raw JSON. Anything past 6 MB causes the runtime
+# to exit with `Runtime.ExitError` *before* lambda_handler's exception
+# handler runs, so the only visible symptom is the API Gateway's
+# generic 500 "Internal Server Error" with nothing logged.
+#
+# We gzip any response body larger than ~256 KB. JSON compresses
+# 5–10× → the wire payload comfortably fits under the cap and the
+# browser auto-decompresses via Content-Encoding: gzip. Below 256 KB
+# we skip the compression overhead.
+_GZIP_THRESHOLD_BYTES = 256 * 1024
+
+
 def response(status_code, body):
+    body_str = json.dumps(body)
+    if len(body_str) <= _GZIP_THRESHOLD_BYTES:
+        return {
+            'statusCode': status_code,
+            'headers': CORS_HEADERS,
+            'body': body_str,
+        }
+    compressed = gzip.compress(body_str.encode('utf-8'), compresslevel=6)
     return {
         'statusCode': status_code,
-        'headers': CORS_HEADERS,
-        'body': json.dumps(body)
+        'headers': {**CORS_HEADERS, 'Content-Encoding': 'gzip'},
+        'body': base64.b64encode(compressed).decode('ascii'),
+        'isBase64Encoded': True,
     }
 
 
@@ -180,9 +223,17 @@ def create_regatta(body):
         'regatta_id': regatta_id,
         'name': body.get('name', ''),
         'venue': body.get('venue', ''),
+        # boat_class may arrive as a legacy free-text string ("J/80") or
+        # the structured {id, name, loa_m, bow_offset_m} object — stored
+        # opaque so existing records keep working.
         'boat_class': body.get('boat_class', ''),
         'start_date': body.get('start_date', ''),
         'end_date': body.get('end_date', ''),
+        # Optional public-facing docs the race dashboard surfaces as
+        # click-through links (open in a new tab).
+        'nor_url': body.get('nor_url'),
+        'si_url': body.get('si_url'),
+        'website_url': body.get('website_url'),
         'race_ids': [],
         'created_at': now,
         'updated_at': now,
@@ -201,8 +252,12 @@ def update_regatta(regatta_id, body):
     data = load_json(REGATTAS_INDEX_KEY)
     for i, regatta in enumerate(data.get('regattas', [])):
         if regatta['regatta_id'] == regatta_id:
-            for key in ['name', 'venue', 'start_date', 'end_date']:
-                if key in body and body[key] is not None:
+            # boat_class is special-cased: it's allowed to be set to an
+            # empty object or `null`, so we let it through with a
+            # presence check (not the truthy `is not None`).
+            for key in ['name', 'venue', 'boat_class', 'start_date', 'end_date',
+                        'nor_url', 'si_url', 'website_url']:
+                if key in body:
                     regatta[key] = body[key]
             regatta['updated_at'] = now_iso()
             data['regattas'][i] = regatta
@@ -219,6 +274,90 @@ def delete_regatta(regatta_id):
         return response(404, {'error': f'Regatta not found: {regatta_id}'})
     save_json(REGATTAS_INDEX_KEY, data)
     return response(200, {'deleted': regatta_id})
+
+
+# --- Race Days ---
+#
+# A race day is an explicit "this is the calendar day on which we plan
+# to race" entity that groups one or more races. Most days are
+# auto-synthesized from race dates by events.html when no explicit
+# raceday row exists, but admins can also create named days
+# ("Day 1 — Race Day") in advance, before any race exists for them.
+
+def list_racedays(regatta_id=None, date=None):
+    data = load_json(RACEDAYS_INDEX_KEY)
+    days = data.get('race_days', [])
+    if regatta_id:
+        days = [d for d in days if d.get('regatta_id') == regatta_id]
+    if date:
+        days = [d for d in days if d.get('date') == date]
+    days = sorted(days, key=lambda d: (d.get('date') or '', d.get('created_at') or ''))
+    return response(200, {'race_days': days})
+
+
+def get_raceday(raceday_id):
+    data = load_json(RACEDAYS_INDEX_KEY)
+    for d in data.get('race_days', []):
+        if d.get('raceday_id') == raceday_id:
+            return response(200, d)
+    return response(404, {'error': f'Race day not found: {raceday_id}'})
+
+
+def create_raceday(body):
+    if not body.get('date'):
+        return response(400, {'error': 'date is required'})
+
+    raceday_id = str(uuid.uuid4())[:8]
+    now = now_iso()
+    new_day = {
+        'raceday_id': raceday_id,
+        'date': body.get('date', ''),
+        'type': body.get('type') or 'race_day',
+        'name': body.get('name') or None,
+        'regatta_id': body.get('regatta_id') or None,
+        'race_ids': body.get('race_ids', []) or [],
+        'created_at': now,
+        'updated_at': now,
+    }
+
+    data = load_json(RACEDAYS_INDEX_KEY)
+    if not data:
+        data = {'race_days': []}
+    data.setdefault('race_days', []).append(new_day)
+    save_json(RACEDAYS_INDEX_KEY, data)
+    return response(201, new_day)
+
+
+def update_raceday(raceday_id, body):
+    if not raceday_id:
+        return response(400, {'error': 'raceday_id is required'})
+    data = load_json(RACEDAYS_INDEX_KEY)
+    days = data.get('race_days', [])
+    for i, d in enumerate(days):
+        if d.get('raceday_id') == raceday_id:
+            # `regatta_id` is allowed to be set to null (un-link from
+            # a regatta), so use presence rather than truthiness.
+            for key in ['date', 'type', 'name', 'regatta_id', 'race_ids']:
+                if key in body:
+                    d[key] = body[key]
+            d['updated_at'] = now_iso()
+            days[i] = d
+            data['race_days'] = days
+            save_json(RACEDAYS_INDEX_KEY, data)
+            return response(200, d)
+    return response(404, {'error': f'Race day not found: {raceday_id}'})
+
+
+def delete_raceday(raceday_id):
+    if not raceday_id:
+        return response(400, {'error': 'raceday_id is required'})
+    data = load_json(RACEDAYS_INDEX_KEY)
+    original_len = len(data.get('race_days', []))
+    data['race_days'] = [d for d in data.get('race_days', []) if d.get('raceday_id') != raceday_id]
+    if len(data['race_days']) == original_len:
+        return response(404, {'error': f'Race day not found: {raceday_id}'})
+    save_json(RACEDAYS_INDEX_KEY, data)
+    return response(200, {'deleted': raceday_id})
 
 
 # --- Races ---
@@ -259,6 +398,10 @@ def create_race(body):
         'end_time': body.get('end_time', ''),
         'regatta_id': body.get('regatta_id'),
         'boats': boats,
+        # Boat class: {id, name, loa_m}. Drives the RRS 18 zone radius
+        # (3 × LOA) drawn around marks on the race page. Optional; the
+        # race page defaults to J/80 (24 m) when absent.
+        'boat_class': body.get('boat_class'),
         'start_line': body.get('start_line'),
         'finish_line': body.get('finish_line'),
         'marks': body.get('marks', []),
@@ -306,18 +449,24 @@ def update_race(race_id, body):
     if not race_data:
         return response(404, {'error': f'Race not found: {race_id}'})
 
-    for key in ['name', 'start_time', 'end_time', 'boats', 'start_line', 'finish_line', 'marks', 'course', 'finish_order']:
+    # NOTE: 'date' MUST stay in this allowlist. The dashboard groups
+    # races by `race.date` for the day-picker dropdown, so a race whose
+    # date is stuck at the wrong day silently sticks to the wrong group
+    # forever — exactly the failure mode that prompted this fix.
+    for key in ['name', 'date', 'start_time', 'end_time', 'boats', 'boat_class', 'start_line', 'finish_line', 'marks', 'course', 'finish_order']:
         if key in body and body[key] is not None:
             race_data[key] = body[key]
 
     race_data['updated_at'] = now_iso()
     save_json(f'races/{race_id}/race.json', race_data)
 
-    # Update index
+    # Update index — date is mirrored here for the day-grouping dropdown,
+    # so it must stay in sync with the per-race JSON above.
     data = load_json(RACES_INDEX_KEY)
     for i, r in enumerate(data.get('races', [])):
         if r['race_id'] == race_id:
             data['races'][i]['name'] = race_data['name']
+            data['races'][i]['date'] = race_data['date']
             data['races'][i]['start_time'] = race_data['start_time']
             data['races'][i]['end_time'] = race_data['end_time']
             data['races'][i]['boat_count'] = len(race_data.get('boats', []))

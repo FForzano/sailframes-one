@@ -1033,6 +1033,26 @@ body.course-editing .boat-legend {
 .marker-overlays-control .trail-window-select:hover { border-color: #22d3ee; }
 .marker-overlays-control .trail-window-select:focus { outline: 1px solid #22d3ee; outline-offset: 1px; }
 
+/* Keyboard-shortcut hint at the bottom of the SHOW legend body. */
+.marker-overlays-control .legend-kbd-hint {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+.marker-overlays-control .legend-kbd-hint kbd {
+    display: inline-block;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.05);
+    font-family: monospace;
+    font-size: 0.65rem;
+    color: var(--text-primary);
+}
+
 /* Polar overlay toggle in chart header */
 .chart-overlay-toggle {
     background: transparent;
@@ -1422,6 +1442,16 @@ body.course-editing .boat-legend {
     min-width: 70px;
 }
 
+.time-wall {
+    font-family: monospace;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-primary);
+}
+
 #timeline-slider {
     flex: 1;
     height: 6px;
@@ -1464,6 +1494,14 @@ body.course-editing .boat-legend {
     max-width: 600px;
     max-height: 90vh;
     overflow-y: auto;
+}
+
+/* Race-edit modal needs more horizontal room because the boat-
+   assignment row now has 5 columns (device, team, boat, sail#,
+   session/gpx). At 600px the session dropdown was squeezed below
+   visibility. */
+.modal-content.modal-race {
+    max-width: 780px;
 }
 
 .modal-header {
@@ -1539,6 +1577,12 @@ body.course-editing .boat-legend {
     gap: 1rem;
 }
 
+.form-hint {
+    margin-top: 0.35rem;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
 .form-section {
     margin-top: 1.5rem;
     padding-top: 1.5rem;
@@ -1561,12 +1605,21 @@ body.course-editing .boat-legend {
 
 .boat-assignment {
     display: grid;
-    grid-template-columns: 50px 1fr 1fr 1fr;
+    /* device | team | boat | sail# | session/gpx
+       sail# is narrow because numbers are short; session/gpx claims
+       1.4fr so the picker stays usable. min-width 0 prevents flex
+       children from refusing to shrink and pushing siblings off. */
+    grid-template-columns: 50px minmax(0, 1fr) minmax(0, 1fr) 70px minmax(0, 1.4fr);
     gap: 0.5rem;
     align-items: center;
     padding: 0.5rem;
     background: var(--bg-primary);
     border-radius: 6px;
+}
+
+.boat-assignment .sail-number-input {
+    text-align: center;
+    letter-spacing: 0.02em;
 }
 
 /* Session / GPX toggle container */
@@ -1757,6 +1810,27 @@ body.course-editing .boat-legend {
 .btn-secondary:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.regatta-docs {
+    display: inline-flex;
+    gap: 0.4rem;
+    margin-left: 0.4rem;
+}
+.btn-doc {
+    display: inline-block;
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.7rem;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.875rem;
+    line-height: 1;
+}
+.btn-doc:hover {
+    background: var(--bg-primary);
+    border-color: var(--accent);
 }
 
 .btn-danger {
@@ -2181,6 +2255,12 @@ body.course-editing .boat-legend {
 .boat-marker-label .bml-init {
     font-weight: 700;
     margin-right: 4px;
+}
+.boat-marker-label .bml-sail {
+    font-weight: 500;
+    color: #cbd5e1;
+    margin-right: 4px;
+    letter-spacing: 0.02em;
 }
 .boat-marker-label .bml-stats {
     font-size: 0.62rem;

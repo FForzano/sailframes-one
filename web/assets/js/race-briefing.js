@@ -194,10 +194,12 @@
     const meta = boatMeta?.boat || {};
     const team = meta.team_name || meta.boat_name || deviceId;
     const boatName = meta.boat_name || team;
+    const sailNumber = (meta.sail_number != null ? String(meta.sail_number) : '').trim();
 
     return {
       name: team,                // primary human label — what the LLM should use
       boat_name: boatName,       // hull/skipper name if distinct from team
+      sail_number: sailNumber || null,  // surface in narrative when present
       boat_id: deviceId,         // device serial — internal only, never surface
       finish_position: finishPosition || null,
       finish: finishMs != null ? fmtTime(finishMs, startMs) : null,
@@ -259,6 +261,42 @@
     const y = Math.sin(dLam) * Math.cos(f2);
     const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dLam);
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  // Project a fix forward along COG by `metres`. Equirectangular, fine
+  // at offsets ≤ 10 m. Mirrors projectBowPosition() in race-app.js.
+  function projectForward(lat, lon, cogDeg, metres) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !(metres > 0)
+        || cogDeg == null || !Number.isFinite(cogDeg)) {
+      return { lat, lon };
+    }
+    const R = 6371000;
+    const rad = cogDeg * Math.PI / 180;
+    const dLat = ((metres * Math.cos(rad)) / R) * 180 / Math.PI;
+    const dLon = ((metres * Math.sin(rad)) / (R * Math.cos(lat * Math.PI / 180))) * 180 / Math.PI;
+    return { lat: lat + dLat, lon: lon + dLon };
+  }
+
+  // Convert (lat, lon) to local east-north (metres) about a reference
+  // point. Cheap planar approximation — fine for a single race course.
+  function toLocalXY(refLat, refLon, lat, lon) {
+    const R = 6371000;
+    const toRad = (d) => d * Math.PI / 180;
+    return {
+      x: (lon - refLon) * Math.cos(toRad(refLat)) * R * toRad(1),
+      y: (lat - refLat) * R * toRad(1),
+    };
+  }
+
+  // Signed perpendicular distance from point q to line p1→p2 (all in
+  // local XY). Sign is +1 when q is to the LEFT of p1→p2 (cross > 0).
+  // Caller picks the orientation so the desired side reads positive.
+  function signedPerpDist(p1, p2, q) {
+    const vx = p2.x - p1.x, vy = p2.y - p1.y;
+    const wx = q.x  - p1.x, wy = q.y  - p1.y;
+    const len = Math.hypot(vx, vy);
+    if (len < 1e-6) return Math.hypot(wx, wy);
+    return (vx * wy - vy * wx) / len;
   }
 
   // GPS track at 1 s cadence (matching the LG290P's native rate).
@@ -517,17 +555,39 @@
   // Start-line analysis: distance from each boat to the line at the
   // start gun (negative = over early), the boat's speed at the gun,
   // and whether the boat appeared to be OCS (across the line before
-  // t=0). Uses simple perpendicular-distance to the line segment.
-  function startAnalysis(boatsMap, layers, startLine, startMs) {
+  // t=0). Bow-corrected: the GPS antenna sits on the stern side of the
+  // mast, ~38 % of LOA aft of the bow. We project the antenna fix
+  // forward by bow_offset_m along COG before measuring, so the line
+  // crossing reflects the BOW — which is what OCS actually depends on.
+  // Sign convention: distance_from_line_m > 0 = bow on the course side
+  // (over the line); < 0 = behind the line. The course side is the
+  // half-plane containing the first course mark.
+  function startAnalysis(boatsMap, layers, startLine, startMs, opts) {
     if (!startLine || startLine.pin_lat == null || startLine.boat_lat == null || startMs == null) return [];
 
-    // Project the boat's position onto the start-line segment and
-    // return the perpendicular distance (positive = behind the line
-    // looking from the line toward the course, negative = over).
-    // Because we don't know the upwind direction reliably for sign,
-    // we just return absolute distance + a flag for "appears over".
+    const bowOffsetM = (opts && Number.isFinite(opts.bow_offset_m) && opts.bow_offset_m >= 0)
+      ? opts.bow_offset_m : 0;
+    const firstMark = opts && opts.first_mark;  // { lat, lon } or null
+
     const linePin  = [startLine.pin_lat,  startLine.pin_lon];
     const lineBoat = [startLine.boat_lat, startLine.boat_lon];
+    const lineMidLat = (linePin[0] + lineBoat[0]) / 2;
+    const lineMidLon = (linePin[1] + lineBoat[1]) / 2;
+    const lineLen = distanceMeters(linePin[0], linePin[1], lineBoat[0], lineBoat[1]);
+
+    // Local XY with the line mid-point as origin. Sign of signedPerpDist
+    // is +1 to the LEFT of pin→committee. Use first-mark cross product
+    // to learn which sign is the "course side"; multiply by that factor
+    // on each boat so positive = over the line.
+    const p1 = toLocalXY(lineMidLat, lineMidLon, linePin[0],  linePin[1]);
+    const p2 = toLocalXY(lineMidLat, lineMidLon, lineBoat[0], lineBoat[1]);
+    let courseSideSign = 1;
+    if (firstMark && firstMark.lat != null && firstMark.lon != null) {
+      const fm = toLocalXY(lineMidLat, lineMidLon, firstMark.lat, firstMark.lon);
+      const cross = signedPerpDist(p1, p2, fm);
+      if (cross < 0) courseSideSign = -1;
+      else if (cross === 0) courseSideSign = 1;   // degenerate, leave as is
+    }
 
     const out = [];
     for (const id of Object.keys(boatsMap)) {
@@ -546,18 +606,32 @@
       }
       const p = layer.data[lo];
       if (!p || p.lat == null) continue;
-      const dPin  = distanceMeters(p.lat, p.lon, linePin[0], linePin[1]);
-      const dBoat = distanceMeters(p.lat, p.lon, lineBoat[0], lineBoat[1]);
-      const lineLen = distanceMeters(linePin[0], linePin[1], lineBoat[0], lineBoat[1]);
+
+      // Project the antenna fix forward to the bow before measuring.
+      const bow = projectForward(p.lat, p.lon, p.course, bowOffsetM);
+
+      const dPin  = distanceMeters(bow.lat, bow.lon, linePin[0], linePin[1]);
+      const dBoat = distanceMeters(bow.lat, bow.lon, lineBoat[0], lineBoat[1]);
+      const q     = toLocalXY(lineMidLat, lineMidLon, bow.lat, bow.lon);
+      const signed = signedPerpDist(p1, p2, q) * courseSideSign;
+
       const meta = boatsMap[id]?.boat || {};
       const name = meta.team_name || meta.boat_name || id;
       out.push({
         name,
         speed_at_gun_kn: round(p.speed_kn, 1),
         cog_at_gun_deg: round(p.course, 0),
-        distance_to_pin_m:  Math.round(dPin),
+        distance_to_pin_m: Math.round(dPin),
         distance_to_committee_m: Math.round(dBoat),
-        // Heuristic line-bias / approach side: closer to pin or boat end.
+        // Signed perpendicular distance from the BOW to the start line,
+        // positive on the course side. The AI briefing reads this for
+        // OCS calls; absence of first_mark means sign is unreliable
+        // (course_side_known=false) and the model is expected to
+        // ignore the sign.
+        distance_from_line_m: Math.round(signed * 10) / 10,
+        course_side_known: !!firstMark,
+        is_ocs: !!firstMark && signed > 0,
+        bow_offset_applied_m: bowOffsetM,
         approach_end: dPin < dBoat ? 'pin' : 'committee',
         line_length_m: Math.round(lineLen),
       });
@@ -624,7 +698,21 @@
     const windSeries = buildWindSeries(ctx.weatherWindSamples || [], startMs);
     const laylines = buildLaylines(courseSeq, raceAvgTwd);
     const encounters = detectEncounters(layers, boatsMap, ctx.weatherWindSamples || [], startMs);
-    const startInfo = startAnalysis(boatsMap, layers, c.start_line, startMs);
+    // courseSeq is an array of mark_id strings; resolve the first
+    // one against c.marks so startAnalysis can decide the "course
+    // side" of the line for OCS sign.
+    const _firstMarkId = courseSeq[0];
+    let _firstMark = null;
+    if (_firstMarkId && Array.isArray(c.marks)) {
+      const m = c.marks.find((mm) => mm.mark_id === _firstMarkId);
+      if (m && m.lat != null && m.lon != null) _firstMark = { lat: m.lat, lon: m.lon };
+    }
+    const _bowOffsetM = (c.boat_class && Number.isFinite(c.boat_class.bow_offset_m))
+      ? c.boat_class.bow_offset_m : 0;
+    const startInfo = startAnalysis(boatsMap, layers, c.start_line, startMs, {
+      bow_offset_m: _bowOffsetM,
+      first_mark: _firstMark,
+    });
 
     return {
       race: {
@@ -650,6 +738,15 @@
         end:   endMs != null   ? fmtTime(endMs, startMs) : null,
         wind_source: ctx.weatherWindSource || null,
         wind: wind,
+        // Hull dimensions for the fleet — drives the 3-LOA mark zone
+        // (RRS 18) and the bow-offset used to project antenna fixes
+        // forward for OCS / zone-entry detection.
+        boat_class: c.boat_class ? {
+          id: c.boat_class.id || null,
+          name: c.boat_class.name || null,
+          loa_m: c.boat_class.loa_m != null ? round(c.boat_class.loa_m, 2) : null,
+          bow_offset_m: c.boat_class.bow_offset_m != null ? round(c.boat_class.bow_offset_m, 2) : null,
+        } : null,
       },
       // AUTHORITATIVE — see system prompt rule on rankings.
       ranking: {

@@ -27,6 +27,28 @@ SYNOPTIC_BBOX = os.environ.get("SYNOPTIC_BBOX", "-71.10,42.27,-70.85,42.42")
 # it stands out in the picker; doesn't affect inclusion.
 SYNOPTIC_MARINE_HINTS = ("courageous", "sailing", "harbor", "wharf", "deer island", "yacht")
 
+# Synoptic stations we never want to surface in the wind-source picker.
+# These are typically personal CWOP stations whose siting (rooftops in
+# residential areas, parking lots, behind buildings) makes them
+# unrepresentative of on-the-water conditions. Matched against both
+# the Synoptic STID and a case-insensitive substring of the station
+# name — Synoptic's CWOP IDs sometimes drop the leading letter from
+# the FCC call-sign (e.g. user-visible "DW3706" arrives as STID
+# "D3706" but the name still reads "DW3706 Winthrop"). The name match
+# also lets us block by friendly identifier like "Northeastern".
+SYNOPTIC_BLOCKED_STIDS = {"DW3706", "EW2727", "FW2367",
+                          "D3706", "E2727", "F2367",
+                          "AN287", "A1261", "E5144", "EW5144"}
+SYNOPTIC_BLOCKED_NAME_SUBSTRINGS = ("dw3706", "ew2727", "fw2367", "ew5144",
+                                    "northeastern", "roxbury", "von hillern")
+
+
+def _synoptic_is_blocked(stid: str, name: str) -> bool:
+    if stid and stid.upper() in SYNOPTIC_BLOCKED_STIDS:
+        return True
+    nm = (name or "").lower()
+    return any(s in nm for s in SYNOPTIC_BLOCKED_NAME_SUBSTRINGS)
+
 # Boston Harbor area NOAA NDBC buoys and C-MAN stations
 BOSTON_BUOYS = {
     # Primary Boston Harbor stations
@@ -729,6 +751,11 @@ def fetch_synoptic_stations(start_ts: float, end_ts: float) -> dict:
     for station in payload.get("STATION", []):
         sid = station.get("STID")
         if not sid:
+            continue
+        # Skip stations the admin has explicitly blocked from the
+        # picker (poorly-sited CWOP rooftops etc.). Done before the
+        # observation parsing to save work on every request.
+        if _synoptic_is_blocked(sid, station.get("NAME") or ""):
             continue
         prefix_id = f"SYN_{sid}"  # namespace to avoid collisions w/ NDBC ids
 
