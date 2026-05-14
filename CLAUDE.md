@@ -609,6 +609,32 @@ Stations: 44013 / CSIM3 (Castle Island) / 44029 / BUZM3 / NTKM3 / KBOS (Logan).
     for SD `/boot.log` forensics + the `*watchdog: …` markers from
     gotcha #22 as the primary diagnostic instead.
 
+24. **Serial reflash boots the OLD firmware after an OTA cycle**
+    (fixed in `scripts/flash-e1.sh` 2026-05-11) — the firmware uses
+    the `Minimal SPIFFS` partition layout, which has TWO app slots
+    plus an `otadata` partition that tells the bootloader which slot
+    to boot:
+    ```
+    ota_0    @ 0x10000   (1.875 MB)
+    ota_1    @ 0x1F0000  (1.875 MB)
+    otadata  @ 0xe000    (which slot is active)
+    ```
+    Auto-OTA (gotcha #22) writes the new build into the inactive slot
+    and updates `otadata` to point there. A subsequent serial flash
+    of `--app-only` to `0x10000` lands the bytes correctly in `ota_0`
+    but the bootloader still reads `otadata`, sees "boot ota_1", and
+    runs the stale firmware. Symptom: device reports the OLD version
+    after a clean flash. Fix is to erase `otadata` before the app
+    write so the bootloader falls back to `ota_0`:
+    ```
+    esptool --port … erase-region 0xe000 0x2000
+    ```
+    `flash-e1.sh` now does this automatically in app-only mode. For
+    a stuck device after a CLI flash that didn't include the erase,
+    just run the command above + reset and the new firmware boots.
+    `--full` mode is unaffected (writes bootloader + partitions
+    + app, which gets the device into a clean state regardless).
+
 ---
 
 ## Weather Data Integration
@@ -691,7 +717,7 @@ lives separately.
 
 ---
 
-*Last updated: 2026-05-05 — added gotchas #22 (auto-OTA stall hang +
-fix in 2026.05.05.08) and #23 (USB-C / SPDT switch enumeration quirk);
-extended boot.log format with the new `ota *` and `*watchdog` markers;
-added 2026-05-05 entries to project history.*
+*Last updated: 2026-05-14 — added gotcha #24 (serial reflash boots
+the OLD firmware after an OTA cycle because `otadata` still points
+at the other slot; `flash-e1.sh` now erases the otadata region
+before app-only writes).*
