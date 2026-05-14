@@ -1,8 +1,14 @@
 // Coach app — shared client (auth + API client + UI helpers).
 //
-// Auth: Google Identity Services. The ID token is stored in localStorage
-// and sent on every API request as `Authorization: Bearer <token>`. Expired
-// tokens (1h TTL) cause a 401, which redirects to login.html.
+// Auth: Google Identity Services for the initial sign-in, then we
+// exchange the 1-hour Google ID token for a 30-day session token
+// issued by the coach Lambda (HS256 JWT-shape, prefix "sf."). The
+// session token lives in localStorage under the same key the Google
+// ID token used to use, so the rest of the dashboard (race-app
+// helpers, every api() call) doesn't care about the swap. The decode
+// helper handles both formats — the standard JWT layout splits
+// `<header>.<payload>.<sig>` on dots and reads the middle; our
+// session token uses `sf.<payload>.<sig>`, which slices the same way.
 
 (function (global) {
     const TOKEN_KEY = 'sf-coach-id-token';
@@ -142,11 +148,33 @@
         return REVIEWER_NAMES[email.toLowerCase()] || email;
     }
 
+    // After a successful Google sign-in, swap the 1-hour Google ID
+    // token for our own 30-day session token. The session token is
+    // stored under the same TOKEN_KEY so every existing call site
+    // (race-app coach helpers, api(), requireAuth) keeps working
+    // unchanged — they just now see an exp 30 days out instead of
+    // 1 hour out.
+    async function exchangeForSession(googleIdToken, email) {
+        if (!API_BASE) throw new Error('SAILFRAMES_COACH_API not configured (web/config.js).');
+        const resp = await fetch(API_BASE + '/session/exchange', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + googleIdToken },
+        });
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            throw new Error(`session/exchange HTTP ${resp.status}: ${text.slice(0, 200)}`);
+        }
+        const data = await resp.json();
+        if (!data.session_token) throw new Error('session/exchange returned no token');
+        setSession(data.session_token, email || data.email || '');
+        return data;
+    }
+
     global.SailFramesCoach = {
         CLIENT_ID,
         getToken, getEmail, setSession, clearSession,
         requireAuth, api, toast, nav, wireNav,
         fmtDate, fmtTimeLocal, fmtTimeShortLocal, reviewerName,
-        decodeIdToken,
+        decodeIdToken, exchangeForSession,
     };
 })(window);

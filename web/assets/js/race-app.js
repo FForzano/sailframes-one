@@ -202,13 +202,26 @@ let markerOverlays = {
     vmg:      false,
     polarPct: false,
     rank:     false,
+    // GNSS accuracy from the per-sample HDOP, surfaced as
+    // ±<N>cm next to the boat label. HDOP is unit-less but
+    // multiplying by ~1 m UERE (LG290P standard mode) gives a
+    // practical horizontal-uncertainty estimate in metres; we
+    // render it in centimetres for granularity at sailing scales.
+    hdop: false,
+    // Distance lines between adjacent boats by leaderboard rank, with
+    // small athwartships tick marks at each boat (perpendicular to its
+    // COG) and a centre label in metres. Useful for cross-tack /
+    // pre-rounding tactical separation; off by default to keep the
+    // map clean.
+    distances: false,
     // Trail is rendered as N short coloured segments per boat instead
     // of one solid polyline. Hue stays the boat's team colour; per-
     // segment lightness/opacity/width encode speed within that
     // boat's recent track (same encoding as the tack-analysis modal,
     // slow = bright/opaque/thick, fast = dark/faded/thin). Falls
-    // back to the original solid polyline when off.
-    trailSpeedColor: true,
+    // back to the original solid polyline when off (default — keeps
+    // the map quiet until the user opts in).
+    trailSpeedColor: false,
 };
 
 // Auto-follow: keep the map framed on the current race leader and the
@@ -388,6 +401,9 @@ async function init() {
     if (manBtn) manBtn.addEventListener('click', openManeuverModal);
     const taBtn = document.getElementById('btn-tack-analysis');
     if (taBtn) taBtn.addEventListener('click', openTackAnalysisModal);
+
+    // Tactics-discussion drawer
+    setupTacticsDrawer();
 
     // Mobile UX (only active when viewport ≤ 900 px — see race.css media query)
     setupMobileNav();
@@ -868,6 +884,7 @@ function clearBoatLayers() {
         }
     }
     boatLayers = {};
+    clearDistanceLines();
     if (laylineLayer) {
         map.removeLayer(laylineLayer);
         laylineLayer = null;
@@ -1082,6 +1099,8 @@ function addMarkerOverlaysMapControl() {
         { key: 'vmg',             label: 'VMG' },
         { key: 'polarPct',        label: '%pol' },
         { key: 'rank',            label: 'Rank' },
+        { key: 'distances',       label: '↔ Dist' },
+        { key: 'hdop',            label: '±cm GPS' },
     ];
 
     // Initial collapsed state: URL param `legend_compact=1` (set by the
@@ -1524,6 +1543,13 @@ function createBoatIcon(color, rotation = 0, initials = '', stats = {}, sailNumb
     if (ovr.polarPct && Number.isFinite(stats.polarPct)) {
         parts.push(`${Math.round(stats.polarPct)}%pol`);
     }
+    // GNSS accuracy in centimetres, derived from per-sample HDOP.
+    // Multiplied by ~1 m UERE (typical for the LG290P running
+    // standard L1/L5 without RTK). PPK-processed sessions land in
+    // the 1–30 cm range; raw NMEA HDOP typically reads 50–150 cm.
+    if (ovr.hdop && Number.isFinite(stats.hdop)) {
+        parts.push(`±${Math.round(stats.hdop * 100)}cm`);
+    }
     const statsHtml = parts.length ? `<span class="bml-stats">${parts.join(' ')}</span>` : '';
     // Sail number rides next to the team-initials chip in the same
     // dark pill — slightly de-emphasized (lighter weight, dimmer
@@ -1683,6 +1709,14 @@ async function loadRaceWindData(startTime, endTime) {
         }
         const data = await resp.json();
         raceBuoyData = data.buoys || {};
+
+        // Inject a synthetic FLEET station inferred from the boats'
+        // own COG + heel (each close-hauled boat gives a TWD estimate
+        // of COG ± tackAngle; heel sign picks the side). Plugs in to
+        // raceBuoyData so the picker, the override system, and
+        // rebuildWindFromSelected all treat it like any other source.
+        _buildFleetWindStation();
+
         // Auto-pick the first station with usable samples. Try the NDBC
         // primaries (Castle Island, Logan, 16NM) first; if none of them
         // has data for this race window, fall back to any Synoptic
@@ -1869,6 +1903,7 @@ function shortStationLabel(stationId, fullName) {
         'KBOS':  'Logan',
         '44013': '16NM',
         '44029': 'Mass Bay',
+        'FLEET': 'Fleet',
     };
     if (overrides[stationId]) return overrides[stationId];
     if (!fullName) return stationId;
@@ -1876,6 +1911,194 @@ function shortStationLabel(stationId, fullName) {
         .replace(/\b(Sailing Center|Sailing|Airport|Buoy|Station)\b/gi, '')
         .replace(/\s+/g, ' ').trim();
     return n.length > 14 ? n.slice(0, 13) + '…' : n;
+}
+
+// ---- Fleet-inferred wind direction -----------------------------------
+// When the user can't trust the nearest land station (Logan is across
+// the bay, the 16NM ocean buoy is, well, 16 NM offshore), the boats
+// themselves are the best in-situ TWD sensor: on a beat they sail at
+// a known angle to the wind, so the COG distribution of close-hauled
+// boats is bimodal around TWD ± tackAngle and the bisector is the
+// wind direction. Heel sign (port/starboard heel) disambiguates which
+// side of the bisector each boat is on so we don't need to know the
+// answer to compute it.
+
+const _FLEET_TACK_ANGLE_DEG = 42;     // J/80 close-hauled (used for all
+                                       // classes — within ±3° for all
+                                       // four built-in classes, error
+                                       // averages out across boats)
+
+// Estimate TWD from the fleet at one instant. Returns {twd, tws, n}
+// or null when no boat in the fleet is currently on the upwind leg.
+//
+// Two-gate algorithm — both gates must pass per boat:
+//
+//   (a) Course-aware leg gate: the boat's current target mark must be
+//       the one labelled mark_type='windward'. Excludes reaches, runs,
+//       gate roundings, and any custom-marked legs. Established last
+//       revision.
+//
+//   (b) Geometry-only tack gate: compute the signed angle from the
+//       boat's COG to its bearing-to-windward-mark. The magnitude
+//       must fall in the close-hauled band (25°–65°, i.e. ~tackAngle
+//       ± 20° tolerance for layline approach and pinch). The SIGN
+//       of that angle uniquely identifies tack:
+//         diff > 0 → mark is to starboard of the boat's heading
+//                  → boat is on STARBOARD tack
+//                  → TWD = COG + tackAngle
+//         diff < 0 → mark is to port
+//                  → boat is on PORT tack
+//                  → TWD = COG − tackAngle
+//
+// Critical improvement over the previous revision: tack identification
+// is GPS-only (COG + bearing-to-mark). The IMU heel signal isn't used
+// at all. Heel was the load-bearing input before, and its sign
+// convention was sometimes inconsistent, which is what made the
+// inference drift wildly after a few minutes.
+function _inferTWDFromFleetAt(timeMs, tackAngleDeg = _FLEET_TACK_ANGLE_DEG) {
+    if (!timeMs || !Number.isFinite(timeMs)) return null;
+    if (!currentRace) return null;
+    const courseSeq = currentRace.course || [];
+    if (!courseSeq.length) return null;
+    const marksById = (typeof buildMarksById === 'function') ? buildMarksById(currentRace) : {};
+    const totalLegs = currentRace._totalLegs ?? courseSeq.length;
+
+    const ests = [];
+    let sumSog = 0;
+    for (const layer of Object.values(boatLayers || {})) {
+        if (!layer?.data?.length) continue;
+
+        // (a) Course-aware leg gate.
+        const legsDone = (typeof legsCompletedAt === 'function')
+            ? legsCompletedAt(layer, timeMs) : 0;
+        if (legsDone >= totalLegs) continue;
+        const targetMarkId = courseSeq[legsDone % courseSeq.length];
+        const targetMark = marksById[targetMarkId];
+        if (!targetMark || targetMark.lat == null || targetMark.lon == null) continue;
+        if (targetMark.mark_type !== 'windward') continue;
+
+        const idx = (typeof gpsIdxAt === 'function') ? gpsIdxAt(layer, timeMs) : null;
+        if (idx == null) continue;
+        const p = layer.data[idx];
+        if (!p || p.lat == null || p.lon == null) continue;
+        const sog = p.speed_kn;
+        if (!Number.isFinite(sog) || sog < 2 || sog > 9) continue;
+        const cog = p.course;
+        if (!Number.isFinite(cog)) continue;
+
+        // (b) Geometry-only tack gate. Signed angle (BTM − COG) mapped
+        // to [-180, 180]. Positive = mark on starboard, negative = mark
+        // on port. Magnitude must look like a close-hauled angle.
+        const btm = bearingDegrees(p.lat, p.lon, targetMark.lat, targetMark.lon);
+        const diff = ((btm - cog + 540) % 360) - 180;
+        const absDiff = Math.abs(diff);
+        if (absDiff < 25 || absDiff > 65) continue;
+
+        const tackSign = diff > 0 ? +1 : -1;
+        const twdEst = (cog + tackSign * tackAngleDeg + 720) % 360;
+        ests.push({ twd: twdEst, sog });
+        sumSog += sog;
+    }
+    if (ests.length < 1) return null;
+
+    // Reject high-disagreement slices: if the per-boat TWD estimates
+    // span more than 35° std-dev across ≥ 3 boats, something's off
+    // (boats at different points of sail, mark misidentified, etc.).
+    // Better to leave a gap in the time series than emit a meaningless
+    // average that drifts the displayed TWD.
+    // Circular mean.
+    let sx = 0, sy = 0;
+    for (const e of ests) {
+        const r = e.twd * Math.PI / 180;
+        sx += Math.sin(r);
+        sy += Math.cos(r);
+    }
+    const twd = (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
+
+    // Disagreement check: circular std-dev of the per-boat estimates.
+    // High std with ≥ 3 contributors means the boats themselves
+    // disagree, so the circular mean is meaningless — drop the slice.
+    if (ests.length >= 3) {
+        const meanRad = twd * Math.PI / 180;
+        let sq = 0;
+        for (const e of ests) {
+            const r = e.twd * Math.PI / 180;
+            const d = ((r - meanRad + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+            sq += d * d;
+        }
+        const stdDeg = Math.sqrt(sq / ests.length) * 180 / Math.PI;
+        if (stdDeg > 35) return null;
+    }
+
+    // Crude TWS estimate from mean close-hauled SOG. J/80 polar at TWA
+    // 42°: SOG ≈ 4 kt @ TWS 8, 5.5 kt @ 12, 6.3 kt @ 16. Linearised:
+    // TWS ≈ 1.6 × SOG. Good to ±2 kt — fine for ranking-style use.
+    const meanSog = sumSog / ests.length;
+    const tws = meanSog * 1.6;
+    return { twd, tws, n: ests.length };
+}
+
+// Mean lat/lon of the fleet at race start — used to anchor the FLEET
+// pseudo-station's map marker somewhere sensible (centroid of the
+// boats), and to let recomputeVisibleStations() keep it in the picker
+// (which filters out stations with null lat/lon).
+function _fleetCentroidAt(timeMs) {
+    let lat = 0, lon = 0, n = 0;
+    for (const layer of Object.values(boatLayers || {})) {
+        if (!layer?.data?.length) continue;
+        const idx = (typeof gpsIdxAt === 'function') ? gpsIdxAt(layer, timeMs) : null;
+        if (idx == null) continue;
+        const p = layer.data[idx];
+        if (!p || p.lat == null || p.lon == null) continue;
+        lat += p.lat; lon += p.lon; n++;
+    }
+    if (!n) return null;
+    return { lat: lat / n, lon: lon / n };
+}
+
+// Sample fleet TWD every 30 s across the race window and register the
+// result as a synthetic 'FLEET' entry in raceBuoyData. The rest of the
+// wind pipeline (picker, override, rebuildWindFromSelected, layline
+// sync, briefing) treats it like any other station — no other code
+// path needs to be FLEET-aware.
+function _buildFleetWindStation() {
+    if (!currentRace?.start_time || !currentRace?.end_time) return;
+    const start = new Date(currentRace.start_time).getTime();
+    const end   = new Date(currentRace.end_time).getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+
+    const STEP_MS = 30_000;
+    const data_points = [];
+    for (let t = start; t <= end; t += STEP_MS) {
+        const w = _inferTWDFromFleetAt(t);
+        if (!w) continue;
+        data_points.push({
+            timestamp: new Date(t).toISOString(),
+            unix_ts: Math.floor(t / 1000),
+            wind_dir: w.twd,
+            wind_speed_kts: Math.round(w.tws * 10) / 10,
+            _n_boats: w.n,
+        });
+    }
+    if (!data_points.length) {
+        // Not enough close-hauled samples in any time slice — don't
+        // register the station at all rather than show an empty entry.
+        return;
+    }
+
+    const centroid = _fleetCentroidAt(start) || _fleetCentroidAt((start + end) / 2);
+    raceBuoyData['FLEET'] = {
+        station_id: 'FLEET',
+        name: 'Fleet inferred',
+        lat: centroid?.lat ?? 42.36,
+        lon: centroid?.lon ?? -71.05,
+        type: 'fleet',
+        source: 'fleet',
+        color: '#22d3ee',
+        data: ['wind'],
+        data_points,
+        has_data: true,
+    };
 }
 
 // Compute mean/std/min/max wind direction and speed across the race
@@ -1938,6 +2161,7 @@ function fmtStationStats(stats) {
 // user can tell a Tempest from a CWOP from a Logan-via-Synoptic mirror.
 function fmtSourceLabel(buoy) {
     const src = (buoy.source || 'ndbc').toLowerCase();
+    if (src === 'fleet') return 'Fleet';
     if (src === 'ndbc')  return 'NDBC';
     if (src === 'metar') return 'METAR';
     if (src === 'nws')   return 'NWS';
@@ -2459,6 +2683,11 @@ function updateBoatPositions(timeSeconds) {
         statsByDevice.set(p.deviceId, { ...p, rank: idx + 1 });
     });
 
+    // Inter-boat distance lines (toggle via SHOW › ↔ Dist). Walks the
+    // same `positions` array so each line connects boats that are
+    // adjacent in the current leaderboard order.
+    updateDistanceLines(positions);
+
     // Pass 2: paint each marker icon with its full stats payload.
     for (const [deviceId, layer] of Object.entries(boatLayers)) {
         if (!layer.visible || !layer.current) continue;
@@ -2476,6 +2705,7 @@ function updateBoatPositions(timeSeconds) {
             vmg: lbStats?.vmg ?? null,
             polarPct: lbStats?.polarPct ?? null,
             rank: lbStats?.rank ?? null,
+            hdop: closest.hdop ?? null,
         }, layer.sailNumber));
 
         // Real-scale hull polygon + mainsail boom. Both anchored to
@@ -5888,6 +6118,283 @@ function hullPolygonLatLngs(antennaLat, antennaLon, cogDeg) {
     });
 }
 
+// ---- Inter-boat separation toward next mark (SHOW › ↔ Dist) ----------
+// RaceQs-style perpendicular projection: for each adjacent ranked pair
+// of boats that are still on the same leg, draw an L-shape:
+//   perpRef:  short line through the trailing boat, perpendicular
+//             to that boat's bearing to the next mark.
+//   dropLine: from the perpRef's far corner up to the leading boat,
+//             parallel to the bearing-to-mark axis.
+//
+// The dropLine length is the along-mark separation in metres — i.e.,
+// how much further toward the next mark the leader is. That's the
+// metric coaches actually care about (you can be 30 m laterally
+// apart but neck-and-neck on progress, or perfectly downcourse but
+// 60 m behind on progress).
+//
+// Pairs are skipped when either boat has finished, when boats are
+// on different legs, or when the course / next-mark isn't defined.
+let distancePairs = [];
+
+function clearDistanceLines() {
+    for (const p of distancePairs) {
+        if (p.perpRefF) map.removeLayer(p.perpRefF);
+        if (p.perpRefL) map.removeLayer(p.perpRefL);
+        if (p.dropLine) map.removeLayer(p.dropLine);
+        if (p.label)    map.removeLayer(p.label);
+    }
+    distancePairs = [];
+}
+
+function _ensureDistancePool(n) {
+    while (distancePairs.length < n) {
+        // Perpendicular reference line through the FOLLOWER's BOW,
+        // extending laterally toward the midpoint between the two
+        // boats (perp/2 in metres).
+        const perpRefF = L.polyline([], {
+            color: '#fbbf24', weight: 1.5, opacity: 0.75, interactive: false,
+        }).addTo(map);
+        // Perpendicular reference line through the LEADER's STERN,
+        // extending laterally back toward the same midpoint.
+        const perpRefL = L.polyline([], {
+            color: '#fbbf24', weight: 1.5, opacity: 0.75, interactive: false,
+        }).addTo(map);
+        // Drop line between the two perp endpoints — parallel to
+        // the bearing-to-mark axis. Its length is exactly the
+        // displayed along-mark stern-to-bow gap.
+        const dropLine = L.polyline([], {
+            color: '#fbbf24', weight: 2, opacity: 0.9, interactive: false,
+        }).addTo(map);
+        const label = L.marker([0, 0], {
+            icon: L.divIcon({
+                className: 'distance-label',
+                html: '<span class="dist-text"></span>',
+                iconSize: [0, 0],
+                iconAnchor: [0, 0],
+            }),
+            interactive: false,
+        }).addTo(map);
+        distancePairs.push({ perpRefF, perpRefL, dropLine, label });
+    }
+    while (distancePairs.length > n) {
+        const p = distancePairs.pop();
+        if (p.perpRefF) map.removeLayer(p.perpRefF);
+        if (p.perpRefL) map.removeLayer(p.perpRefL);
+        if (p.dropLine) map.removeLayer(p.dropLine);
+        if (p.label)    map.removeLayer(p.label);
+    }
+}
+
+// RRS-style overlap test. The follower is overlapped with the leader
+// when its bow is at or past the line drawn abeam from the leader's
+// stern (perpendicular to the leader's heading). Equivalently:
+//   (F_bow − L_stern) · leader_heading_unit_vector ≥ 0
+// Independent of where the next mark is — uses the leader's own
+// direction of travel, which is what RRS 18 cares about and what
+// matters in tight mark-rounding clusters where bearing-to-mark
+// varies wildly per boat.
+function _rrsOverlap(F_bow, L_stern, cogL) {
+    if (!F_bow || !L_stern) return false;
+    if (cogL == null || !Number.isFinite(cogL)) return false;
+    const R = 6371000;
+    const toRad = (d) => d * Math.PI / 180;
+    const mLat = R * toRad(1);
+    const mLon = R * toRad(1) * Math.cos(L_stern[0] * toRad(1));
+    const dN = (F_bow[0] - L_stern[0]) * mLat;
+    const dE = (F_bow[1] - L_stern[1]) * mLon;
+    const cogR = cogL * toRad(1);
+    const along = dN * Math.cos(cogR) + dE * Math.sin(cogR);
+    return along >= 0;
+}
+
+// Decompose (toPt − fromPt) into along-mark and perpendicular components,
+// using the bearing from `ref` to `mark` as the +along axis.
+//   fromPt, toPt:  [lat, lon] tuples — typically follower's bow and
+//                  leader's stern when used for inter-boat measurement.
+//   ref:           {lat, lon} reference point used to compute the
+//                  bearing (small offsets between ref and fromPt
+//                  shift bearing by < 0.1° at race distances).
+//   mark:          {lat, lon} of the next-leg target.
+// Returns:
+//   midA / midB:   [lat, lon] endpoints of the perpendicular reference
+//                  lines from each side — both at the lateral midpoint
+//                  between the two input points, so the line midA→midB
+//                  is parallel to the bearing-to-mark axis with
+//                  length |alongMark|.
+//   alongMark:     unsigned metres separating the two input points
+//                  along the bearing axis (the displayed metric).
+//   perp:          unsigned lateral separation along the perp axis.
+function _perpToMarkProjection(fromPt, toPt, ref, mark) {
+    if (!fromPt || !toPt || !ref || !mark) return null;
+    if (mark.lat == null || ref.lat == null) return null;
+
+    const R = 6371000;
+    const toRad = (d) => d * Math.PI / 180;
+    const mPerDegLat = R * toRad(1);
+    const mPerDegLon = R * toRad(1) * Math.cos(ref.lat * toRad(1));
+
+    const brgRad = bearingDegrees(ref.lat, ref.lon, mark.lat, mark.lon) * Math.PI / 180;
+    const bN = Math.cos(brgRad), bE = Math.sin(brgRad);
+    const pN = Math.sin(brgRad), pE = -Math.cos(brgRad);
+
+    const dN = (toPt[0] - fromPt[0]) * mPerDegLat;
+    const dE = (toPt[1] - fromPt[1]) * mPerDegLon;
+
+    const along = dN * bN + dE * bE;
+    const perp  = dN * pN + dE * pE;
+
+    // Each perp reference line extends from its anchor toward the
+    // lateral midpoint (perp/2 metres). Both endpoints land on the
+    // same perp coordinate, so midA→midB is purely along-mark.
+    const midA_dN = (perp / 2) * pN, midA_dE = (perp / 2) * pE;
+    const midB_dN = -(perp / 2) * pN, midB_dE = -(perp / 2) * pE;
+    const midA = [
+        fromPt[0] + midA_dN / mPerDegLat,
+        fromPt[1] + midA_dE / mPerDegLon,
+    ];
+    const midB = [
+        toPt[0] + midB_dN / mPerDegLat,
+        toPt[1] + midB_dE / mPerDegLon,
+    ];
+
+    return {
+        midA, midB,
+        alongMark: Math.abs(along),
+        perp: Math.abs(perp),
+        alongSign: along >= 0 ? 1 : -1,
+    };
+}
+
+// `positions` is the leaderboard-sorted array from calculatePositions().
+// Walks it in pairs (rank N + rank N+1); pair is shown only when both
+// boats are still racing AND on the same leg (same next mark).
+function updateDistanceLines(positions) {
+    if (!markerOverlays.distances || !positions?.length || !currentRace) {
+        clearDistanceLines();
+        return;
+    }
+    const courseSeq = currentRace.course || [];
+    const totalLegs = currentRace._totalLegs ?? courseSeq.length;
+    if (!courseSeq.length) {
+        clearDistanceLines();
+        return;
+    }
+    const marksById = buildMarksById(currentRace);
+    const sternLen = Math.max(0, HULL_LOA_M - BOW_OFFSET_M);
+
+    // ---- Step 1: build the candidate pair list (same filters as before) ----
+    const pairData = [];
+    for (let i = 0; i < positions.length - 1; i++) {
+        const pLeader   = positions[i];
+        const pFollower = positions[i + 1];
+        if (pLeader.finished || pFollower.finished) continue;
+        if (pLeader.legsCompleted !== pFollower.legsCompleted) continue;
+        if (pLeader.legsCompleted >= totalLegs) continue;
+        const targetMark = marksById[courseSeq[pLeader.legsCompleted % courseSeq.length]];
+        if (!targetMark || targetMark.lat == null) continue;
+        const layerL = boatLayers[pLeader.deviceId];
+        const layerF = boatLayers[pFollower.deviceId];
+        if (!layerL?.visible || !layerF?.visible) continue;
+        const leader   = layerL.current;
+        const follower = layerF.current;
+        if (!leader || !follower) continue;
+        if (leader.lat == null || follower.lat == null) continue;
+        const cogF = Number.isFinite(follower.course) ? follower.course : 0;
+        const cogL = Number.isFinite(leader.course)   ? leader.course   : 0;
+        const F_bow   = _offsetLatLng(follower.lat, follower.lon,  BOW_OFFSET_M, 0, cogF);
+        const L_stern = _offsetLatLng(leader.lat,   leader.lon,   -sternLen,     0, cogL);
+        pairData.push({
+            leader, follower, mark: targetMark,
+            F_bow, L_stern, cogF, cogL,
+            overlapped: _rrsOverlap(F_bow, L_stern, cogL),
+        });
+    }
+
+    // ---- Step 2: scan for maximal consecutive-overlap chains -------------
+    // For each pool slot we'll assign one of three rendering modes:
+    //   'lshape'  — non-overlapped clear-water pair, draw full L-shape.
+    //   'chain'   — front of a chain: draw ONE line from this pair's
+    //               leader's stern to chainTail's follower's bow.
+    //   'hidden'  — inside a chain (the line is rendered by the chain
+    //               head slot instead), or otherwise suppressed.
+    const slotMode  = new Array(pairData.length).fill('hidden');
+    const chainTail = new Array(pairData.length).fill(-1);   // index of last pair in chain when mode='chain'
+    let i = 0;
+    while (i < pairData.length) {
+        if (pairData[i].overlapped) {
+            let tail = i;
+            while (tail + 1 < pairData.length && pairData[tail + 1].overlapped) tail++;
+            slotMode[i] = 'chain';
+            chainTail[i] = tail;
+            // pairs i+1..tail are inside the chain — leave as 'hidden'.
+            i = tail + 1;
+        } else {
+            slotMode[i] = 'lshape';
+            i++;
+        }
+    }
+
+    _ensureDistancePool(pairData.length);
+
+    // ---- Step 3: render each slot per its assigned mode ------------------
+    for (let i = 0; i < pairData.length; i++) {
+        const slot = distancePairs[i];
+        const mode = slotMode[i];
+
+        // Reset all visuals first — the mode branches set whichever
+        // ones are needed. Hidden slots stay reset.
+        slot.perpRefF.setLatLngs([]);
+        slot.perpRefL.setLatLngs([]);
+        slot.dropLine.setLatLngs([]);
+        const el = slot.label.getElement();
+        if (el) {
+            const s = el.querySelector('.dist-text');
+            if (s) s.textContent = '';
+        }
+        // Make sure the drop line is solid in the default state; the
+        // chain branch will swap it to dashed if needed.
+        slot.dropLine.setStyle({ dashArray: null });
+
+        if (mode === 'hidden') continue;
+
+        if (mode === 'chain') {
+            // Chain spans pairs i..chainTail[i], i.e. boats positions[i]
+            // (front, leader of pair i) through positions[tail+1] (back,
+            // follower of pair tail). Draw a single dashed line from
+            // the front boat's stern to the back boat's bow — across
+            // any middle boats in the chain (they don't get their own
+            // line). The line is intentionally dashed so it reads as
+            // an "overlap bracket" rather than a clear-water metric.
+            const head = pairData[i];
+            const tail = pairData[chainTail[i]];
+            slot.dropLine.setLatLngs([head.L_stern, tail.F_bow]);
+            slot.dropLine.setStyle({ dashArray: '6 4' });
+            continue;
+        }
+
+        // mode === 'lshape': non-overlapped pair, draw the full
+        // along-mark distance visualization.
+        const data = pairData[i];
+        const proj = _perpToMarkProjection(data.F_bow, data.L_stern, data.follower, data.mark);
+        if (!proj) continue;
+        slot.perpRefF.setLatLngs([data.F_bow,   proj.midA]);
+        slot.perpRefL.setLatLngs([data.L_stern, proj.midB]);
+        slot.dropLine.setLatLngs([proj.midA, proj.midB]);
+        slot.label.setLatLng([
+            (proj.midA[0] + proj.midB[0]) / 2,
+            (proj.midA[1] + proj.midB[1]) / 2,
+        ]);
+        if (el) {
+            const span = el.querySelector('.dist-text');
+            if (span) {
+                span.textContent = proj.alongMark < 1000
+                    ? `${Math.round(proj.alongMark)} m`
+                    : `${(proj.alongMark / 1000).toFixed(2)} km`;
+            }
+        }
+    }
+}
+
 // Mainsail boom line. The boom hangs aft from the mast (≈ antenna
 // position) on the side OPPOSITE the wind:
 //   - starboard tack (twa > 0, wind from starboard) → boom on port side
@@ -6677,6 +7184,478 @@ function setupEventListeners() {
             setTimeout(() => { btnShare.textContent = restore; }, 1600);
         });
     }
+}
+
+// ============================================================
+// Tactics-discussion drawer
+//
+// Per-race bulletin board. Anyone can read; verified Google
+// users can post and edit/delete their own posts; coaches
+// (members of COACH_ALLOWLIST on the backend) can delete any.
+//
+// Auth model:
+//   • If the user is already signed in as a coach (sf-coach-id-token
+//     in localStorage), we send that session token.
+//   • Otherwise we run a Google Identity Services popup, store the
+//     resulting Google ID token under sf-user-id-token, and send
+//     that. Google ID tokens expire in 1 hour — we re-prompt on
+//     expiry. This is intentionally lighter-weight than the coach
+//     session flow so competitors can drop in to ask one question.
+//
+// All API traffic goes through SAILFRAMES_COACH_API (the coach
+// Lambda's Function URL), with three endpoints:
+//   GET    /discussions/{race_id}                — public
+//   POST   /discussions/{race_id}                — auth, create
+//   DELETE /discussions/{race_id}/{post_id}      — auth, mod-aware
+// ============================================================
+
+const _TD_GUEST_TOKEN_KEY = 'sf-user-id-token';
+const _TD_GUEST_EMAIL_KEY = 'sf-user-email';
+const _TD_GUEST_NAME_KEY  = 'sf-user-name';
+
+let _tdLoadedForRaceId = null;
+let _tdPostsCache = [];
+let _tdRefreshTimer = null;
+let _tdAttachTime = false;
+let _tdAttachSec = 0;
+
+function _tdGuestToken() {
+    try { return localStorage.getItem(_TD_GUEST_TOKEN_KEY) || ''; } catch { return ''; }
+}
+function _tdGuestEmail() {
+    try { return localStorage.getItem(_TD_GUEST_EMAIL_KEY) || ''; } catch { return ''; }
+}
+function _tdGuestName() {
+    try { return localStorage.getItem(_TD_GUEST_NAME_KEY) || ''; } catch { return ''; }
+}
+function _tdSaveGuestSession(token, email, name) {
+    try {
+        localStorage.setItem(_TD_GUEST_TOKEN_KEY, token);
+        localStorage.setItem(_TD_GUEST_EMAIL_KEY, email || '');
+        localStorage.setItem(_TD_GUEST_NAME_KEY, name || '');
+    } catch {}
+}
+function _tdClearGuestSession() {
+    try {
+        localStorage.removeItem(_TD_GUEST_TOKEN_KEY);
+        localStorage.removeItem(_TD_GUEST_EMAIL_KEY);
+        localStorage.removeItem(_TD_GUEST_NAME_KEY);
+    } catch {}
+}
+
+// Decode a JWT payload — same shape works for Google ID tokens and
+// our own sf.* session tokens (split on dots, base64url-decode the
+// middle segment). Returns null on any failure.
+function _tdDecodeJwt(token) {
+    try {
+        const payload = token.split('.')[1];
+        const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        return JSON.parse(decodeURIComponent(escape(json)));
+    } catch { return null; }
+}
+
+function _tdCurrentAuth() {
+    // Coach session takes precedence — 30-day lifetime, no popup needed.
+    const coach = _coachToken();
+    if (coach && _coachTokenIsValid()) {
+        let email = '';
+        try { email = localStorage.getItem('sf-coach-email') || ''; } catch {}
+        return { token: coach, email, name: email, kind: 'coach' };
+    }
+    const guest = _tdGuestToken();
+    if (guest) {
+        const claims = _tdDecodeJwt(guest);
+        const expMs = claims && claims.exp ? claims.exp * 1000 : 0;
+        if (expMs && expMs > Date.now() + 30_000) {
+            return {
+                token: guest,
+                email: _tdGuestEmail(),
+                name: _tdGuestName(),
+                kind: 'guest',
+            };
+        }
+        // Expired — drop it so the UI re-prompts.
+        _tdClearGuestSession();
+    }
+    return null;
+}
+
+function _tdApiBase() {
+    return (window.SAILFRAMES_COACH_API || '').replace(/\/+$/, '');
+}
+
+async function _tdFetchPosts(raceId) {
+    const base = _tdApiBase();
+    if (!base) return [];
+    // Attach auth opportunistically: signed-in viewers get is_mine/is_mod
+    // flags so the delete UI works. Unauthed callers still get a clean
+    // (PII-redacted) response.
+    const auth = _tdCurrentAuth();
+    const headers = {};
+    if (auth) headers['Authorization'] = 'Bearer ' + auth.token;
+    const resp = await fetch(`${base}/discussions/${encodeURIComponent(raceId)}`, { headers });
+    if (!resp.ok) throw new Error(`GET /discussions HTTP ${resp.status}`);
+    const data = await resp.json();
+    return data.posts || [];
+}
+
+async function _tdSubmitPost(raceId, body, cursorTSec) {
+    const auth = _tdCurrentAuth();
+    if (!auth) throw new Error('Sign in to post.');
+    const base = _tdApiBase();
+    if (!base) throw new Error('Discussion API not configured.');
+    const resp = await fetch(`${base}/discussions/${encodeURIComponent(raceId)}`, {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + auth.token,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ body, cursor_t_sec: cursorTSec }),
+    });
+    if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        if (resp.status === 401) {
+            // Token rejected — clear guest session and re-prompt.
+            if (auth.kind === 'guest') _tdClearGuestSession();
+            throw new Error('Your sign-in expired. Please sign in again.');
+        }
+        throw new Error(`POST failed (${resp.status}): ${t.slice(0, 160)}`);
+    }
+    return resp.json();
+}
+
+async function _tdDeletePost(raceId, postId) {
+    const auth = _tdCurrentAuth();
+    if (!auth) throw new Error('Sign in required.');
+    const base = _tdApiBase();
+    const resp = await fetch(
+        `${base}/discussions/${encodeURIComponent(raceId)}/${encodeURIComponent(postId)}`,
+        {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + auth.token },
+        }
+    );
+    if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        throw new Error(`DELETE failed (${resp.status}): ${t.slice(0, 160)}`);
+    }
+    return resp.json();
+}
+
+// Render the post list. Newest at the bottom (chat-style) so the
+// composer remains directly beneath the freshest content.
+function _tdRenderPosts() {
+    const list = document.getElementById('td-list');
+    if (!list) return;
+
+    if (!_tdPostsCache.length) {
+        list.innerHTML = '<div class="td-empty">No posts yet. Start the conversation — observations, questions, what would you have done?</div>';
+        return;
+    }
+
+    // Server stamps `is_mine` and `is_mod` per post when the viewer is
+    // authenticated; `author_email` is never sent to the client (PII).
+    const html = _tdPostsCache.map(p => {
+        const author = p.author_name || 'Anonymous';
+        const when = p.created_at ? new Date(p.created_at).toLocaleString('en-US', {
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+        }) : '';
+        const canDelete = !!(p.is_mine || p.is_mod);
+        const cursorBtn = (p.cursor_t_sec != null && currentRace?.start_time)
+            ? `<button class="td-cursor-link" data-cursor-t="${Number(p.cursor_t_sec)}" type="button">→ Jump to ${_tdFmtCursorLocal(p.cursor_t_sec)}</button>`
+            : '';
+        const delBtn = canDelete
+            ? `<div class="td-post-actions"><button class="td-delete-btn" data-delete="${p.id}" type="button">delete</button></div>`
+            : '';
+        return `
+            <div class="td-post ${p.is_coach ? 'is-coach' : ''}">
+                <div class="td-post-head">
+                    <span class="td-author">${_tdEscape(author)}</span>
+                    ${p.is_coach ? '<span class="td-coach-tag">coach</span>' : ''}
+                    <span class="td-when">${when}</span>
+                </div>
+                <div class="td-body">${_tdEscape(p.body || '')}</div>
+                ${cursorBtn}
+                ${delBtn}
+            </div>
+        `;
+    }).join('');
+
+    list.innerHTML = html;
+    list.scrollTop = list.scrollHeight;
+
+    // Wire cursor-jump and delete buttons.
+    for (const btn of list.querySelectorAll('.td-cursor-link')) {
+        btn.addEventListener('click', () => {
+            const tSec = parseFloat(btn.getAttribute('data-cursor-t'));
+            if (Number.isFinite(tSec) && window.SailFramesRace) {
+                window.SailFramesRace.seekTo(tSec);
+            }
+        });
+    }
+    for (const btn of list.querySelectorAll('.td-delete-btn')) {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this post?')) return;
+            const id = btn.getAttribute('data-delete');
+            try {
+                await _tdDeletePost(currentRace.race_id, id);
+                _tdPostsCache = _tdPostsCache.filter(p => p.id !== id);
+                _tdRenderPosts();
+            } catch (e) {
+                alert('Delete failed: ' + (e.message || e));
+            }
+        });
+    }
+}
+
+function _tdFmtTSec(sec) {
+    const s = Math.max(0, Math.round(Number(sec) || 0));
+    const m = Math.floor(s / 60);
+    const ss = String(s % 60).padStart(2, '0');
+    return `${m}:${ss}`;
+}
+
+// Format a "seconds from race start" offset as a wall-clock time in the
+// viewer's local timezone — i.e. what the on-water observer would have
+// seen on their watch. Falls back to mm:ss-from-start if the race
+// start_time isn't loaded yet.
+function _tdFmtCursorLocal(tSec) {
+    if (!currentRace?.start_time) return _tdFmtTSec(tSec);
+    const ms = new Date(currentRace.start_time).getTime() + Number(tSec) * 1000;
+    if (!Number.isFinite(ms)) return _tdFmtTSec(tSec);
+    return new Date(ms).toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    });
+}
+
+function _tdEscape(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+}
+
+function _tdRefreshComposeUI() {
+    const signin = document.getElementById('td-signin');
+    const form = document.getElementById('td-form');
+    const formWho = document.getElementById('td-form-who');
+    if (!signin || !form) return;
+    const auth = _tdCurrentAuth();
+    if (auth) {
+        signin.hidden = true;
+        form.hidden = false;
+        const who = auth.name || auth.email || 'signed-in user';
+        const kindLabel = auth.kind === 'coach' ? 'as <b>coach</b>' : 'as guest';
+        formWho.innerHTML = `Posting ${kindLabel} — <b>${_tdEscape(who)}</b>`;
+    } else {
+        signin.hidden = false;
+        form.hidden = true;
+    }
+}
+
+async function _tdLoadAndRender() {
+    if (!currentRace?.race_id) return;
+    const list = document.getElementById('td-list');
+    if (list) list.innerHTML = '<div class="td-empty">Loading…</div>';
+    try {
+        _tdPostsCache = await _tdFetchPosts(currentRace.race_id);
+        _tdLoadedForRaceId = currentRace.race_id;
+        _tdRenderPosts();
+    } catch (e) {
+        console.error('[tactics] load failed', e);
+        if (list) list.innerHTML = `<div class="td-empty">Couldn't load posts. ${_tdEscape(e.message || '')}</div>`;
+    }
+}
+
+function _tdOpenDrawer() {
+    const drawer = document.getElementById('tactics-drawer');
+    if (!drawer) return;
+    drawer.classList.add('open');
+
+    // Header subtitle: current race name.
+    const nm = document.getElementById('td-race-name');
+    if (nm) {
+        nm.textContent = currentRace?.race_name
+            ? currentRace.race_name + (currentRace.date ? ` · ${currentRace.date}` : '')
+            : '';
+    }
+
+    _tdRefreshComposeUI();
+
+    // GIS button — render lazily (library is async-loaded). Retry a few
+    // times if google.accounts isn't ready yet.
+    if (!_tdCurrentAuth()) _tdRenderGsiButton();
+
+    // Always re-fetch on open so a refresh shows fresh posts.
+    _tdLoadAndRender();
+
+    // Light auto-poll while drawer is open (every 30 s) so collaborators
+    // see each other's posts without a manual refresh.
+    if (_tdRefreshTimer) clearInterval(_tdRefreshTimer);
+    _tdRefreshTimer = setInterval(() => {
+        if (drawer.classList.contains('open') && currentRace?.race_id) {
+            _tdLoadAndRender();
+        }
+    }, 30_000);
+}
+
+function _tdCloseDrawer() {
+    const drawer = document.getElementById('tactics-drawer');
+    if (!drawer) return;
+    drawer.classList.remove('open');
+    if (_tdRefreshTimer) { clearInterval(_tdRefreshTimer); _tdRefreshTimer = null; }
+    if (_tdAttachLabelTimer) { clearInterval(_tdAttachLabelTimer); _tdAttachLabelTimer = null; }
+}
+
+let _tdGsiAttempts = 0;
+function _tdRenderGsiButton() {
+    const slot = document.getElementById('td-gsi-button');
+    const errEl = document.getElementById('td-signin-err');
+    if (!slot) return;
+    const clientId = window.SAILFRAMES_GOOGLE_CLIENT_ID;
+    if (!clientId) {
+        if (errEl) errEl.textContent = 'Google sign-in not configured (SAILFRAMES_GOOGLE_CLIENT_ID).';
+        return;
+    }
+    const g = window.google && window.google.accounts && window.google.accounts.id;
+    if (!g) {
+        if (_tdGsiAttempts++ < 20) {
+            setTimeout(_tdRenderGsiButton, 250);
+        } else if (errEl) {
+            errEl.textContent = 'Could not load Google sign-in.';
+        }
+        return;
+    }
+    try {
+        g.initialize({
+            client_id: clientId,
+            callback: _tdHandleGoogleCredential,
+        });
+        slot.innerHTML = '';
+        g.renderButton(slot, {
+            type: 'standard', theme: 'filled_blue', size: 'medium',
+            text: 'signin_with', shape: 'rectangular',
+        });
+    } catch (e) {
+        if (errEl) errEl.textContent = 'Sign-in init failed: ' + (e.message || e);
+    }
+}
+
+function _tdHandleGoogleCredential(response) {
+    const errEl = document.getElementById('td-signin-err');
+    if (errEl) errEl.textContent = '';
+    const token = response && response.credential;
+    if (!token) {
+        if (errEl) errEl.textContent = 'No credential returned by Google.';
+        return;
+    }
+    const claims = _tdDecodeJwt(token);
+    if (!claims || !claims.email) {
+        if (errEl) errEl.textContent = 'Could not read email from Google credential.';
+        return;
+    }
+    _tdSaveGuestSession(token, claims.email, claims.name || claims.email);
+    _tdRefreshComposeUI();
+}
+
+let _tdAttachLabelTimer = null;
+
+function _tdUpdateAttachTimeLabel() {
+    const el = document.getElementById('td-attach-time-val');
+    if (!el) return;
+    _tdAttachSec = Math.max(0, Math.round(playCursorSeconds || currentTime || 0));
+    el.textContent = _tdAttachTime ? `(${_tdFmtCursorLocal(_tdAttachSec)})` : '';
+    // Keep the displayed time fresh as the cursor moves so it reflects
+    // the moment the user is actually about to attach. Without this the
+    // label freezes at whatever the cursor was when the box was ticked.
+    if (_tdAttachLabelTimer) { clearInterval(_tdAttachLabelTimer); _tdAttachLabelTimer = null; }
+    if (_tdAttachTime) {
+        _tdAttachLabelTimer = setInterval(() => {
+            const cur = Math.max(0, Math.round(playCursorSeconds || currentTime || 0));
+            if (cur !== _tdAttachSec) {
+                _tdAttachSec = cur;
+                el.textContent = `(${_tdFmtCursorLocal(cur)})`;
+            }
+        }, 500);
+    }
+}
+
+function setupTacticsDrawer() {
+    const btn = document.getElementById('btn-tactics');
+    const closeBtn = document.getElementById('td-close');
+    const refreshBtn = document.getElementById('td-refresh');
+    const submitBtn = document.getElementById('td-submit');
+    const signoutBtn = document.getElementById('td-signout');
+    const bodyEl = document.getElementById('td-body');
+    const attachChk = document.getElementById('td-attach-time');
+
+    if (btn) btn.addEventListener('click', _tdOpenDrawer);
+    if (closeBtn) closeBtn.addEventListener('click', _tdCloseDrawer);
+    if (refreshBtn) refreshBtn.addEventListener('click', _tdLoadAndRender);
+
+    if (attachChk) attachChk.addEventListener('change', () => {
+        _tdAttachTime = attachChk.checked;
+        _tdUpdateAttachTimeLabel();
+    });
+
+    if (signoutBtn) signoutBtn.addEventListener('click', () => {
+        // Only signs out the guest (coach session is managed by the coach app).
+        const auth = _tdCurrentAuth();
+        if (auth && auth.kind === 'coach') {
+            // Coach sign-out goes through the coach app — be explicit.
+            if (confirm('Sign out of the coach session? You can sign back in at /coach/login.html.')) {
+                try { localStorage.removeItem('sf-coach-id-token'); localStorage.removeItem('sf-coach-email'); } catch {}
+            } else {
+                return;
+            }
+        } else {
+            _tdClearGuestSession();
+        }
+        _tdRefreshComposeUI();
+        _tdRenderGsiButton();
+    });
+
+    if (submitBtn) submitBtn.addEventListener('click', async () => {
+        const errEl = document.getElementById('td-form-err');
+        if (errEl) errEl.textContent = '';
+        const body = (bodyEl?.value || '').trim();
+        if (!body) {
+            if (errEl) errEl.textContent = 'Write something first.';
+            return;
+        }
+        if (!currentRace?.race_id) {
+            if (errEl) errEl.textContent = 'No race loaded.';
+            return;
+        }
+        // Recapture at submit time — the user may have scrubbed after
+        // ticking the box, and they expect the attached moment to be
+        // whatever the cursor shows right now.
+        const cursorTSec = _tdAttachTime
+            ? Math.max(0, Math.round(playCursorSeconds || currentTime || 0))
+            : null;
+        submitBtn.disabled = true;
+        try {
+            const post = await _tdSubmitPost(currentRace.race_id, body, cursorTSec);
+            _tdPostsCache.push(post);
+            if (bodyEl) bodyEl.value = '';
+            if (attachChk) attachChk.checked = false;
+            _tdAttachTime = false;
+            _tdUpdateAttachTimeLabel();
+            _tdRenderPosts();
+        } catch (e) {
+            if (errEl) errEl.textContent = e.message || String(e);
+            _tdRefreshComposeUI();
+            if (!_tdCurrentAuth()) _tdRenderGsiButton();
+        } finally {
+            submitBtn.disabled = false;
+        }
+    });
+
+    // Esc closes the tactics drawer too.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const drawer = document.getElementById('tactics-drawer');
+        if (drawer?.classList.contains('open')) _tdCloseDrawer();
+    });
 }
 
 // Public API consumed by the chat panel's (t=N) link handler and any

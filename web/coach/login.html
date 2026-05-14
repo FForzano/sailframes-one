@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>*</text></svg>">
     <link rel="stylesheet" href="./coach.css?v=4">
     <script src="../config.js"></script>
-    <script src="./coach.js?v=4"></script>
+    <script src="./coach.js?v=5"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -50,19 +50,27 @@
                 errEl.textContent = 'Could not read email from Google credential.';
                 return;
             }
-            // Verify via the API on landing — the coach Lambda will
-            // reject non-allowlisted emails with 401, which clears the
-            // session. We trust the token here only for redirect.
-            SailFramesCoach.setSession(token, claims.email);
-            // Return to the originating page if one was supplied via
-            // ?next=<urlencoded path>. Only same-origin paths are
-            // accepted to prevent open-redirect abuse.
-            const next = new URLSearchParams(window.location.search).get('next');
-            if (next && next.startsWith('/') && !next.startsWith('//')) {
-                window.location.href = next;
-                return;
-            }
-            window.location.href = './index.html';
+            // Swap the 1-hour Google ID token for a 30-day session
+            // token issued by our coach Lambda. The Lambda re-checks
+            // the Google token + allowlist; if either fails we get
+            // a 401 here and surface it on the login page. Persisted
+            // under the same key so race-app's coach helpers and
+            // every api() call read it transparently.
+            SailFramesCoach.exchangeForSession(token, claims.email)
+                .then(() => {
+                    // Return to the originating page if one was supplied
+                    // via ?next=<urlencoded path>. Only same-origin
+                    // paths are accepted to prevent open-redirect abuse.
+                    const next = new URLSearchParams(window.location.search).get('next');
+                    if (next && next.startsWith('/') && !next.startsWith('//')) {
+                        window.location.href = next;
+                        return;
+                    }
+                    window.location.href = './index.html';
+                })
+                .catch((err) => {
+                    errEl.textContent = 'Could not start session: ' + (err && err.message || err);
+                });
         }
     </script>
 </body>

@@ -46,7 +46,7 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
-    <link rel="stylesheet" href="./assets/css/race.css?v=43">
+    <link rel="stylesheet" href="./assets/css/race.css?v=46">
     <link rel="stylesheet" href="./assets/css/race-chat.css?v=9">
     <link rel="stylesheet" href="./assets/css/race-start-review.css?v=2">
     <script src="./config.js"></script>
@@ -81,6 +81,7 @@
             <button id="btn-charts" class="btn-secondary" title="Open Speed / Heel / Wind charts (Esc to close)">Charts</button>
             <button id="btn-start-review" class="btn-secondary" title="Replay the start sequence with horn signals">Review Start</button>
             <button id="btn-race-coach" class="btn-secondary" title="Ask an AI Coach about this race">Ask an AI Coach</button>
+            <button id="btn-tactics" class="btn-secondary" title="Tactics discussion — observations &amp; questions from coaches and competitors">💬 Tactics</button>
             <!-- Regatta-level public docs (NOR / SI / Website). Each
                  anchor opens in a new tab; hidden when the loaded
                  race's regatta has no link for that slot. -->
@@ -233,6 +234,52 @@
         <div class="drawer-body" id="drawer-body"></div>
     </aside>
 
+    <!-- Tactics-discussion drawer. Per-race bulletin board: coaches and
+         competitors post tactical observations and questions. Public
+         read, Google sign-in required to post. Mirrors .boat-drawer
+         styling. Opened by #btn-tactics in the header. -->
+    <aside class="tactics-drawer" id="tactics-drawer">
+        <div class="drawer-header">
+            <h3>
+                <span>💬 Tactics &amp; questions</span>
+                <span class="td-race-name" id="td-race-name"></span>
+            </h3>
+            <button class="drawer-refresh" id="td-refresh" title="Refresh posts">↻</button>
+            <button class="drawer-close" id="td-close" title="Close (Esc)">×</button>
+        </div>
+        <div class="drawer-body" id="td-list">
+            <div class="td-empty">Loading…</div>
+        </div>
+        <div class="td-compose" id="td-compose">
+            <div class="td-signin" id="td-signin">
+                <div class="td-signin-msg">Sign in with Google to post.</div>
+                <div id="td-gsi-button"></div>
+                <div class="td-signin-err" id="td-signin-err"></div>
+            </div>
+            <div class="td-form" id="td-form" hidden>
+                <div class="td-form-who" id="td-form-who"></div>
+                <textarea id="td-body" rows="3"
+                          maxlength="4000"
+                          placeholder="Share a tactical observation, ask a question, or reply to one. e.g. 'Boat X tacked short of the layline on leg 1 — was it good to tack or duck?'"></textarea>
+                <label class="td-attach-time">
+                    <input type="checkbox" id="td-attach-time">
+                    Attach the current race-cursor time
+                    <span class="td-attach-time-val" id="td-attach-time-val"></span>
+                </label>
+                <div class="td-form-actions">
+                    <button id="td-signout" class="btn-secondary" type="button">Sign out</button>
+                    <button id="td-submit" class="btn-primary" type="button">Post</button>
+                </div>
+                <div class="td-form-err" id="td-form-err"></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Google Identity Services — loaded for the Tactics drawer's guest
+         sign-in flow. The library is async-loaded; race-app calls
+         google.accounts.id.* lazily once the user opens the drawer. -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
     <!-- Data attributions (Synoptic Open Access Program requires page-level
          attribution for public-facing applications) -->
     <div class="data-attributions">
@@ -343,6 +390,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=73"></script>
+    <script type="module" src="./assets/js/race-app.js?v=88"></script>
 </body>
 </html>

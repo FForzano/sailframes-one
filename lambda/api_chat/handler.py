@@ -39,6 +39,7 @@ log.setLevel(logging.INFO)
 _secrets = boto3.client("secretsmanager")
 _ddb = boto3.client("dynamodb")
 _s3 = boto3.client("s3")
+_sns = boto3.client("sns")
 
 ANTHROPIC_SECRET_ARN = os.environ["ANTHROPIC_SECRET_ARN"]
 RATE_LIMIT_TABLE = os.environ.get("RATE_LIMIT_TABLE", "")
@@ -63,6 +64,24 @@ MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "4096"))
 LOG_BUCKET = os.environ.get("LOG_BUCKET", "sailframes-fleet-data-prod")
 LOG_PREFIX = os.environ.get("LOG_PREFIX", "chat_logs")
 CORS_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
+NOTIFY_TOPIC_ARN = os.environ.get(
+    "NOTIFY_TOPIC_ARN",
+    "arn:aws:sns:us-east-1:581790374840:sailframes-coach-notifications",
+)
+
+
+def _notify_admin(subject, body):
+    """Fire-and-forget SNS publish. Failures never fail the user request."""
+    if not NOTIFY_TOPIC_ARN:
+        return
+    try:
+        _sns.publish(
+            TopicArn=NOTIFY_TOPIC_ARN,
+            Subject=subject[:99],
+            Message=body,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("sns publish failed: %s", e)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -645,5 +664,35 @@ def lambda_handler(event, context):
         },
         "feedback": None,
     })
+
+    # Notify the admin that someone asked the AI Coach a question.
+    # Fire-and-forget — never blocks the response.
+    race_label = (
+        race_meta.get("name") or race_meta.get("id") or "(unknown race)"
+    )
+    boat_label = user_boat or "spectator"
+    preview = (last_user[:300] + "…") if len(last_user) > 300 else last_user
+    race_id = race_meta.get("id") or ""
+    link = (
+        f"https://sailframes.com/race.html?race_id={race_id}"
+        if race_id else "https://sailframes.com/race.html"
+    )
+    _notify_admin(
+        subject=f"[SailFrames] AI Coach question — {race_label}",
+        body=(
+            f"Someone asked the AI Coach a question.\n"
+            f"\n"
+            f"Race  : {race_label}\n"
+            f"Boat  : {boat_label}\n"
+            f"Model : {model}\n"
+            f"Intent: {intent or '(default)'}\n"
+            f"\n"
+            f"---\n"
+            f"{preview}\n"
+            f"---\n"
+            f"\n"
+            f"View race: {link}\n"
+        ),
+    )
 
     return _resp(200, {"text": text, "message_id": message_id})

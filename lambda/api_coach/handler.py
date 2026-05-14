@@ -45,10 +45,14 @@ Briefing JSON schema:
   }
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import time
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 
 import boto3
@@ -59,6 +63,7 @@ from google.oauth2 import id_token
 
 _s3 = boto3.client("s3")
 _secrets = boto3.client("secretsmanager")
+_sns = boto3.client("sns")
 # 240 s read timeout: a single screenshot can take ~70-90 s on cold start
 # (Chromium init + page nav + tile load + render). Default boto3 read_timeout
 # is 60 s — that was killing every auto-capture after the first one.
@@ -83,8 +88,91 @@ COACH_ALLOWLIST = {
     if e.strip()
 }
 ANTHROPIC_SECRET_ARN = os.environ.get("ANTHROPIC_SECRET_ARN", "")
+NOTIFY_TOPIC_ARN = os.environ.get(
+    "NOTIFY_TOPIC_ARN",
+    "arn:aws:sns:us-east-1:581790374840:sailframes-coach-notifications",
+)
 
 GENERATOR_MODEL = "claude-opus-4-7"
+
+# --- Long-lived session tokens ------------------------------------------
+# Google ID tokens expire after 1 hour, which is too aggressive for a
+# coach session where the same person reviews briefings across days.
+# After a successful Google sign-in the client calls
+# POST /session/exchange and gets back a 30-day HS256 JWT-shape token
+# (prefixed "sf." so _verify_request can tell it apart from a real
+# Google ID token at zero cost).
+_SESSION_LIFETIME_SEC = 30 * 24 * 3600   # 30 days
+_SESSION_VERSION = "v1"
+
+def _session_signing_key():
+    explicit = os.environ.get("SESSION_TOKEN_SECRET", "").strip()
+    if explicit:
+        return hashlib.sha256(explicit.encode("utf-8")).digest()
+    # Derived stable key — cold-start safe, depends only on values
+    # that don't change across deploys. Set SESSION_TOKEN_SECRET to a
+    # 32+ byte random string to rotate.
+    seed = (
+        f"sailframes-coach-session::{_SESSION_VERSION}::"
+        f"{GOOGLE_CLIENT_ID}::{LOG_BUCKET}"
+    )
+    return hashlib.sha256(seed.encode("utf-8")).digest()
+
+
+def _b64u_encode(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+
+
+def _b64u_decode(s):
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+def _make_session_token(email):
+    now = int(datetime.now(timezone.utc).timestamp())
+    payload = {
+        "v": _SESSION_VERSION,
+        "sub": email,
+        "iat": now,
+        "exp": now + _SESSION_LIFETIME_SEC,
+    }
+    payload_b64 = _b64u_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = hmac.new(_session_signing_key(), payload_b64.encode("ascii"), hashlib.sha256).digest()
+    return f"sf.{payload_b64}.{_b64u_encode(sig)}"
+
+
+def _verify_session_token(token):
+    """Return the email on success; raise PermissionError otherwise."""
+    if not token or not token.startswith("sf."):
+        raise PermissionError("not a session token")
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise PermissionError("malformed session token")
+    _, payload_b64, sig_b64 = parts
+    expected = hmac.new(_session_signing_key(), payload_b64.encode("ascii"), hashlib.sha256).digest()
+    try:
+        given = _b64u_decode(sig_b64)
+    except Exception:
+        raise PermissionError("session signature decode failed")
+    if not hmac.compare_digest(expected, given):
+        raise PermissionError("session signature mismatch")
+    try:
+        payload = json.loads(_b64u_decode(payload_b64))
+    except Exception:
+        raise PermissionError("session payload decode failed")
+    if payload.get("v") != _SESSION_VERSION:
+        raise PermissionError("session version mismatch")
+    exp = payload.get("exp", 0)
+    now = int(datetime.now(timezone.utc).timestamp())
+    if not isinstance(exp, (int, float)) or now > exp:
+        raise PermissionError(f"session expired ({exp} < {now})")
+    email = (payload.get("sub") or "").lower()
+    if not email:
+        raise PermissionError("session has no subject")
+    if COACH_ALLOWLIST and email not in COACH_ALLOWLIST:
+        raise PermissionError(f"{email} not in coach allowlist")
+    return email
+
 
 
 # -------------------- Anthropic --------------------
@@ -341,9 +429,20 @@ def _verify_request(event):
     auth = headers.get("authorization") or headers.get("Authorization") or ""
     if not auth.lower().startswith("bearer "):
         raise PermissionError("missing bearer token")
+    token = auth.split(None, 1)[1].strip()
+
+    # Long-lived session tokens are prefixed "sf." — verify locally with
+    # HMAC, no network round-trip to Google. The vast majority of
+    # authenticated requests after sign-in take this fast path.
+    if token.startswith("sf."):
+        return _verify_session_token(token)
+
+    # Fall back to verifying a Google ID token (1-hour lifetime). This
+    # is only hit by /session/exchange right after sign-in, since the
+    # client immediately swaps the Google ID token for our session
+    # token and uses the latter for every subsequent call.
     if not GOOGLE_CLIENT_ID:
         raise RuntimeError("GOOGLE_CLIENT_ID not configured")
-    token = auth.split(None, 1)[1].strip()
     info = id_token.verify_oauth2_token(
         token, g_requests.Request(), GOOGLE_CLIENT_ID, clock_skew_in_seconds=30
     )
@@ -424,6 +523,109 @@ def _list_briefings():
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# -------------------- Discussions (per-race tactics board) --------------------
+#
+# Public read, open-auth write. Anyone with a verified Google email may
+# post; coaches (members of COACH_ALLOWLIST) get moderation power
+# (delete any post). Authors can delete their own.
+#
+# Auth model: coaches authenticate with their existing 30-day session
+# token (sf.*). Guests send a fresh Google ID token per request (1-hour
+# Google lifetime), which is fine for occasional posters. We don't issue
+# session tokens to non-coach users — that would widen the trust surface
+# of every other coach endpoint.
+#
+# Storage: one JSON doc per race at coach-discussions/{race_id}.json
+# with posts ordered by created_at ascending. List-append concurrency
+# is best-effort — at single-digit posts/minute the race window is
+# negligible.
+
+_DISCUSSION_PREFIX = "coach-discussions/"
+_DISCUSSION_BODY_MAX = 4000   # chars per post
+_DISCUSSION_PAGE_MAX = 500    # max posts per race returned in one GET
+
+
+def _discussion_key(race_id):
+    return f"{_DISCUSSION_PREFIX}{race_id.replace('/', '_')}.json"
+
+
+def _load_discussion(race_id):
+    try:
+        obj = _s3.get_object(Bucket=LOG_BUCKET, Key=_discussion_key(race_id))
+        return json.loads(obj["Body"].read())
+    except _s3.exceptions.NoSuchKey:
+        return {"race_id": race_id, "posts": []}
+
+
+def _save_discussion(race_id, doc):
+    _s3.put_object(
+        Bucket=LOG_BUCKET,
+        Key=_discussion_key(race_id),
+        Body=json.dumps(doc, ensure_ascii=False).encode("utf-8"),
+        ContentType="application/json",
+    )
+
+
+def _notify_admin(subject, body):
+    """Fire-and-forget SNS publish for admin notifications. Never raises
+    — a notification failure must NEVER fail the user-facing request."""
+    if not NOTIFY_TOPIC_ARN:
+        return
+    try:
+        _sns.publish(
+            TopicArn=NOTIFY_TOPIC_ARN,
+            Subject=subject[:99],   # SNS hard limit is 100 chars
+            Message=body,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[notify] sns publish failed: {e}")
+
+
+def _verify_open_request(event):
+    """Like _verify_request but does NOT enforce the coach allowlist —
+    used only by the discussion endpoints so verified competitors can
+    post. Returns dict {email, is_coach, name}."""
+    headers = event.get("headers") or {}
+    auth = headers.get("authorization") or headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        raise PermissionError("missing bearer token")
+    token = auth.split(None, 1)[1].strip()
+
+    # Session tokens are gated on COACH_ALLOWLIST at issuance — but we
+    # re-derive is_coach from the allowlist here so the flag tracks the
+    # actual moderation source of truth even if session-token issuance
+    # is ever widened.
+    if token.startswith("sf."):
+        email = _verify_session_token(token)
+        return {"email": email, "is_coach": email in COACH_ALLOWLIST, "name": ""}
+
+    # Google ID token — accept any verified email; flag is_coach
+    # separately so the route handler can decide moderation rights.
+    if not GOOGLE_CLIENT_ID:
+        raise RuntimeError("GOOGLE_CLIENT_ID not configured")
+    info = id_token.verify_oauth2_token(
+        token, g_requests.Request(), GOOGLE_CLIENT_ID, clock_skew_in_seconds=30
+    )
+    if not info.get("email_verified"):
+        raise PermissionError("email not verified")
+    email = (info.get("email") or "").lower()
+    if not email:
+        raise PermissionError("token has no email")
+    return {
+        "email": email,
+        "is_coach": email in COACH_ALLOWLIST,
+        "name": (info.get("name") or "").strip(),
+    }
+
+
+def _shorten_email(email):
+    """Fallback display name: local-part of the email, capitalized."""
+    if not email or "@" not in email:
+        return email or ""
+    local = email.split("@", 1)[0]
+    return local.replace(".", " ").replace("_", " ").title()
 
 
 # -------------------- Generation --------------------
@@ -529,6 +731,131 @@ def handler(event, _ctx):
         return {"statusCode": 204, "body": ""}
 
     # ----- Public (no-auth) endpoints, evaluated BEFORE the auth gate -----
+    # /discussions/* — per-race tactics board. GET is fully public.
+    # POST/DELETE use a wider auth gate (_verify_open_request) that
+    # accepts any verified Google email, not just the coach allowlist —
+    # so competitors can post questions/observations without being
+    # added to COACH_ALLOWLIST by hand.
+    if path.startswith("/discussions/"):
+        parts = path.split("/")
+        # Expect /discussions/{race_id} (3 parts) or /discussions/{race_id}/{post_id} (4).
+        if len(parts) < 3 or not parts[2]:
+            return _resp(404, {"error": "no_route", "method": method, "path": path})
+        race_id = parts[2]
+
+        if method == "GET" and len(parts) == 3:
+            doc = _load_discussion(race_id)
+            posts = doc.get("posts") or []
+            if len(posts) > _DISCUSSION_PAGE_MAX:
+                posts = posts[-_DISCUSSION_PAGE_MAX:]
+            # Opportunistically authenticate the viewer so we can stamp
+            # `is_mine` / `is_mod` per post — but never leak the raw
+            # author_email back to public callers (PII; would otherwise
+            # end up in browser caches and any forwarded JSON).
+            viewer_email = None
+            viewer_is_coach = False
+            try:
+                ai = _verify_open_request(event)
+                viewer_email = ai["email"]
+                viewer_is_coach = ai["is_coach"]
+            except Exception:
+                pass
+            safe_posts = []
+            for p in posts:
+                pe = (p.get("author_email") or "").lower()
+                safe = {
+                    "id": p.get("id"),
+                    "author_name": p.get("author_name"),
+                    "is_coach": bool(p.get("is_coach")),
+                    "body": p.get("body"),
+                    "cursor_t_sec": p.get("cursor_t_sec"),
+                    "created_at": p.get("created_at"),
+                }
+                if viewer_email and pe == viewer_email:
+                    safe["is_mine"] = True
+                if viewer_is_coach:
+                    safe["is_mod"] = True
+                safe_posts.append(safe)
+            return _resp(200, {"race_id": race_id, "posts": safe_posts})
+
+        # Mutating ops need auth (but NOT the strict coach allowlist).
+        try:
+            auth_info = _verify_open_request(event)
+        except (PermissionError, ValueError) as e:
+            return _resp(401, {"error": "unauthorized", "detail": str(e)})
+        except Exception as e:  # noqa: BLE001
+            return _resp(500, {"error": "auth_error", "detail": str(e)})
+        email = auth_info["email"]
+        is_coach = auth_info["is_coach"]
+        display_name = auth_info["name"] or _shorten_email(email)
+
+        if method == "POST" and len(parts) == 3:
+            body = json.loads(event.get("body") or "{}")
+            text = (body.get("body") or "").strip()
+            if not text:
+                return _resp(400, {"error": "body required"})
+            if len(text) > _DISCUSSION_BODY_MAX:
+                return _resp(400, {
+                    "error": f"body too long (max {_DISCUSSION_BODY_MAX} chars)",
+                })
+            cursor_t_sec = body.get("cursor_t_sec")
+            if cursor_t_sec is not None:
+                try:
+                    cursor_t_sec = float(cursor_t_sec)
+                except (TypeError, ValueError):
+                    cursor_t_sec = None
+            post = {
+                "id": uuid.uuid4().hex,
+                "author_email": email,
+                "author_name": display_name,
+                "is_coach": is_coach,
+                "body": text,
+                "cursor_t_sec": cursor_t_sec,
+                "created_at": _now_iso(),
+            }
+            doc = _load_discussion(race_id)
+            doc.setdefault("posts", []).append(post)
+            doc["race_id"] = race_id
+            _save_discussion(race_id, doc)
+
+            # Notify the admin of every new post. Includes a deep link so
+            # the recipient can jump straight to the discussion.
+            author_label = display_name or email
+            role = "coach" if is_coach else "guest"
+            preview = (text[:300] + "…") if len(text) > 300 else text
+            _notify_admin(
+                subject=f"[SailFrames] Tactics post by {author_label}",
+                body=(
+                    f"New tactics-discussion post on race {race_id}\n"
+                    f"\n"
+                    f"Author : {author_label} ({email}) — {role}\n"
+                    f"Posted : {post['created_at']}\n"
+                    f"\n"
+                    f"---\n"
+                    f"{preview}\n"
+                    f"---\n"
+                    f"\n"
+                    f"View: https://sailframes.com/race.html?race_id={race_id}\n"
+                ),
+            )
+            return _resp(200, post)
+
+        if method == "DELETE" and len(parts) == 4:
+            post_id = parts[3]
+            doc = _load_discussion(race_id)
+            posts = doc.get("posts") or []
+            target = next((p for p in posts if p.get("id") == post_id), None)
+            if target is None:
+                return _resp(404, {"error": "post not found"})
+            owner_match = (target.get("author_email") or "").lower() == email
+            if not is_coach and not owner_match:
+                return _resp(403, {"error": "not authorized"})
+            doc["posts"] = [p for p in posts if p.get("id") != post_id]
+            _save_discussion(race_id, doc)
+            return _resp(200, {"deleted": True, "id": post_id})
+
+        return _resp(404, {"error": "no_route", "method": method, "path": path})
+
     # GET /race-wind-default/{race_id} — race.html reads this on every load
     # to honor the admin's wind-station override. Public because race.html
     # has no user auth.
@@ -555,6 +882,17 @@ def handler(event, _ctx):
         return _resp(500, {"error": "auth_error", "detail": str(e)})
 
     try:
+        # POST /session/exchange — caller authenticates with a Google
+        # ID token (just-after-sign-in), we return our own 30-day
+        # session JWT for subsequent requests so the coach session
+        # doesn't expire every hour.
+        if method == "POST" and path == "/session/exchange":
+            return _resp(200, {
+                "session_token": _make_session_token(email),
+                "email": email,
+                "expires_in": _SESSION_LIFETIME_SEC,
+            })
+
         if method == "POST" and path == "/generate":
             body = json.loads(event.get("body") or "{}")
             race_id = body.get("race_id")
