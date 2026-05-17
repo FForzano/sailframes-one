@@ -666,30 +666,49 @@ def lambda_handler(event, context):
     })
 
     # Notify the admin that someone asked the AI Coach a question.
-    # Fire-and-forget — never blocks the response.
+    # Includes BOTH the question and the model's answer so the email
+    # is self-contained. Race is labelled with the rich client-side
+    # context ("Regatta · Race N of M · Tue May 12, 2026") when the
+    # client provides it; otherwise falls back to whatever the briefing
+    # carries. Fire-and-forget; never blocks the response. Bodies cap
+    # at ~6 KB combined to keep the email comfortable on mobile while
+    # staying well under SNS's 256 KB message ceiling.
+    race_context_label = (body.get("race_context_label") or "").strip()
     race_label = (
-        race_meta.get("name") or race_meta.get("id") or "(unknown race)"
+        race_context_label
+        or race_meta.get("name")
+        or race_meta.get("id")
+        or "(unknown race)"
     )
     boat_label = user_boat or "spectator"
-    preview = (last_user[:300] + "…") if len(last_user) > 300 else last_user
+    def _cap(s, n):
+        s = s or ""
+        return (s[:n] + "\n…(truncated)") if len(s) > n else s
+    question_block = _cap(last_user, 2000)
+    answer_block   = _cap(text,      4000)
     race_id = race_meta.get("id") or ""
     link = (
-        f"https://sailframes.com/race.html?race_id={race_id}"
+        f"https://sailframes.com/race.html?race={race_id}"
         if race_id else "https://sailframes.com/race.html"
     )
     _notify_admin(
-        subject=f"[SailFrames] AI Coach question — {race_label}",
+        subject=f"[SailFrames] AI Coach Q&A — {race_label}",
         body=(
             f"Someone asked the AI Coach a question.\n"
             f"\n"
-            f"Race  : {race_label}\n"
-            f"Boat  : {boat_label}\n"
-            f"Model : {model}\n"
-            f"Intent: {intent or '(default)'}\n"
+            f"Race   : {race_label}\n"
+            f"Race ID: {race_id or '(none)'}\n"
+            f"Boat   : {boat_label}\n"
+            f"Model  : {model}\n"
+            f"Intent : {intent or '(default)'}\n"
             f"\n"
-            f"---\n"
-            f"{preview}\n"
-            f"---\n"
+            f"=== QUESTION ===\n"
+            f"{question_block}\n"
+            f"\n"
+            f"=== ANSWER ===\n"
+            f"{answer_block}\n"
+            f"\n"
+            f"=== END ===\n"
             f"\n"
             f"View race: {link}\n"
         ),

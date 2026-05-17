@@ -6,6 +6,26 @@
     <title>SailFrames - Race Dashboard</title>
 
     <!--
+      Canonical host: collapse www.sailframes.com -> sailframes.com so
+      Google OAuth's Authorized JS origin matches consistently. Without
+      this, anyone whose browser auto-completed the www. prefix lands
+      on a different origin and Google blocks sign-in with Error 400
+      origin_mismatch. Done FIRST, before any other script, to avoid
+      wasted work on the about-to-be-discarded www. page.
+    -->
+    <script>
+        (function () {
+            try {
+                if (location.hostname === 'www.sailframes.com') {
+                    location.replace(
+                        location.href.replace('//www.sailframes.com', '//sailframes.com')
+                    );
+                }
+            } catch (e) { /* fall through to normal load */ }
+        })();
+    </script>
+
+    <!--
       Bare /race.html (no ?race= or ?regatta= deep link) sends visitors
       to the Series & Races browse page instead of auto-loading
       whatever the latest race happens to be. Done synchronously
@@ -16,7 +36,11 @@
         (function () {
             try {
                 var p = new URLSearchParams(location.search);
-                if (!p.get('race') && !p.get('regatta')) {
+                // Accept ?race=, ?race_id= (alias used by older
+                // notification emails + share links), or ?regatta=.
+                // Anything else with no race scope → bounce to the
+                // landing page.
+                if (!p.get('race') && !p.get('race_id') && !p.get('regatta')) {
                     location.replace('/races.html');
                 }
             } catch (e) { /* ignore — fall through to normal load */ }
@@ -46,13 +70,13 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
-    <link rel="stylesheet" href="./assets/css/race.css?v=46">
-    <link rel="stylesheet" href="./assets/css/race-chat.css?v=9">
+    <link rel="stylesheet" href="./assets/css/race.css?v=52">
+    <link rel="stylesheet" href="./assets/css/race-chat.css?v=10">
     <link rel="stylesheet" href="./assets/css/race-start-review.css?v=2">
     <script src="./config.js"></script>
     <script src="./assets/js/analytics.js"></script>
-    <script src="./assets/js/race-briefing.js?v=11"></script>
-    <script src="./assets/js/race-chat.js?v=16"></script>
+    <script src="./assets/js/race-briefing.js?v=12"></script>
+    <script src="./assets/js/race-chat.js?v=18"></script>
     <script src="./assets/js/race-start-review.js?v=3"></script>
 </head>
 <body class="race-dashboard">
@@ -75,13 +99,38 @@
             <button id="btn-edit-course" class="btn-secondary" title="Edit course on map" disabled>Edit Course</button>
             <button id="btn-copy-course-next" class="btn-secondary" title="Copy this race's marks, start/finish lines, and course sequence to the next race of the day" disabled>Copy Course →</button>
             <button id="btn-copy-course-all" class="btn-secondary" title="Copy this race's course to every later race on the same day" disabled>Copy → All</button>
-            <button id="btn-leg-summary" class="btn-secondary" title="Leg-by-leg per-boat summary">Legs</button>
-            <button id="btn-maneuvers" class="btn-secondary" title="Tacks &amp; gybes comparison">Maneuvers</button>
-            <button id="btn-tack-analysis" class="btn-secondary" title="Overlay every tack in a wind-up frame, color-coded by speed">Tack Analysis</button>
-            <button id="btn-charts" class="btn-secondary" title="Open Speed / Heel / Wind charts (Esc to close)">Charts</button>
-            <button id="btn-start-review" class="btn-secondary" title="Replay the start sequence with horn signals">Review Start</button>
-            <button id="btn-race-coach" class="btn-secondary" title="Ask an AI Coach about this race">Ask an AI Coach</button>
-            <button id="btn-tactics" class="btn-secondary" title="Tactics discussion — observations &amp; questions from coaches and competitors">💬 Tactics</button>
+            <!-- Analytics dropdown: groups all per-race analysis tools
+                 under one toolbar entry so the header stays compact.
+                 Each item keeps its original ID so existing handlers
+                 in race-app.js bind unchanged. -->
+            <div class="tb-dropdown" id="analytics-dropdown">
+                <button id="btn-analytics" class="btn-secondary" type="button"
+                        aria-haspopup="true" aria-expanded="false"
+                        title="Race analysis tools">Analytics ▾</button>
+                <div class="tb-menu" id="analytics-menu" hidden role="menu">
+                    <button id="btn-leg-summary" class="tb-menu-item" role="menuitem" title="Leg-by-leg per-boat summary">Legs</button>
+                    <button id="btn-maneuvers" class="tb-menu-item" role="menuitem" title="Tacks &amp; gybes comparison">Maneuvers</button>
+                    <button id="btn-tack-analysis" class="tb-menu-item" role="menuitem" title="Overlay every tack in a wind-up frame, color-coded by speed">Tack Analysis</button>
+                    <button id="btn-charts" class="tb-menu-item" role="menuitem" title="Open Speed / Heel / Wind charts (Esc to close)">Charts</button>
+                    <button id="btn-start-review" class="tb-menu-item" role="menuitem" title="Replay the start sequence with horn signals">Review Start</button>
+                    <button id="btn-roll-tacking" class="tb-menu-item" role="menuitem" title="Compare roll-tacking technique across boats: heel signature, flatten rate, speed loss">Roll Tacking Analysis</button>
+                </div>
+            </div>
+
+            <!-- Discuss Tactics dropdown: peer discussion or AI coach.
+                 #btn-tactics opens the discussion drawer (existing
+                 handler in setupTacticsDrawer). #btn-race-coach opens
+                 the in-page AI coach chat (existing handler in
+                 race-chat.js). Both kept their original IDs. -->
+            <div class="tb-dropdown" id="tactics-dropdown">
+                <button id="btn-tactics-dd" class="btn-secondary" type="button"
+                        aria-haspopup="true" aria-expanded="false"
+                        title="Discuss this race">💬 Discuss Tactics with… ▾</button>
+                <div class="tb-menu" id="tactics-menu" hidden role="menu">
+                    <button id="btn-tactics" class="tb-menu-item" role="menuitem" title="Open the per-race tactics discussion board">Other Sailors</button>
+                    <button id="btn-race-coach" class="tb-menu-item" role="menuitem" title="Ask Anthropic's Claude about this race">Coach AI (claude.ai)</button>
+                </div>
+            </div>
             <!-- Regatta-level public docs (NOR / SI / Website). Each
                  anchor opens in a new tab; hidden when the loaded
                  race's regatta has no link for that slot. -->
@@ -225,6 +274,21 @@
         </div>
     </div>
 
+    <!-- Roll-tacking analysis modal. Per-boat phase-by-phase comparison
+         of tacking technique: heel signature, speed dip + recovery,
+         roll amplitude vs speed-loss scatter. Populated by
+         openRollTackingModal() in race-app.js. -->
+    <div class="modal" id="roll-tacking-modal" style="display: none;">
+        <div class="modal-backdrop" data-close-modal="roll-tacking-modal"></div>
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>Roll Tacking Analysis · phases &amp; technique</h2>
+                <button class="modal-close" data-close-modal="roll-tacking-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="roll-tacking-modal-body"></div>
+        </div>
+    </div>
+
     <!-- Per-boat detail drawer (slides in from the right) -->
     <aside class="boat-drawer" id="boat-drawer">
         <div class="drawer-header">
@@ -244,6 +308,7 @@
                 <span>💬 Tactics &amp; questions</span>
                 <span class="td-race-name" id="td-race-name"></span>
             </h3>
+            <button class="drawer-share" id="td-share-wa" title="Share this discussion on WhatsApp">📤 WhatsApp</button>
             <button class="drawer-refresh" id="td-refresh" title="Refresh posts">↻</button>
             <button class="drawer-close" id="td-close" title="Close (Esc)">×</button>
         </div>
@@ -390,6 +455,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=88"></script>
+    <script type="module" src="./assets/js/race-app.js?v=103"></script>
 </body>
 </html>

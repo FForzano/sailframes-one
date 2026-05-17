@@ -302,3 +302,47 @@
   cursor: pointer;
 }
 .sf-chat-close-btn:hover { background: #dee5eb; }
+
+/* "Attach race-cursor time" row — sits between the input and the
+   prototype callout. Tick the box to pin the current playback cursor
+   to the next question; the timestamp updates live as the user scrubs
+   so they see exactly what will be sent. */
+.sf-chat-attach-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 0;
+  font-size: 11px;
+  color: #5b6b78;
+  cursor: pointer;
+  user-select: none;
+}
+.sf-chat-attach-time input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+.sf-chat-attach-time-val {
+  color: #b8851a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+/* Time badge under a user message — clickable, scrubs to the moment.
+   Amber to match the tactics-drawer "Jump to" affordance so both
+   feature areas read as the same thing visually. */
+.sf-chat-time-badge {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  background: rgba(251, 191, 36, 0.18);
+  color: #b8851a;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.sf-chat-time-badge:hover {
+  background: rgba(251, 191, 36, 0.3);
+}

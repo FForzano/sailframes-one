@@ -654,9 +654,33 @@
     const boatIds = Object.keys(boatsMap);
     const wind = summarizeWind(ctx.weatherWindSamples || [], startMs);
 
-    const { stats } = computeRankings(boatsMap, layers, courseSeq.length);
+    // currentRace.course is an array of mark_id STRINGS; the full
+    // mark objects (with lat/lon/name/type) live in currentRace.marks.
+    // Resolve the sequence into full objects so every downstream
+    // helper — and the briefing itself — sees real coordinates instead
+    // of silent nulls. (Briefing-was-missing-coordinates bug fixed
+    // 2026-05-16 after Claude reported "I don't have the mark's exact
+    // coordinates" mid-conversation.)
+    const _marksById = {};
+    for (const mm of (c.marks || [])) {
+        if (mm && mm.mark_id) _marksById[mm.mark_id] = mm;
+    }
+    const resolvedCourse = courseSeq.map((m, i) => {
+        const id = typeof m === 'string' ? m : (m?.mark_id || null);
+        const obj = (id && _marksById[id]) || (typeof m === 'object' ? m : null);
+        return {
+            mark_id: id || null,
+            order: i + 1,
+            name: (obj && obj.name) || id || `mark ${i + 1}`,
+            type: (obj && obj.type) || null,
+            lat: obj && obj.lat != null ? obj.lat : null,
+            lon: obj && obj.lon != null ? obj.lon : null,
+        };
+    });
+
+    const { stats } = computeRankings(boatsMap, layers, resolvedCourse.length);
     const finalRanking = buildFinalRanking(stats, startMs);
-    const byMarkRanking = buildByMarkRanking(boatsMap, layers, courseSeq);
+    const byMarkRanking = buildByMarkRanking(boatsMap, layers, resolvedCourse);
 
     // deviceId -> finish_position lookup so per-boat objects can carry it.
     const posByName = new Map(finalRanking.map((r) => [r.name, r.position]));
@@ -696,23 +720,37 @@
     }
 
     const windSeries = buildWindSeries(ctx.weatherWindSamples || [], startMs);
-    const laylines = buildLaylines(courseSeq, raceAvgTwd);
+    const laylines = buildLaylines(resolvedCourse, raceAvgTwd);
     const encounters = detectEncounters(layers, boatsMap, ctx.weatherWindSamples || [], startMs);
-    // courseSeq is an array of mark_id strings; resolve the first
-    // one against c.marks so startAnalysis can decide the "course
-    // side" of the line for OCS sign.
-    const _firstMarkId = courseSeq[0];
-    let _firstMark = null;
-    if (_firstMarkId && Array.isArray(c.marks)) {
-      const m = c.marks.find((mm) => mm.mark_id === _firstMarkId);
-      if (m && m.lat != null && m.lon != null) _firstMark = { lat: m.lat, lon: m.lon };
-    }
+    // First-mark resolved straight from the course-sequence array.
+    const _firstMarkObj = resolvedCourse[0];
+    const _firstMark = (_firstMarkObj && _firstMarkObj.lat != null && _firstMarkObj.lon != null)
+      ? { lat: _firstMarkObj.lat, lon: _firstMarkObj.lon } : null;
     const _bowOffsetM = (c.boat_class && Number.isFinite(c.boat_class.bow_offset_m))
       ? c.boat_class.bow_offset_m : 0;
     const startInfo = startAnalysis(boatsMap, layers, c.start_line, startMs, {
       bow_offset_m: _bowOffsetM,
       first_mark: _firstMark,
     });
+
+    // Wind sensor coordinates — the AI needs these to reason about how
+    // far the wind reference is from the racing area (Castle Island
+    // is on-course; KBOS/Logan is ~3 nm off, etc.). Resolves via the
+    // currently selected station id against raceBuoyData.
+    let windStation = null;
+    const _sid = ctx.selectedWindStationId;
+    const _buoy = (_sid && ctx.raceBuoyData) ? ctx.raceBuoyData[_sid] : null;
+    if (_buoy) {
+      windStation = {
+        station_id: _sid,
+        name: _buoy.name || _sid,
+        lat: round(_buoy.lat, 5),
+        lon: round(_buoy.lon, 5),
+      };
+    }
+
+    const _loaM = (c.boat_class && Number.isFinite(c.boat_class.loa_m))
+      ? c.boat_class.loa_m : null;
 
     return {
       race: {
@@ -722,10 +760,32 @@
         venue: c.venue || 'Boston Harbor',
         timezone: VENUE_TZ,
         course_type: c.course_type || null,
-        course: courseSeq.map((m) => ({
-          name: m.name, type: m.type,
-          lat: round(m.lat, 5), lon: round(m.lon, 5),
+        // Course sequence with FULL mark info — name, type, lat, lon,
+        // mark_id (so the model can correlate with marks{} below if
+        // the same mark appears twice in a multi-lap course).
+        course: resolvedCourse.map((m) => ({
+          order: m.order,
+          mark_id: m.mark_id,
+          name: m.name,
+          type: m.type,
+          lat: round(m.lat, 5),
+          lon: round(m.lon, 5),
         })),
+        // Every mark defined on the race — including marks not yet
+        // sequenced into the course (gates that pair, future marks,
+        // alternates). Lets the model reason about "the windward mark
+        // at <coords>" even when it's mid-course.
+        marks: (c.marks || []).map((mm) => ({
+          mark_id: mm.mark_id,
+          name: mm.name || mm.mark_id,
+          type: mm.type || null,
+          lat: round(mm.lat, 5),
+          lon: round(mm.lon, 5),
+        })),
+        // RRS 18 (mark-room) zone radius = 3 boat-lengths from the
+        // mark. Precomputed so the model doesn't have to derive it
+        // and so the value is consistent with what the dashboard draws.
+        mark_zone_radius_m: _loaM != null ? round(_loaM * 3, 1) : null,
         start_line: c.start_line ? {
           pin: { lat: round(c.start_line.pin_lat, 5), lon: round(c.start_line.pin_lon, 5) },
           committee: { lat: round(c.start_line.boat_lat, 5), lon: round(c.start_line.boat_lon, 5) },
@@ -737,6 +797,11 @@
         start: startMs != null ? { local: fmtLocal(startMs), t_sec: 0 } : null,
         end:   endMs != null   ? fmtTime(endMs, startMs) : null,
         wind_source: ctx.weatherWindSource || null,
+        // Selected wind reference station's geographic location, so
+        // the model can reason about how representative the wind is
+        // of the racing area (Castle Island = on-course; Logan/16NM
+        // are remote; FLEET is a synthetic from the boats themselves).
+        wind_station: windStation,
         wind: wind,
         // Hull dimensions for the fleet — drives the 3-LOA mark zone
         // (RRS 18) and the bow-offset used to project antenna fixes

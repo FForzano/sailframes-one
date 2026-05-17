@@ -34,6 +34,15 @@
   const messages = [];        // { role, content }
   let streaming = false;
 
+  // Attach-race-cursor-time UI state (mirrors the tactics-drawer
+  // composer). When the checkbox is ticked the label tracks the live
+  // cursor; at submit we recapture so the attached time matches the
+  // moment the user pressed Send, not when they ticked the box.
+  let attachTimeOn = false;
+  let attachTimeTimer = null;
+  let attachCbEl = null;
+  let attachValEl = null;
+
   // Stable session id so we can correlate every Q&A from one chat
   // sitting (across reloads) when reviewing the logs later. Survives
   // the page lifetime via localStorage; rotates only if cleared.
@@ -163,6 +172,11 @@
                  placeholder="Ask anything about this race…" autocomplete="off">
           <button type="submit" class="sf-chat-send">Send</button>
         </form>
+        <label class="sf-chat-attach-time" title="Pin the current race-cursor time to your question so Claude grounds its answer on that exact moment, and so you can click to scrub back to it later.">
+          <input type="checkbox" class="sf-chat-attach-time-cb">
+          📍 Attach race-cursor time
+          <span class="sf-chat-attach-time-val"></span>
+        </label>
         <div class="sf-chat-foot">
           <span>🔬 <strong>Prototype</strong> — answers vary in quality. Tap 👍 / 👌 / 👎 below each answer to help me improve.</span>
           <button type="button" class="sf-chat-close-btn">Close</button>
@@ -174,6 +188,14 @@
     logEl = root.querySelector('.sf-chat-log');
     inputEl = root.querySelector('.sf-chat-input');
     boatSelectEl = root.querySelector('.sf-chat-boat');
+    attachCbEl = root.querySelector('.sf-chat-attach-time-cb');
+    attachValEl = root.querySelector('.sf-chat-attach-time-val');
+    if (attachCbEl) {
+      attachCbEl.addEventListener('change', () => {
+        attachTimeOn = attachCbEl.checked;
+        refreshAttachLabel();
+      });
+    }
 
     const closeFn = () => { panelEl.hidden = true; };
     root.querySelector('.sf-chat-close').onclick = closeFn;
@@ -491,6 +513,64 @@
     });
   }
 
+  // Format the current cursor as wall-clock time using the race's
+  // start_time. Falls back to "t=Ns from start" when no start time.
+  function fmtCursorLocal(ctx, sec) {
+    const start = ctx && ctx.raceStartTime;
+    if (!start) return `t=${sec}s`;
+    const ms = new Date(start).getTime() + sec * 1000;
+    if (!Number.isFinite(ms)) return `t=${sec}s`;
+    return new Date(ms).toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    });
+  }
+
+  function refreshAttachLabel() {
+    if (!attachValEl) return;
+    if (attachTimeTimer) { clearInterval(attachTimeTimer); attachTimeTimer = null; }
+    if (!attachTimeOn) { attachValEl.textContent = ''; return; }
+    const tick = () => {
+      const ctx = getCtx ? getCtx() : null;
+      const sec = Math.max(0, Math.round((ctx && ctx.currentTimeSec) || 0));
+      attachValEl.textContent = `(${fmtCursorLocal(ctx, sec)})`;
+    };
+    tick();
+    // Keep the displayed time fresh as the user scrubs — otherwise
+    // they'd see whatever the cursor was when they ticked the box.
+    attachTimeTimer = setInterval(tick, 500);
+  }
+
+  function clearAttachState() {
+    attachTimeOn = false;
+    if (attachCbEl) attachCbEl.checked = false;
+    refreshAttachLabel();
+  }
+
+  // Render a user-side message with an optional clickable timestamp
+  // badge. Clicking the badge scrubs the race timeline to that moment.
+  function pushUserMessage(text, attachedSec, attachedWall) {
+    const m = el('div', 'sf-chat-msg sf-chat-msg-user');
+    const body = el('span', 'sf-chat-msg-body');
+    body.textContent = text;
+    m.appendChild(body);
+    if (attachedSec != null) {
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'sf-chat-time-badge';
+      badge.textContent = `📍 ${attachedWall}`;
+      badge.title = `Jump to ${attachedWall} (race time)`;
+      badge.addEventListener('click', () => {
+        if (window.SailFramesRace && typeof window.SailFramesRace.seekTo === 'function') {
+          window.SailFramesRace.seekTo(attachedSec);
+        }
+      });
+      m.appendChild(badge);
+    }
+    logEl.appendChild(m);
+    logEl.scrollTop = logEl.scrollHeight;
+    return m;
+  }
+
   async function postFeedback(messageId, rating, comment) {
     const url = ENDPOINT.replace(/\/?$/, '/') + 'feedback';
     try {
@@ -509,8 +589,29 @@
     if (!text || streaming) return;
     streaming = true;
     inputEl.value = '';
-    pushMessage('user', text);
-    messages.push({ role: 'user', content: text });
+
+    // Capture the cursor moment at submit time so it always matches
+    // the cursor the user is looking at, not the cursor when they
+    // ticked the box (which may have been seconds ago).
+    let attachedSec = null;
+    let attachedWall = null;
+    if (attachTimeOn) {
+      const ctx0 = getCtx ? getCtx() : null;
+      attachedSec = Math.max(0, Math.round((ctx0 && ctx0.currentTimeSec) || 0));
+      attachedWall = fmtCursorLocal(ctx0, attachedSec);
+    }
+
+    // The bubble shows the raw user text + a clickable time badge,
+    // but the text we send to the model is prefixed with the moment
+    // so Claude grounds its answer on that specific cursor — the
+    // briefing already carries per-boat time-series data, so Claude
+    // can lookup positions/speeds at that exact second.
+    pushUserMessage(text, attachedSec, attachedWall);
+    const textForModel = attachedSec != null
+      ? `[At ${attachedWall} in the race · t=${attachedSec}s from start] ${text}`
+      : text;
+    messages.push({ role: 'user', content: textForModel });
+    clearAttachState();
 
     const replyEl = pushMessage('assistant', '');
     replyEl.textContent = '…';
@@ -538,6 +639,11 @@
       user_boat: userBoat,
       messages: messages,
       session_id: sessionId(),
+      // Rich human-readable label ("Regatta · Race N of M · Tue May 12, 2026")
+      // — used by the api_chat Lambda to label the admin notification
+      // email so the subject/body name the race in fleet terms instead
+      // of just the race_id.
+      race_context_label: ctx && ctx.raceContextLabel || null,
     };
     if (opts && opts.intent) reqBody.intent = opts.intent;
 

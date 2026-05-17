@@ -338,12 +338,22 @@ document.addEventListener('DOMContentLoaded', init);
 async function init() {
     console.log('[Race] Initializing race dashboard...');
 
-    // Hide admin controls for non-authenticated users
+    // Hide admin controls for non-authenticated users. Race-mutating
+    // actions (create / edit / duplicate / course-copy) are coach-only;
+    // guests still see read-only controls (regatta picker, charts,
+    // legs/maneuvers, tactics).
     if (!IS_ADMIN) {
-        document.getElementById('btn-new-race').style.display = 'none';
-        document.getElementById('btn-edit-race').style.display = 'none';
-        const editCourseBtn = document.getElementById('btn-edit-course');
-        if (editCourseBtn) editCourseBtn.style.display = 'none';
+        for (const id of [
+            'btn-new-race',
+            'btn-edit-race',
+            'btn-edit-course',
+            'btn-duplicate-race',
+            'btn-copy-course-next',
+            'btn-copy-course-all',
+        ]) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
     }
 
     // Initialize map
@@ -370,7 +380,7 @@ async function init() {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             if (drawerDeviceId) closeBoatDrawer();
-            for (const id of ['leg-modal', 'maneuver-modal', 'tack-analysis-modal']) {
+            for (const id of ['leg-modal', 'maneuver-modal', 'tack-analysis-modal', 'roll-tacking-modal']) {
                 const m = document.getElementById(id);
                 if (m && m.style.display !== 'none') m.style.display = 'none';
             }
@@ -401,9 +411,15 @@ async function init() {
     if (manBtn) manBtn.addEventListener('click', openManeuverModal);
     const taBtn = document.getElementById('btn-tack-analysis');
     if (taBtn) taBtn.addEventListener('click', openTackAnalysisModal);
+    const rtBtn = document.getElementById('btn-roll-tacking');
+    if (rtBtn) rtBtn.addEventListener('click', openRollTackingModal);
 
     // Tactics-discussion drawer
     setupTacticsDrawer();
+
+    // Toolbar dropdowns (Analytics, Discuss Tactics with…)
+    setupToolbarDropdown('btn-analytics', 'analytics-menu');
+    setupToolbarDropdown('btn-tactics-dd', 'tactics-menu');
 
     // Mobile UX (only active when viewport ≤ 900 px — see race.css media query)
     setupMobileNav();
@@ -417,9 +433,11 @@ async function init() {
     });
 
     // Deep-link support: ?race=<race_id> loads that specific race instead
-    // of the auto-pick. Used by the coach app, which iframes this page.
+    // of the auto-pick. Used by the coach app, which iframes this page,
+    // and by shared WhatsApp links + notification emails. ?race_id= is
+    // honored as an alias for legacy URLs (older notification emails).
     const params = new URLSearchParams(location.search);
-    const raceParam = params.get('race');
+    const raceParam = params.get('race') || params.get('race_id');
     if (raceParam) {
         try {
             const r = await fetch(`${API_BASE}/api/races/${raceParam}`);
@@ -4957,6 +4975,766 @@ function applyTackEmphasis() {
     }
 }
 
+// =====================================================================
+// Roll-tacking analysis
+//
+// Per-tack technique analysis across boats. Compares the five phases of
+// a roll tack — Approach, Windward Roll, Head-to-Wind, Flatten, Exit —
+// by extracting heel + speed signatures around each detected tack and
+// computing phase-specific metrics. Reuses detectManeuversForLayer() for
+// tack discovery and windAt() for TWD lookup; the only new state is the
+// per-tack "profile" record below.
+//
+// Profile shape (one per detected tack):
+//   {
+//     id, deviceId, team, color,
+//     t0Ms,            // head-to-wind moment (|TWA| min in [tStart, tEnd])
+//     tStartMs,        // tack start (speed dip onset)
+//     tEndMs,          // tack end (turn complete)
+//     heelSeries,      // [{tRel, heel}] resampled to TR_DT_S grid in [-5, +10]
+//     speedSeries,     // [{tRel, speed}] same grid
+//     metrics: {
+//       approachSpeedKn, exitSpeedKn5, exitSpeedKn10, minSpeedKn,
+//       speedLossPct, recoveryTimeS,
+//       heelRangeDeg,           // max(heel) - min(heel) in [-2, +3]
+//       peakRollExcessDeg,      // overshoot beyond steady-state pre-tack heel
+//       peakFlattenRateDegS,    // max |d(heel)/dt| in [-1, +2]
+//       timeInIronsS,           // duration |TWA| < 10°
+//       wasRolled,              // boolean: peakRollExcessDeg > 4
+//     }
+//   }
+// =====================================================================
+
+const RT_PRE_SEC = 5;       // seconds before t0
+const RT_POST_SEC = 10;     // seconds after t0
+const RT_DT_S = 0.5;        // resample grid step
+const RT_ROLL_THRESHOLD_DEG = 4;   // excess heel beyond steady → "rolled"
+
+// Per-modal state (analogue of tackAnalysisState).
+let rollTackState = null;
+const _rtCharts = {};       // Chart.js instances per canvas id
+
+function _rtResampleSeries(samples, t0Ms, accessor, tMin = -RT_PRE_SEC, tMax = RT_POST_SEC) {
+    // samples: [{t: iso, ...}] with accessor(s) returning a numeric value.
+    // Returns [{tRel, value}] on a uniform grid; gaps filled by linear
+    // interpolation between flanking samples. Empty array if no data.
+    if (!samples?.length) return [];
+    const ts = [];
+    const vs = [];
+    for (const s of samples) {
+        const tm = s?.t ? new Date(s.t).getTime() : null;
+        if (tm == null) continue;
+        const v = accessor(s);
+        if (!Number.isFinite(v)) continue;
+        ts.push((tm - t0Ms) / 1000);
+        vs.push(v);
+    }
+    if (ts.length < 2) return [];
+    const out = [];
+    let j = 0;
+    for (let tRel = tMin; tRel <= tMax + 1e-6; tRel += RT_DT_S) {
+        while (j + 1 < ts.length && ts[j + 1] < tRel) j++;
+        if (tRel < ts[0] || tRel > ts[ts.length - 1]) { out.push({ tRel, value: null }); continue; }
+        const t1 = ts[j], v1 = vs[j];
+        const t2 = ts[Math.min(j + 1, ts.length - 1)], v2 = vs[Math.min(j + 1, vs.length - 1)];
+        if (t2 === t1) { out.push({ tRel, value: v1 }); continue; }
+        const f = (tRel - t1) / (t2 - t1);
+        out.push({ tRel, value: v1 + (v2 - v1) * f });
+    }
+    return out;
+}
+
+// Locate the head-to-wind moment inside the tack window: the sample
+// where the absolute TWA is smallest (COG ≈ TWD).
+function _rtFindT0(layer, tack) {
+    const data = layer.data;
+    if (!data?.length) return null;
+    let bestT = null, bestAbsTwa = Infinity;
+    for (const p of data) {
+        const tm = new Date(p.t).getTime();
+        if (tm < tack.tStart || tm > tack.tEnd) continue;
+        const w = windAt(tm);
+        if (!w || w.twd == null || p.course == null) continue;
+        const twa = Math.abs(((w.twd - p.course + 540) % 360) - 180);
+        if (twa < bestAbsTwa) { bestAbsTwa = twa; bestT = tm; }
+    }
+    return bestT;
+}
+
+// Assess BNO085 health for a full IMU recording. Three failure modes
+// we've seen in the field:
+//   'dead'    — sensor returns 0.0 for every sample (E2 on 2026-05-12:
+//               BNO085 was nearly off its header pins → I²C bus open →
+//               driver returned the default zero with no error surfaced).
+//   'garbage' — sensor returns physically-impossible heel values
+//               (E3 on 2026-05-12: range >300°, intermixed with stuck
+//               runs — likely BNO firmware fault or wrong report mode).
+//   'no-data' — too few samples to assess (boat skipped, IMU off, etc.).
+//   'ok'      — usable.
+// A boat flagged dead/garbage is dropped from the heel-derived charts
+// (signature chart + roll-vs-loss scatter) and rendered with a warning
+// badge in the legend and tables, instead of polluting the analysis
+// with sensor failures.
+function _rtAssessImuHealth(imuSamples) {
+    if (!imuSamples || imuSamples.length < 10) return 'no-data';
+    let n = 0, outliers = 0, mn = Infinity, mx = -Infinity;
+    for (const s of imuSamples) {
+        const h = Number(s?.heel);
+        if (!Number.isFinite(h)) continue;
+        n++;
+        if (h < mn) mn = h;
+        if (h > mx) mx = h;
+        if (Math.abs(h) > 80) outliers++;
+    }
+    if (n < 10) return 'no-data';
+    const range = mx - mn;
+    // Dynamic range under 2° across an entire recording = sensor is
+    // stuck (E2's symptom). Threshold is well below any real boat's
+    // heel motion even in glassy conditions.
+    if (range < 2) return 'dead';
+    // More than 0.5% of samples beyond ±80° heel = the sensor is
+    // returning something other than tilt (could be yaw, could be
+    // quaternion-singularity garbage). E3 hit 0.9%.
+    if (outliers / n > 0.005) return 'garbage';
+    return 'ok';
+}
+
+function _rtBuildProfile(tack, layer, meta, idx) {
+    const t0Ms = _rtFindT0(layer, tack);
+    if (t0Ms == null) return null;
+    const heelSamples = layer.imu || [];
+    if (heelSamples.length < 5) return null;
+
+    const heelSeries = _rtResampleSeries(
+        heelSamples.filter(s => {
+            const tm = s?.t ? new Date(s.t).getTime() : 0;
+            return tm >= t0Ms - RT_PRE_SEC * 1000 - 2000 &&
+                   tm <= t0Ms + RT_POST_SEC * 1000 + 2000;
+        }),
+        t0Ms,
+        s => Number(s.heel),
+    );
+    const speedSeries = _rtResampleSeries(
+        (layer.data || []).filter(s => {
+            const tm = s?.t ? new Date(s.t).getTime() : 0;
+            return tm >= t0Ms - RT_PRE_SEC * 1000 - 2000 &&
+                   tm <= t0Ms + RT_POST_SEC * 1000 + 2000;
+        }),
+        t0Ms,
+        s => Number(s.speed_kn),
+    );
+
+    // Require enough heel coverage in the action window [-2, +3] to be
+    // meaningful — otherwise the metrics are unreliable.
+    const heelCore = heelSeries.filter(p => p.tRel >= -2 && p.tRel <= 3 && p.value != null);
+    if (heelCore.length < 6) return null;
+
+    // Normalize heel sign so positive = "new tack's heeled-to side"
+    // (= the side the boat ends up heeling toward after settling).
+    // This makes every tack overlay with the same shape: starts
+    // negative (old tack heel side), dips MORE negative during the
+    // roll, swings sharply positive after the flatten.
+    const preHeelAvg = _rtAvg(heelSeries.filter(p => p.tRel >= -5 && p.tRel <= -2).map(p => p.value));
+    const sign = (preHeelAvg != null && preHeelAvg > 0) ? -1 : 1;
+    const heelNorm = heelSeries.map(p => ({ tRel: p.tRel, value: p.value == null ? null : sign * p.value }));
+
+    // Phase metrics ---------------------------------------------------
+    const valsHeelCore = heelCore.map(p => sign * p.value);
+    const heelMax = Math.max(...valsHeelCore);
+    const heelMin = Math.min(...valsHeelCore);
+    const heelRangeDeg = heelMax - heelMin;
+
+    // Steady pre-tack heel in normalized frame (should be negative).
+    const steadyPre = _rtAvg(
+        heelNorm.filter(p => p.tRel >= -5 && p.tRel <= -2 && p.value != null).map(p => p.value)
+    );
+    // Peak windward overshoot: how far below steady_pre did heel dip?
+    // (More negative = more excess roll = better roll-tack execution.)
+    const peakWindwardNorm = Math.min(
+        ...heelNorm.filter(p => p.tRel >= -2 && p.tRel <= 1 && p.value != null).map(p => p.value)
+    );
+    const peakRollExcessDeg = (steadyPre != null && Number.isFinite(peakWindwardNorm))
+        ? Math.max(0, steadyPre - peakWindwardNorm) : 0;
+
+    // Peak flatten rate: max |d(heel)/dt| in [-1, +2] window.
+    let peakFlattenRateDegS = 0;
+    const flatWin = heelNorm.filter(p => p.tRel >= -1 && p.tRel <= 2 && p.value != null);
+    for (let i = 1; i < flatWin.length; i++) {
+        const dh = flatWin[i].value - flatWin[i - 1].value;
+        const dt = flatWin[i].tRel - flatWin[i - 1].tRel;
+        if (dt > 0) {
+            const r = Math.abs(dh / dt);
+            if (r > peakFlattenRateDegS) peakFlattenRateDegS = r;
+        }
+    }
+
+    // Speed metrics ---------------------------------------------------
+    const approachSpeedKn = tack.speedBefore || 0;
+    const minSpeedKn = tack.speedMin || 0;
+    const speedLossPct = approachSpeedKn > 0
+        ? Math.max(0, (approachSpeedKn - minSpeedKn) / approachSpeedKn * 100) : 0;
+    const _spdAt = (tRel) => {
+        const p = speedSeries.find(x => Math.abs(x.tRel - tRel) < RT_DT_S / 2);
+        return p?.value;
+    };
+    const exitSpeedKn5  = _spdAt(5);
+    const exitSpeedKn10 = _spdAt(10);
+    // Recovery time: first tRel ≥ 0 where speed crosses back to 95% of approach.
+    let recoveryTimeS = null;
+    if (approachSpeedKn > 0) {
+        const target = 0.95 * approachSpeedKn;
+        for (const p of speedSeries) {
+            if (p.tRel < 0 || p.value == null) continue;
+            if (p.value >= target) { recoveryTimeS = p.tRel; break; }
+        }
+    }
+
+    // Time in irons: count tRel samples where |TWA| < 10° around t0.
+    let timeInIronsS = 0;
+    const data = layer.data || [];
+    for (const p of data) {
+        const tm = new Date(p.t).getTime();
+        if (tm < tack.tStart || tm > tack.tEnd) continue;
+        const w = windAt(tm);
+        if (!w || w.twd == null || p.course == null) continue;
+        const twa = Math.abs(((w.twd - p.course + 540) % 360) - 180);
+        if (twa < 10) timeInIronsS += 1;   // 1 Hz data ≈ 1 s per sample
+    }
+
+    const wasRolled = peakRollExcessDeg >= RT_ROLL_THRESHOLD_DEG;
+
+    return {
+        id: `rt_${meta.deviceId}_${idx}`,
+        deviceId: meta.deviceId,
+        team: meta.team,
+        sailNumber: meta.sailNumber || '',
+        color: meta.color,
+        raceId: meta.raceId,
+        raceName: meta.raceName,
+        imuHealth: meta.imuHealth || 'ok',  // 'ok' | 'dead' | 'garbage' | 'no-data'
+        t0Ms,
+        tStartMs: tack.tStart,
+        tEndMs: tack.tEnd,
+        heelSeries: heelNorm,
+        speedSeries,
+        metrics: {
+            approachSpeedKn, exitSpeedKn5, exitSpeedKn10, minSpeedKn,
+            speedLossPct, recoveryTimeS,
+            heelRangeDeg, peakRollExcessDeg, peakFlattenRateDegS,
+            timeInIronsS, wasRolled,
+        },
+    };
+}
+
+function _rtAvg(arr) {
+    const xs = arr.filter(v => v != null && Number.isFinite(v));
+    if (!xs.length) return null;
+    return xs.reduce((s, v) => s + v, 0) / xs.length;
+}
+
+// Boat label = team name + sail # (when present). Matches the
+// convention used elsewhere (leaderboard, drawer, leg/maneuver tables).
+function _rtBoatLabel(o) {
+    const team = o.team || '';
+    const sail = (o.sailNumber || '').trim();
+    return sail ? `${team} #${sail}` : team;
+}
+
+// Gather profiles for every detected tack across the boats in the
+// currently-loaded race. Sync.
+function _rtGatherProfilesForCurrentRace() {
+    const out = [];
+    if (!raceData?.boats) return out;
+    let idx = 0;
+    for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
+        const layer = boatLayers[deviceId];
+        if (!layer?.data?.length) continue;
+        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+        const sailNumber = (boatData.boat?.sail_number != null ? String(boatData.boat.sail_number) : '').trim();
+        const color = layer.color || '#888';
+        // Assess IMU health ONCE per boat-recording (not per tack —
+        // sensor failures are recording-wide). The flag propagates
+        // through to every profile for this boat.
+        const imuHealth = _rtAssessImuHealth(layer.imu);
+        const tacks = detectManeuversForLayer(layer).filter(m => m.type === 'tack');
+        for (const t of tacks) {
+            const meta = {
+                deviceId, team, sailNumber, color, imuHealth,
+                raceId: currentRace?.race_id, raceName: currentRace?.race_name,
+            };
+            const p = _rtBuildProfile(t, layer, meta, idx++);
+            if (p) out.push(p);
+        }
+    }
+    return out;
+}
+
+// Async: pull tacks from every other race on the day and add to the
+// pool. Same pattern as ensureCrossDayTacks().
+async function _rtGatherProfilesForDay() {
+    const pool = _rtGatherProfilesForCurrentRace();
+    if (!currentRaceDay?.races?.length) return pool;
+    const others = currentRaceDay.races.filter(r => r.race_id !== currentRace?.race_id);
+    let idx = pool.length;
+    await Promise.all(others.map(async (r) => {
+        try {
+            const resp = await fetch(`${API_BASE}/api/races/${r.race_id}/data?sensors=gps,imu`);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            for (const [deviceId, boatData] of Object.entries(data.boats || {})) {
+                const gps = boatData?.sensors?.gps;
+                if (!gps?.length) continue;
+                const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+                const sailNumber = (boatData.boat?.sail_number != null ? String(boatData.boat.sail_number) : '').trim();
+                const color = boatLayers[deviceId]?.color || '#888';
+                const fakeLayer = { data: gps, imu: boatData?.sensors?.imu || [] };
+                const imuHealth = _rtAssessImuHealth(fakeLayer.imu);
+                const tacks = detectManeuversForLayer(fakeLayer).filter(m => m.type === 'tack');
+                for (const t of tacks) {
+                    const meta = {
+                        deviceId, team, sailNumber, color, imuHealth,
+                        raceId: r.race_id, raceName: r.race_name,
+                    };
+                    const p = _rtBuildProfile(t, fakeLayer, meta, idx++);
+                    if (p) pool.push(p);
+                }
+            }
+        } catch (e) {
+            console.warn('[RollTacking] cross-day fetch failed for', r.race_id, e);
+        }
+    }));
+    return pool;
+}
+
+function openRollTackingModal() {
+    const modal = document.getElementById('roll-tacking-modal');
+    const body = document.getElementById('roll-tacking-modal-body');
+    if (!modal || !body) return;
+    if (!raceData?.boats) {
+        body.innerHTML = '<div class="rt-empty">Load a race first.</div>';
+        modal.style.display = 'flex';
+        return;
+    }
+
+    rollTackState = {
+        scope: 'race',
+        profiles: _rtGatherProfilesForCurrentRace(),
+        crossDayProfiles: null,
+        crossDayState: 'idle',
+    };
+
+    _rtRenderShell(body);
+    _rtRenderContent(body);
+    modal.style.display = 'flex';
+}
+
+function _rtRenderShell(body) {
+    body.innerHTML = `
+        <div class="rt-toolbar">
+            <div class="rt-scope" role="tablist">
+                <button data-scope="race" class="active" type="button">This race</button>
+                <button data-scope="day" type="button">All races today</button>
+            </div>
+            <span class="rt-meta" id="rt-meta"></span>
+            <div class="rt-legend" id="rt-legend"></div>
+        </div>
+        <div class="rt-phase-bar" title="Roll-tack phases (relative to head-to-wind)">
+            <span style="flex:4; background:#475569;">1·Approach</span>
+            <span style="flex:1; background:#64748b;">2·Roll</span>
+            <span style="flex:0.5; background:#22d3ee;">3·HTW</span>
+            <span style="flex:1.5; background:#fb923c;">4·Flatten</span>
+            <span style="flex:8.5; background:#22c55e;">5·Exit / Recovery</span>
+        </div>
+        <div class="rt-charts-grid">
+            <div class="rt-chart-card">
+                <div class="rt-chart-title">Heel signature</div>
+                <div class="rt-chart-sub">Normalized so positive = new-tack heel side. Deeper dip pre-zero = more windward roll. Steeper rise through zero = faster flatten.</div>
+                <div class="rt-chart-canvas-wrap"><canvas id="rt-chart-heel"></canvas></div>
+            </div>
+            <div class="rt-chart-card">
+                <div class="rt-chart-title">Speed signature</div>
+                <div class="rt-chart-sub">SOG vs time around head-to-wind. Shallower dip + faster recovery = better roll-tack execution.</div>
+                <div class="rt-chart-canvas-wrap"><canvas id="rt-chart-speed"></canvas></div>
+            </div>
+            <div class="rt-chart-card span-2">
+                <div class="rt-chart-title">Roll amplitude vs speed loss</div>
+                <div class="rt-chart-sub">One dot per detected tack. Bottom-right is best (more roll, less loss). Bottom-left = small flat tacks.</div>
+                <div class="rt-chart-canvas-wrap" style="height:280px;"><canvas id="rt-chart-scatter"></canvas></div>
+            </div>
+        </div>
+        <div class="rt-table-wrap">
+            <h3>Per-boat aggregate</h3>
+            <div id="rt-table-boat"></div>
+        </div>
+        <div class="rt-table-wrap">
+            <h3>Every tack</h3>
+            <div id="rt-table-tack"></div>
+        </div>
+    `;
+
+    for (const btn of body.querySelectorAll('[data-scope]')) {
+        btn.addEventListener('click', async () => {
+            const scope = btn.getAttribute('data-scope');
+            if (rollTackState.scope === scope) return;
+            for (const b of body.querySelectorAll('[data-scope]')) b.classList.toggle('active', b === btn);
+            rollTackState.scope = scope;
+            if (scope === 'day' && !rollTackState.crossDayProfiles) {
+                rollTackState.crossDayState = 'loading';
+                document.getElementById('rt-meta').textContent = 'Loading other races…';
+                rollTackState.crossDayProfiles = await _rtGatherProfilesForDay();
+                rollTackState.crossDayState = 'ready';
+            }
+            _rtRenderContent(body);
+        });
+    }
+}
+
+function _rtRenderContent(body) {
+    const profiles = rollTackState.scope === 'day'
+        ? (rollTackState.crossDayProfiles || rollTackState.profiles)
+        : rollTackState.profiles;
+
+    // Meta line + boat legend
+    const meta = document.getElementById('rt-meta');
+    if (meta) {
+        const nBoats = new Set(profiles.map(p => p.deviceId)).size;
+        meta.textContent = `${profiles.length} tack${profiles.length === 1 ? '' : 's'} · ${nBoats} boat${nBoats === 1 ? '' : 's'}`;
+    }
+    const legendEl = document.getElementById('rt-legend');
+    if (legendEl) {
+        const byBoat = new Map();
+        for (const p of profiles) {
+            if (!byBoat.has(p.deviceId)) {
+                byBoat.set(p.deviceId, {
+                    team: p.team, sailNumber: p.sailNumber, color: p.color,
+                    imuHealth: p.imuHealth || 'ok',
+                });
+            }
+        }
+        legendEl.innerHTML = [...byBoat.values()].map(b => {
+            const badge = _rtImuBadge(b.imuHealth);
+            return `<span class="rt-legend-item"><span class="rt-legend-swatch" style="background:${b.color}"></span>${_tdEscape(_rtBoatLabel(b))}${badge}</span>`;
+        }).join('');
+    }
+
+    if (!profiles.length) {
+        document.getElementById('rt-table-boat').innerHTML = '<div class="rt-empty">No tacks detected.</div>';
+        document.getElementById('rt-table-tack').innerHTML = '';
+        for (const id of ['rt-chart-heel', 'rt-chart-speed', 'rt-chart-scatter']) {
+            if (_rtCharts[id]) { _rtCharts[id].destroy(); delete _rtCharts[id]; }
+        }
+        return;
+    }
+
+    // Heel-derived charts: drop boats whose IMU is dead/garbage so we
+    // don't pollute the picture. Speed signature stays inclusive —
+    // GPS is independent of the IMU failure.
+    const heelHealthyProfiles = profiles.filter(p => (p.imuHealth || 'ok') === 'ok');
+
+    _rtDrawHeelChart(heelHealthyProfiles);
+    _rtDrawSpeedChart(profiles);
+    _rtDrawScatter(heelHealthyProfiles);
+    _rtRenderBoatTable(profiles);
+    _rtRenderTackTable(profiles);
+}
+
+// Inline HTML badge for the per-boat IMU status, surfaced in the
+// legend and tables. Empty string when 'ok' so the layout doesn't
+// shift for healthy boats.
+function _rtImuBadge(status) {
+    if (status === 'dead')    return ' <span class="rt-imu-warn" title="BNO085 returned 0.0 for every sample — sensor likely disconnected. Heel chart suppressed.">⚠ IMU dead</span>';
+    if (status === 'garbage') return ' <span class="rt-imu-warn" title="BNO085 returned physically impossible values — sensor likely miscalibrated or wrong report mode. Heel chart suppressed.">⚠ IMU garbage</span>';
+    if (status === 'no-data') return ' <span class="rt-imu-warn rt-imu-no-data" title="No IMU samples recorded for this boat.">— no IMU</span>';
+    return '';
+}
+
+// Compute per-boat mean series at each grid x by averaging across that
+// boat's tacks. Faded individual lines + bold mean line per boat.
+function _rtBuildBoatMeanDatasets(profiles, seriesKey, label) {
+    const byBoat = new Map();   // deviceId → { team, sailNumber, color, perTack: [series, ...] }
+    for (const p of profiles) {
+        if (!byBoat.has(p.deviceId)) {
+            byBoat.set(p.deviceId, { team: p.team, sailNumber: p.sailNumber, color: p.color, perTack: [] });
+        }
+        byBoat.get(p.deviceId).perTack.push(p[seriesKey]);
+    }
+    const datasets = [];
+    for (const [_, b] of byBoat) {
+        // Mean per x.
+        const gridX = b.perTack[0].map(s => s.tRel);
+        const meanY = gridX.map((x, ix) => {
+            const vals = b.perTack.map(s => s[ix]?.value).filter(v => v != null && Number.isFinite(v));
+            return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+        });
+        // Faded individual tacks.
+        for (const series of b.perTack) {
+            datasets.push({
+                label: '',
+                data: series.map(p => ({ x: p.tRel, y: p.value })),
+                borderColor: b.color + '55',
+                borderWidth: 1,
+                fill: false,
+                pointRadius: 0,
+                tension: 0.2,
+                spanGaps: true,
+            });
+        }
+        // Bold mean.
+        datasets.push({
+            label: `${_rtBoatLabel(b)} (mean of ${b.perTack.length})`,
+            data: gridX.map((x, i) => ({ x, y: meanY[i] })),
+            borderColor: b.color,
+            borderWidth: 2.5,
+            fill: false,
+            pointRadius: 0,
+            tension: 0.25,
+            spanGaps: true,
+        });
+    }
+    return datasets;
+}
+
+function _rtMakeOrUpdateChart(canvasId, config) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    if (_rtCharts[canvasId]) { _rtCharts[canvasId].destroy(); }
+    _rtCharts[canvasId] = new Chart(canvas.getContext('2d'), config);
+}
+
+const _RT_PHASE_BANDS = [
+    { from: -5,   to: -1,  color: 'rgba(71, 85, 105, 0.10)'  },   // approach
+    { from: -1,   to:  0,  color: 'rgba(100, 116, 139, 0.18)' },  // roll
+    { from:  0,   to:  0.4, color: 'rgba(34, 211, 238, 0.18)' },  // HTW
+    { from:  0.4, to:  1.8, color: 'rgba(251, 146, 60, 0.16)' },  // flatten
+    { from:  1.8, to: 10,   color: 'rgba(34, 197, 94, 0.10)'  },  // exit
+];
+
+const _rtPhaseBandPlugin = {
+    id: 'rtPhaseBand',
+    beforeDraw(chart) {
+        const { ctx, chartArea, scales } = chart;
+        if (!chartArea) return;
+        const x = scales.x;
+        ctx.save();
+        for (const b of _RT_PHASE_BANDS) {
+            const xL = x.getPixelForValue(b.from);
+            const xR = x.getPixelForValue(b.to);
+            ctx.fillStyle = b.color;
+            ctx.fillRect(xL, chartArea.top, xR - xL, chartArea.bottom - chartArea.top);
+        }
+        // t0 line (head-to-wind).
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.85)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        const x0 = x.getPixelForValue(0);
+        ctx.beginPath();
+        ctx.moveTo(x0, chartArea.top);
+        ctx.lineTo(x0, chartArea.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    },
+};
+
+function _rtDrawHeelChart(profiles) {
+    const datasets = _rtBuildBoatMeanDatasets(profiles, 'heelSeries', 'heel');
+    _rtMakeOrUpdateChart('rt-chart-heel', {
+        type: 'line',
+        data: { datasets },
+        plugins: [_rtPhaseBandPlugin],
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { enabled: false },
+            },
+            scales: {
+                x: { type: 'linear', min: -RT_PRE_SEC, max: RT_POST_SEC,
+                     title: { display: true, text: 'Seconds from head-to-wind' },
+                     grid: { color: 'rgba(255,255,255,0.05)' },
+                     ticks: { color: '#94a3b8' } },
+                y: { title: { display: true, text: 'Heel (deg, +/− = new/old tack side)' },
+                     grid: { color: 'rgba(255,255,255,0.05)' },
+                     ticks: { color: '#94a3b8' } },
+            },
+        },
+    });
+}
+
+function _rtDrawSpeedChart(profiles) {
+    const datasets = _rtBuildBoatMeanDatasets(profiles, 'speedSeries', 'speed');
+    _rtMakeOrUpdateChart('rt-chart-speed', {
+        type: 'line',
+        data: { datasets },
+        plugins: [_rtPhaseBandPlugin],
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: false,
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            scales: {
+                x: { type: 'linear', min: -RT_PRE_SEC, max: RT_POST_SEC,
+                     title: { display: true, text: 'Seconds from head-to-wind' },
+                     grid: { color: 'rgba(255,255,255,0.05)' },
+                     ticks: { color: '#94a3b8' } },
+                y: { title: { display: true, text: 'SOG (kt)' },
+                     grid: { color: 'rgba(255,255,255,0.05)' },
+                     ticks: { color: '#94a3b8' }, beginAtZero: true },
+            },
+        },
+    });
+}
+
+function _rtDrawScatter(profiles) {
+    const byBoat = new Map();
+    for (const p of profiles) {
+        if (!byBoat.has(p.deviceId)) {
+            byBoat.set(p.deviceId, { team: p.team, sailNumber: p.sailNumber, color: p.color, pts: [] });
+        }
+        byBoat.get(p.deviceId).pts.push({
+            x: p.metrics.peakRollExcessDeg,
+            y: p.metrics.speedLossPct,
+        });
+    }
+    const datasets = [...byBoat.values()].map(b => ({
+        label: _rtBoatLabel(b),
+        data: b.pts,
+        backgroundColor: b.color,
+        borderColor: b.color,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+    }));
+    _rtMakeOrUpdateChart('rt-chart-scatter', {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: true, labels: { color: '#94a3b8' } },
+                tooltip: { callbacks: {
+                    label: (ctx) => `${ctx.dataset.label}: roll ${ctx.parsed.x.toFixed(1)}°, loss ${ctx.parsed.y.toFixed(1)}%`,
+                } },
+            },
+            scales: {
+                x: { title: { display: true, text: 'Peak windward roll excess (deg)' },
+                     grid: { color: 'rgba(255,255,255,0.05)' },
+                     ticks: { color: '#94a3b8' }, beginAtZero: true },
+                y: { title: { display: true, text: 'Speed loss (%)' },
+                     grid: { color: 'rgba(255,255,255,0.05)' },
+                     ticks: { color: '#94a3b8' }, beginAtZero: true },
+            },
+        },
+    });
+}
+
+function _rtRenderBoatTable(profiles) {
+    const byBoat = new Map();
+    for (const p of profiles) {
+        if (!byBoat.has(p.deviceId)) {
+            byBoat.set(p.deviceId, {
+                team: p.team, sailNumber: p.sailNumber, color: p.color,
+                imuHealth: p.imuHealth || 'ok', tacks: [],
+            });
+        }
+        byBoat.get(p.deviceId).tacks.push(p);
+    }
+    const rows = [...byBoat.values()].map(b => {
+        const avg = (k) => _rtAvg(b.tacks.map(t => t.metrics[k]));
+        const rolledCount = b.tacks.filter(t => t.metrics.wasRolled).length;
+        return {
+            team: b.team, sailNumber: b.sailNumber, color: b.color,
+            imuHealth: b.imuHealth, n: b.tacks.length,
+            rolledPct: 100 * rolledCount / b.tacks.length,
+            peakRoll: avg('peakRollExcessDeg'),
+            heelRange: avg('heelRangeDeg'),
+            flatten: avg('peakFlattenRateDegS'),
+            loss: avg('speedLossPct'),
+            recovery: avg('recoveryTimeS'),
+            irons: avg('timeInIronsS'),
+        };
+    }).sort((a, b) => (a.loss ?? 999) - (b.loss ?? 999));
+
+    const fmt = (v, n = 1) => v == null || !Number.isFinite(v) ? '—' : v.toFixed(n);
+    // For boats with bad IMU, blank out heel-derived columns so the
+    // reader doesn't compare a real boat's roll to noise. Speed-loss
+    // / recovery / in-irons stay populated (GPS-only).
+    const fmtHeel = (r, val, n = 1) => (r.imuHealth === 'ok') ? fmt(val, n) : '—';
+    const html = `
+        <table class="rt-table">
+            <thead><tr>
+                <th>Boat</th><th>Tacks</th><th>Rolled %</th>
+                <th>Peak roll<br>excess (°)</th><th>Heel<br>range (°)</th>
+                <th>Flatten<br>rate (°/s)</th>
+                <th>Speed<br>loss (%)</th><th>Recovery<br>(s)</th>
+                <th>In irons<br>(s)</th>
+            </tr></thead>
+            <tbody>
+                ${rows.map(r => `
+                    <tr>
+                        <td><span class="rt-boat-swatch" style="background:${r.color}"></span>${_tdEscape(_rtBoatLabel(r))}${_rtImuBadge(r.imuHealth)}</td>
+                        <td>${r.n}</td>
+                        <td>${(r.imuHealth === 'ok') ? fmt(r.rolledPct, 0) + '%' : '—'}</td>
+                        <td>${fmtHeel(r, r.peakRoll)}</td>
+                        <td>${fmtHeel(r, r.heelRange)}</td>
+                        <td>${fmtHeel(r, r.flatten)}</td>
+                        <td>${fmt(r.loss)}</td>
+                        <td>${fmt(r.recovery)}</td>
+                        <td>${fmt(r.irons, 0)}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+    document.getElementById('rt-table-boat').innerHTML = html;
+}
+
+function _rtRenderTackTable(profiles) {
+    const rows = profiles.slice().sort((a, b) => (a.t0Ms || 0) - (b.t0Ms || 0));
+    const fmt = (v, n = 1) => v == null || !Number.isFinite(v) ? '—' : v.toFixed(n);
+    const tt = (ms) => ms ? new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—';
+    const html = `
+        <table class="rt-table">
+            <thead><tr>
+                <th>Boat</th><th>Time</th>
+                <th>Status</th>
+                <th>Peak roll<br>excess (°)</th>
+                <th>Heel<br>range (°)</th>
+                <th>Flatten<br>rate (°/s)</th>
+                <th>Approach<br>(kt)</th>
+                <th>Min<br>(kt)</th>
+                <th>Speed<br>loss (%)</th>
+                <th>Recovery<br>(s)</th>
+            </tr></thead>
+            <tbody>
+                ${rows.map(p => {
+                    const m = p.metrics;
+                    const imuOk = (p.imuHealth || 'ok') === 'ok';
+                    const fH = (v, n = 1) => imuOk ? fmt(v, n) : '—';
+                    const statusCell = imuOk
+                        ? (m.wasRolled ? '<span class="rt-tag-rolled">rolled</span>' : '<span class="rt-tag-flat">flat</span>')
+                        : '<span class="rt-imu-warn">⚠ no heel</span>';
+                    return `
+                        <tr>
+                            <td><span class="rt-boat-swatch" style="background:${p.color}"></span>${_tdEscape(_rtBoatLabel(p))}</td>
+                            <td>${tt(p.t0Ms)}</td>
+                            <td>${statusCell}</td>
+                            <td>${fH(m.peakRollExcessDeg)}</td>
+                            <td>${fH(m.heelRangeDeg)}</td>
+                            <td>${fH(m.peakFlattenRateDegS)}</td>
+                            <td>${fmt(m.approachSpeedKn)}</td>
+                            <td>${fmt(m.minSpeedKn)}</td>
+                            <td>${fmt(m.speedLossPct)}</td>
+                            <td>${fmt(m.recoveryTimeS)}</td>
+                        </tr>
+                    `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+    document.getElementById('rt-table-tack').innerHTML = html;
+}
+
 // Move the dashed play cursor on each chart without redrawing the data lines.
 function updatePlayCursor(seconds) {
     playCursorSeconds = seconds;
@@ -4985,7 +5763,11 @@ function setupPlaybackControls() {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        // Never hijack typing — covers the tactics-drawer textarea,
+        // the AI-coach chat input, modal inputs, and any contenteditable.
+        const t = e.target;
+        const tag = t && t.tagName;
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
 
         if (e.code === 'Space') {
             e.preventDefault();
@@ -5334,7 +6116,8 @@ async function loadRaceData(raceId) {
         // past it, and only do this on first load (subsequent loads
         // for the same race re-read the URL).
         try {
-            const tParam = new URLSearchParams(location.search).get('t');
+            const params = new URLSearchParams(location.search);
+            const tParam = params.get('t');
             if (tParam != null) {
                 const tSec = Math.max(0, Math.min(parseInt(tParam, 10) || 0, raceDuration));
                 if (isPlaying) togglePlayback();
@@ -5342,9 +6125,22 @@ async function loadRaceData(raceId) {
                 updatePlaybackPosition();
                 updatePlayCursor(tSec);
             }
+            // ?focus=fleet → zoom map to the live boats at the cursor
+            // moment instead of showing the whole race overview. The
+            // setTimeout gives updatePlaybackPosition (above) a tick to
+            // refresh layer.current via updateBoatPositions; without it
+            // we'd fit to stale (pre-load) marker positions.
+            if (params.get('focus') === 'fleet') {
+                setTimeout(focusMapOnFleet, 300);
+            }
         } catch (e) {
-            console.warn('[Race] ?t= parse failed:', e);
+            console.warn('[Race] URL param parse failed:', e);
         }
+
+        // ?tactics=1 → open the discussion drawer on first load. Used by
+        // shared WhatsApp links so the recipient lands inside the
+        // conversation instead of having to hunt for the button.
+        if (typeof _tdMaybeAutoOpenFromUrl === 'function') _tdMaybeAutoOpenFromUrl();
 
         // Attach the race-coach chat panel. The callback is recomputed
         // on every chat turn so the briefing reflects the latest state
@@ -5369,6 +6165,18 @@ async function loadRaceData(raceId) {
                     maneuvers: allManeuvers,
                     weatherWindSamples,
                     weatherWindSource,
+                    raceContextLabel: typeof buildRaceContextLabel === 'function' ? buildRaceContextLabel() : null,
+                    // Current playback cursor in seconds from race
+                    // start. Read live by the chat panel so its
+                    // "attach race-cursor time" feature can capture
+                    // whatever the user is looking at right now.
+                    currentTimeSec: Math.max(0, Math.round(currentTime || 0)),
+                    raceStartTime: currentRace?.start_time || null,
+                    // Wind-station catalogue + currently-selected id so
+                    // the briefing can embed the chosen sensor's
+                    // coordinates (Castle Is, Logan, FLEET, ...).
+                    raceBuoyData,
+                    selectedWindStationId,
                     finishOrder: null,  // leaderboard order is recomputed per playback tick;
                                          // briefing's per-boat finish_position derives from
                                          // the per-boat roundingTimes instead.
@@ -6351,24 +7159,70 @@ function updateDistanceLines(positions) {
             const s = el.querySelector('.dist-text');
             if (s) s.textContent = '';
         }
-        // Make sure the drop line is solid in the default state; the
-        // chain branch will swap it to dashed if needed.
-        slot.dropLine.setStyle({ dashArray: null });
+        // Reset styles (chain mode bumps weight; lshape uses defaults).
+        slot.dropLine.setStyle({ dashArray: null, weight: 2, opacity: 0.9 });
+        slot.perpRefF.setStyle({ weight: 1.5, opacity: 0.75 });
+        slot.perpRefL.setStyle({ weight: 1.5, opacity: 0.75 });
 
         if (mode === 'hidden') continue;
 
         if (mode === 'chain') {
-            // Chain spans pairs i..chainTail[i], i.e. boats positions[i]
-            // (front, leader of pair i) through positions[tail+1] (back,
-            // follower of pair tail). Draw a single dashed line from
-            // the front boat's stern to the back boat's bow — across
-            // any middle boats in the chain (they don't get their own
-            // line). The line is intentionally dashed so it reads as
-            // an "overlap bracket" rather than a clear-water metric.
+            // RRS overlap visualization. Per the rule definition, two
+            // boats overlap when neither is *clear astern* — i.e. when
+            // the trailing boat's bow is on or forward of the line
+            // drawn abeam from the leader's transom (perpendicular to
+            // the LEADER's centreline). RRS imposes NO sideways limit;
+            // the lateral distance between the boats is irrelevant to
+            // whether they're overlapped, and only matters for Rule 18
+            // (mark-room zone, 3 hull lengths) and contact rules.
+            //
+            // We render that geometry directly: two parallel ticks
+            // perpendicular to the chain leader's heading, one through
+            // the leader's transom (A) and one through the trailing
+            // boat's bow (B). The slab between the ticks IS the RRS
+            // overlap zone. Each tick spans the lateral gap between
+            // the boats plus a small overshoot, so the bracket reads
+            // even when boats are tracking nearly bow-to-bow.
             const head = pairData[i];
             const tail = pairData[chainTail[i]];
-            slot.dropLine.setLatLngs([head.L_stern, tail.F_bow]);
-            slot.dropLine.setStyle({ dashArray: '6 4' });
+            const A = head.L_stern;
+            const B = tail.F_bow;
+            const RAD = Math.PI / 180;
+            const cogR = (head.cogL || 0) * RAD;
+            const cosC = Math.cos(cogR), sinC = Math.sin(cogR);
+            const mLat = 6371000 * RAD;
+            const mLon = 6371000 * RAD * Math.cos(A[0] * RAD);
+            // Lateral component of (B − A) in the leader's right-normal
+            // direction (positive = trailing boat is to starboard of
+            // leader). Sign drives which side the ticks extend toward.
+            const dN = (B[0] - A[0]) * mLat;
+            const dE = (B[1] - A[1]) * mLon;
+            const lateral = dE * cosC - dN * sinC;
+            const OVERSHOOT_M = 3;
+            const halfSpan = Math.abs(lateral) / 2 + OVERSHOOT_M;
+            const midOff   = lateral / 2;
+            // Helper: offset a [lat,lon] point by `vMetres` along the
+            // leader's right-normal axis v=(-sinC, cosC) in (N,E).
+            const offV = (anchor, vMetres) => [
+                anchor[0] + (vMetres * -sinC) / mLat,
+                anchor[1] + (vMetres *  cosC) / mLon,
+            ];
+            // Leader's transom abeam line (through A).
+            slot.perpRefL.setLatLngs([
+                offV(A, midOff - halfSpan),
+                offV(A, midOff + halfSpan),
+            ]);
+            // Trailing boat's bow abeam line (through B). Mid-offset
+            // is negated because B is at v=lateral relative to A, so
+            // the lateral midpoint is at v=−lateral/2 relative to B.
+            slot.perpRefF.setLatLngs([
+                offV(B, -midOff - halfSpan),
+                offV(B, -midOff + halfSpan),
+            ]);
+            // Make the abeam ticks visually distinct: thicker, fully
+            // opaque amber. Together they read as the overlap bracket.
+            slot.perpRefL.setStyle({ weight: 2.5, opacity: 1.0 });
+            slot.perpRefF.setStyle({ weight: 2.5, opacity: 1.0 });
             continue;
         }
 
@@ -7212,6 +8066,20 @@ function setupEventListeners() {
 const _TD_GUEST_TOKEN_KEY = 'sf-user-id-token';
 const _TD_GUEST_EMAIL_KEY = 'sf-user-email';
 const _TD_GUEST_NAME_KEY  = 'sf-user-name';
+// Self-declared role for the tactics board ("coach" or "sailor").
+// Distinct from any backend allowlist — the user picks at sign-in
+// and can change anytime. Empty = not yet chosen (forces picker).
+const _TD_ROLE_KEY = 'sf-tactics-role';
+
+function _tdRole() {
+    try { return localStorage.getItem(_TD_ROLE_KEY) || ''; } catch { return ''; }
+}
+function _tdSetRole(role) {
+    try {
+        if (role) localStorage.setItem(_TD_ROLE_KEY, role);
+        else      localStorage.removeItem(_TD_ROLE_KEY);
+    } catch {}
+}
 
 let _tdLoadedForRaceId = null;
 let _tdPostsCache = [];
@@ -7287,9 +8155,9 @@ function _tdApiBase() {
 async function _tdFetchPosts(raceId) {
     const base = _tdApiBase();
     if (!base) return [];
-    // Attach auth opportunistically: signed-in viewers get is_mine/is_mod
-    // flags so the delete UI works. Unauthed callers still get a clean
-    // (PII-redacted) response.
+    // Attach auth opportunistically: signed-in viewers get is_mine,
+    // is_admin_mod, and my_vote stamps. Unauthed callers still get a
+    // clean (PII-redacted) response.
     const auth = _tdCurrentAuth();
     const headers = {};
     if (auth) headers['Authorization'] = 'Bearer ' + auth.token;
@@ -7299,7 +8167,7 @@ async function _tdFetchPosts(raceId) {
     return data.posts || [];
 }
 
-async function _tdSubmitPost(raceId, body, cursorTSec) {
+async function _tdSubmitPost(raceId, body, cursorTSec, role) {
     const auth = _tdCurrentAuth();
     if (!auth) throw new Error('Sign in to post.');
     const base = _tdApiBase();
@@ -7310,7 +8178,16 @@ async function _tdSubmitPost(raceId, body, cursorTSec) {
             'Authorization': 'Bearer ' + auth.token,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ body, cursor_t_sec: cursorTSec }),
+        body: JSON.stringify({
+            body,
+            cursor_t_sec: cursorTSec,
+            role,
+            // Stamp the rich context label so the notification email
+            // names the race in human terms ("Wednesday Night Series ·
+            // Race 2 of 4 · Tue May 12, 2026"). Best computed client-
+            // side where we have all the regatta + day state already.
+            race_context_label: buildRaceContextLabel(),
+        }),
     });
     if (!resp.ok) {
         const t = await resp.text().catch(() => '');
@@ -7320,6 +8197,32 @@ async function _tdSubmitPost(raceId, body, cursorTSec) {
             throw new Error('Your sign-in expired. Please sign in again.');
         }
         throw new Error(`POST failed (${resp.status}): ${t.slice(0, 160)}`);
+    }
+    return resp.json();
+}
+
+async function _tdVoteApi(raceId, postId, vote) {
+    const auth = _tdCurrentAuth();
+    if (!auth) throw new Error('Sign in to vote.');
+    const base = _tdApiBase();
+    const resp = await fetch(
+        `${base}/discussions/${encodeURIComponent(raceId)}/${encodeURIComponent(postId)}/vote`,
+        {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + auth.token,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ vote }),
+        }
+    );
+    if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        if (resp.status === 401) {
+            if (auth.kind === 'guest') _tdClearGuestSession();
+            throw new Error('Your sign-in expired.');
+        }
+        throw new Error(`vote HTTP ${resp.status}: ${t.slice(0, 160)}`);
     }
     return resp.json();
 }
@@ -7353,30 +8256,54 @@ function _tdRenderPosts() {
         return;
     }
 
-    // Server stamps `is_mine` and `is_mod` per post when the viewer is
-    // authenticated; `author_email` is never sent to the client (PII).
+    // Server stamps `is_mine`, `is_admin_mod`, `my_vote` per post when
+    // the viewer is authenticated; `author_email` is never sent.
+    const auth = _tdCurrentAuth();
+    const canVote = !!auth;
     const html = _tdPostsCache.map(p => {
         const author = p.author_name || 'Anonymous';
         const when = p.created_at ? new Date(p.created_at).toLocaleString('en-US', {
             month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
         }) : '';
-        const canDelete = !!(p.is_mine || p.is_mod);
+        const isCoach = (p.role === 'coach');
+        const canDelete = !!(p.is_mine || p.is_admin_mod);
         const cursorBtn = (p.cursor_t_sec != null && currentRace?.start_time)
             ? `<button class="td-cursor-link" data-cursor-t="${Number(p.cursor_t_sec)}" type="button">→ Jump to ${_tdFmtCursorLocal(p.cursor_t_sec)}</button>`
             : '';
+        const upN   = Number(p.upvotes   || 0);
+        const downN = Number(p.downvotes || 0);
+        let voteBlock;
+        if (p.is_mine) {
+            // Authors can't vote on their own posts — show passive tally.
+            voteBlock = `<div class="td-votes is-own">▲ ${upN} · ▼ ${downN}</div>`;
+        } else if (canVote) {
+            const upActive   = p.my_vote === 'up'   ? 'active up'   : '';
+            const downActive = p.my_vote === 'down' ? 'active down' : '';
+            voteBlock = `
+                <div class="td-votes">
+                    <button class="td-vote ${upActive}" data-vote="up" data-post="${p.id}" type="button" title="Upvote">▲ <span>${upN}</span></button>
+                    <button class="td-vote ${downActive}" data-vote="down" data-post="${p.id}" type="button" title="Downvote">▼ <span>${downN}</span></button>
+                </div>`;
+        } else {
+            // Anonymous viewer — tally read-only.
+            voteBlock = `<div class="td-votes is-anon" title="Sign in to vote">▲ ${upN} · ▼ ${downN}</div>`;
+        }
         const delBtn = canDelete
-            ? `<div class="td-post-actions"><button class="td-delete-btn" data-delete="${p.id}" type="button">delete</button></div>`
+            ? `<button class="td-delete-btn" data-delete="${p.id}" type="button">delete</button>`
+            : '';
+        const actions = (voteBlock || delBtn)
+            ? `<div class="td-post-actions">${voteBlock}<span class="td-actions-spacer"></span>${delBtn}</div>`
             : '';
         return `
-            <div class="td-post ${p.is_coach ? 'is-coach' : ''}">
+            <div class="td-post ${isCoach ? 'is-coach' : ''}">
                 <div class="td-post-head">
                     <span class="td-author">${_tdEscape(author)}</span>
-                    ${p.is_coach ? '<span class="td-coach-tag">coach</span>' : ''}
+                    ${isCoach ? '<span class="td-coach-tag">coach</span>' : ''}
                     <span class="td-when">${when}</span>
                 </div>
                 <div class="td-body">${_tdEscape(p.body || '')}</div>
                 ${cursorBtn}
-                ${delBtn}
+                ${actions}
             </div>
         `;
     }).join('');
@@ -7384,13 +8311,20 @@ function _tdRenderPosts() {
     list.innerHTML = html;
     list.scrollTop = list.scrollHeight;
 
-    // Wire cursor-jump and delete buttons.
+    // Wire cursor-jump, vote, delete handlers.
     for (const btn of list.querySelectorAll('.td-cursor-link')) {
         btn.addEventListener('click', () => {
             const tSec = parseFloat(btn.getAttribute('data-cursor-t'));
             if (Number.isFinite(tSec) && window.SailFramesRace) {
                 window.SailFramesRace.seekTo(tSec);
             }
+        });
+    }
+    for (const btn of list.querySelectorAll('.td-vote')) {
+        btn.addEventListener('click', () => {
+            const postId   = btn.getAttribute('data-post');
+            const dir      = btn.getAttribute('data-vote');   // 'up' | 'down'
+            _tdHandleVote(postId, dir);
         });
     }
     for (const btn of list.querySelectorAll('.td-delete-btn')) {
@@ -7405,6 +8339,43 @@ function _tdRenderPosts() {
                 alert('Delete failed: ' + (e.message || e));
             }
         });
+    }
+}
+
+// Click-handler for the vote buttons. Optimistically updates the local
+// cache + UI, then reconciles with the server response. Toggling an
+// already-active direction clears the vote; clicking the opposite
+// direction switches.
+async function _tdHandleVote(postId, direction) {
+    const post = _tdPostsCache.find(p => p.id === postId);
+    if (!post) return;
+    const newVote = post.my_vote === direction ? 'none' : direction;
+    const prev = {
+        my_vote: post.my_vote || null,
+        upvotes: Number(post.upvotes || 0),
+        downvotes: Number(post.downvotes || 0),
+    };
+    // Optimistic — remove existing vote contribution, then apply new.
+    let up = prev.upvotes, down = prev.downvotes;
+    if (prev.my_vote === 'up')   up   = Math.max(0, up - 1);
+    if (prev.my_vote === 'down') down = Math.max(0, down - 1);
+    if (newVote === 'up')   up += 1;
+    if (newVote === 'down') down += 1;
+    post.my_vote  = newVote === 'none' ? null : newVote;
+    post.upvotes  = up;
+    post.downvotes = down;
+    _tdRenderPosts();
+    try {
+        const result = await _tdVoteApi(currentRace.race_id, postId, newVote);
+        post.upvotes  = Number(result.upvotes   || 0);
+        post.downvotes = Number(result.downvotes || 0);
+        post.my_vote  = result.my_vote || null;
+        _tdRenderPosts();
+    } catch (e) {
+        // Revert and surface.
+        Object.assign(post, prev);
+        _tdRenderPosts();
+        alert('Vote failed: ' + (e.message || e));
     }
 }
 
@@ -7438,18 +8409,47 @@ function _tdRefreshComposeUI() {
     const signin = document.getElementById('td-signin');
     const form = document.getElementById('td-form');
     const formWho = document.getElementById('td-form-who');
+    const submitBtn = document.getElementById('td-submit');
     if (!signin || !form) return;
     const auth = _tdCurrentAuth();
-    if (auth) {
-        signin.hidden = true;
-        form.hidden = false;
-        const who = auth.name || auth.email || 'signed-in user';
-        const kindLabel = auth.kind === 'coach' ? 'as <b>coach</b>' : 'as guest';
-        formWho.innerHTML = `Posting ${kindLabel} — <b>${_tdEscape(who)}</b>`;
-    } else {
+    if (!auth) {
         signin.hidden = false;
         form.hidden = true;
+        return;
     }
+    signin.hidden = true;
+    form.hidden = false;
+    const who = auth.name || auth.email || 'signed-in user';
+    const role = _tdRole();
+    if (!role) {
+        // No role chosen yet — present the picker before allowing post.
+        // Default suggestion: Sailor. The user can switch to Coach at
+        // any time via the (change) link once chosen.
+        formWho.innerHTML = `
+            <span class="td-role-prompt">Hi <b>${_tdEscape(who)}</b> — post as:</span>
+            <button class="td-role-btn" data-pickrole="sailor" type="button">⛵ Sailor</button>
+            <button class="td-role-btn td-role-btn-coach" data-pickrole="coach" type="button">👨‍🏫 Coach</button>
+        `;
+        if (submitBtn) submitBtn.disabled = true;
+    } else {
+        const label = role === 'coach' ? '👨‍🏫 Coach' : '⛵ Sailor';
+        formWho.innerHTML = `
+            Posting as <b>${label}</b> · <b>${_tdEscape(who)}</b>
+            <button class="td-role-change" type="button" title="Change role">change</button>
+        `;
+        if (submitBtn) submitBtn.disabled = false;
+    }
+    for (const btn of formWho.querySelectorAll('[data-pickrole]')) {
+        btn.addEventListener('click', () => {
+            _tdSetRole(btn.getAttribute('data-pickrole'));
+            _tdRefreshComposeUI();
+        });
+    }
+    const changeBtn = formWho.querySelector('.td-role-change');
+    if (changeBtn) changeBtn.addEventListener('click', () => {
+        _tdSetRole('');
+        _tdRefreshComposeUI();
+    });
 }
 
 async function _tdLoadAndRender() {
@@ -7461,9 +8461,152 @@ async function _tdLoadAndRender() {
         _tdLoadedForRaceId = currentRace.race_id;
         _tdRenderPosts();
     } catch (e) {
+        // Print a verbose error to help diagnose Safari "Load failed"
+        // and other browser-specific fetch failures. Includes error
+        // name + message + the API base so the next bug report tells
+        // us more than the generic Safari "Load failed" string.
         console.error('[tactics] load failed', e);
-        if (list) list.innerHTML = `<div class="td-empty">Couldn't load posts. ${_tdEscape(e.message || '')}</div>`;
+        const apiBase = _tdApiBase() || '(no API base)';
+        const detail = `${e.name || 'Error'}: ${e.message || 'unknown'}`;
+        if (list) list.innerHTML =
+            `<div class="td-empty">Couldn't load posts.<br>` +
+            `<small style="opacity:0.75">${_tdEscape(detail)}<br>` +
+            `Endpoint: ${_tdEscape(apiBase)}<br>` +
+            `Browser: ${_tdEscape(navigator.userAgent.slice(0, 120))}</small></div>`;
     }
+}
+
+// Build a human-readable label that names the race in three pieces:
+// regatta series name, race # within the day, and date. Used in
+// WhatsApp share text and in notification emails so the recipient
+// instantly knows which race is being discussed without opening the
+// link. Falls back gracefully when any piece is missing.
+//
+// Example outputs:
+//   "Wednesday Night Series · Race 2 of 4 · Tue May 12, 2026"
+//   "Race 3 · Tue May 12, 2026"               (no regatta assigned)
+//   "Mock Practice · Race 1 · Tue May 12, 2026"   (only race that day)
+function buildRaceContextLabel() {
+    if (!currentRace) return 'this race';
+    const parts = [];
+    const regId = currentRace.regatta_id;
+    if (regId && Array.isArray(regattas)) {
+        const reg = regattas.find(r => r.regatta_id === regId);
+        if (reg?.name) parts.push(reg.name);
+    }
+    const dayRaces = currentRaceDay?.races || [];
+    const idx = dayRaces.findIndex(r => r.race_id === currentRace.race_id);
+    if (idx >= 0 && dayRaces.length > 1) {
+        parts.push(`Race ${idx + 1} of ${dayRaces.length}`);
+    } else if (currentRace.race_name) {
+        parts.push(currentRace.race_name);
+    } else if (idx >= 0) {
+        parts.push(`Race ${idx + 1}`);
+    }
+    if (currentRace.date) {
+        try {
+            const d = new Date(currentRace.date + 'T12:00:00');
+            parts.push(d.toLocaleDateString('en-US', {
+                weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+            }));
+        } catch {
+            parts.push(currentRace.date);
+        }
+    }
+    return parts.length ? parts.join(' · ') : 'this race';
+}
+
+// Build the canonical shareable URL for the tactics discussion of the
+// currently-loaded race. Always uses the production origin so the link
+// is portable even when generated on staging / localhost. Uses ?race=
+// (consistent with the deep-link reader); ?tactics=1 auto-opens the
+// drawer for the recipient. When the playback cursor is past t=0 we
+// also embed t=<seconds> + focus=fleet so the recipient lands at the
+// exact moment AND the map zooms to the boats at that moment instead
+// of showing the whole race overview.
+function _tdShareUrl() {
+    if (!currentRace?.race_id) return null;
+    const origin = 'https://sailframes.com';
+    const u = new URL(`${origin}/race.html`);
+    u.searchParams.set('race', currentRace.race_id);
+    u.searchParams.set('tactics', '1');
+    const tSec = Math.max(0, Math.round(currentTime || 0));
+    if (tSec > 0) {
+        u.searchParams.set('t', String(tSec));
+        u.searchParams.set('focus', 'fleet');
+    }
+    return u.toString();
+}
+
+// Open WhatsApp (app on mobile, Desktop/Web on desktop) with a
+// prefilled message linking back to the discussion. The wa.me handler
+// lets the user pick the recipient — your sailors group, a contact,
+// whatever. Falls back to copying the URL when WhatsApp is unreachable.
+function _tdShareToWhatsApp() {
+    const url = _tdShareUrl();
+    if (!url) { alert('No race loaded.'); return; }
+    const label = buildRaceContextLabel();
+    // If the cursor is past t=0, surface the moment in the message so
+    // the recipient sees in plain text what they're being pointed at
+    // before tapping the URL. _tdFmtCursorLocal renders wall-clock
+    // local time (e.g. "14:32:08") using currentRace.start_time.
+    const tSec = Math.max(0, Math.round(currentTime || 0));
+    const tNote = (tSec > 0) ? `\n📍 At ${_tdFmtCursorLocal(tSec)} (race time)` : '';
+    const text = `💬 Tactics discussion on SailFrames\n\n${label}${tNote}\n\nDiscuss this race with the fleet: ${url}`;
+    // wa.me universal handler: works on mobile (opens app) and on
+    // desktop (opens WhatsApp Web / Desktop). User chooses the group.
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    // Try in a new tab to preserve the page state behind it.
+    const w = window.open(waUrl, '_blank', 'noopener,noreferrer');
+    if (!w) {
+        // Pop-up blocker → fall back to copy.
+        try { navigator.clipboard.writeText(url); alert('Link copied to clipboard.'); }
+        catch { prompt('Copy this link:', url); }
+    }
+}
+
+// Honor ?tactics=1 in the URL to auto-open the discussion drawer
+// once the race has loaded. Lets shared WhatsApp links land readers
+// directly inside the conversation.
+function _tdMaybeAutoOpenFromUrl() {
+    try {
+        const v = new URLSearchParams(location.search).get('tactics');
+        if (v === '1' || v === 'true') {
+            // Small delay so the drawer slide animation runs after the
+            // initial paint settles.
+            setTimeout(_tdOpenDrawer, 150);
+        }
+    } catch {}
+}
+
+// Zoom the map to the bounding box of every visible boat's current
+// position. Used by shared discussion links (?focus=fleet) so the
+// recipient lands on the action, not the whole course. Requires that
+// updateBoatPositions() has already run for the target cursor — the
+// init hook adds a short setTimeout to guarantee that ordering.
+function focusMapOnFleet() {
+    if (!map || !boatLayers) return false;
+    const points = [];
+    for (const id of Object.keys(boatLayers)) {
+        const layer = boatLayers[id];
+        if (!layer || !layer.visible) continue;
+        const cur = layer.current;
+        if (cur && cur.lat != null && cur.lon != null) {
+            points.push([cur.lat, cur.lon]);
+        }
+    }
+    if (points.length === 0) return false;
+    if (points.length === 1) {
+        map.setView(points[0], 18, { animate: true });
+        return true;
+    }
+    const bounds = L.latLngBounds(points);
+    map.fitBounds(bounds, {
+        padding: [60, 60],
+        maxZoom: 18,
+        animate: true,
+    });
+    return true;
 }
 
 function _tdOpenDrawer() {
@@ -7579,10 +8722,54 @@ function _tdUpdateAttachTimeLabel() {
     }
 }
 
+// Generic toolbar-dropdown wiring. Used for both the Analytics
+// dropdown and the Discuss-Tactics-with… dropdown. Item handlers are
+// bound separately (each item still owns its own click listener); this
+// function only owns open/close/outside-click/Esc.
+function setupToolbarDropdown(triggerId, menuId) {
+    const trigger = document.getElementById(triggerId);
+    const menu = document.getElementById(menuId);
+    if (!trigger || !menu) return;
+
+    const close = () => {
+        menu.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+    };
+    const open = () => {
+        menu.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+    };
+
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.hidden ? open() : close();
+    });
+
+    // Any item-click closes the menu. The item's own existing handler
+    // fires before this thanks to event-bubbling order — we just
+    // collapse afterwards.
+    menu.addEventListener('click', (e) => {
+        const item = e.target.closest('.tb-menu-item');
+        if (!item) return;
+        close();
+    });
+
+    document.addEventListener('click', (e) => {
+        if (menu.hidden) return;
+        if (e.target === trigger) return;
+        if (menu.contains(e.target)) return;
+        close();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !menu.hidden) close();
+    });
+}
+
 function setupTacticsDrawer() {
     const btn = document.getElementById('btn-tactics');
     const closeBtn = document.getElementById('td-close');
     const refreshBtn = document.getElementById('td-refresh');
+    const shareBtn = document.getElementById('td-share-wa');
     const submitBtn = document.getElementById('td-submit');
     const signoutBtn = document.getElementById('td-signout');
     const bodyEl = document.getElementById('td-body');
@@ -7591,6 +8778,7 @@ function setupTacticsDrawer() {
     if (btn) btn.addEventListener('click', _tdOpenDrawer);
     if (closeBtn) closeBtn.addEventListener('click', _tdCloseDrawer);
     if (refreshBtn) refreshBtn.addEventListener('click', _tdLoadAndRender);
+    if (shareBtn) shareBtn.addEventListener('click', _tdShareToWhatsApp);
 
     if (attachChk) attachChk.addEventListener('change', () => {
         _tdAttachTime = attachChk.checked;
@@ -7610,6 +8798,9 @@ function setupTacticsDrawer() {
         } else {
             _tdClearGuestSession();
         }
+        // Forget the role choice on sign-out so the next signed-in
+        // user gets the picker rather than inheriting our role.
+        _tdSetRole('');
         _tdRefreshComposeUI();
         _tdRenderGsiButton();
     });
@@ -7632,9 +8823,10 @@ function setupTacticsDrawer() {
         const cursorTSec = _tdAttachTime
             ? Math.max(0, Math.round(playCursorSeconds || currentTime || 0))
             : null;
+        const role = _tdRole() || 'sailor';
         submitBtn.disabled = true;
         try {
-            const post = await _tdSubmitPost(currentRace.race_id, body, cursorTSec);
+            const post = await _tdSubmitPost(currentRace.race_id, body, cursorTSec, role);
             _tdPostsCache.push(post);
             if (bodyEl) bodyEl.value = '';
             if (attachChk) attachChk.checked = false;

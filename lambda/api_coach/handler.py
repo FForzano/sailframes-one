@@ -87,6 +87,15 @@ COACH_ALLOWLIST = {
     for e in os.environ.get("COACH_ALLOWLIST", "").split(",")
     if e.strip()
 }
+# Distinct from COACH_ALLOWLIST (which gates long-lived session token
+# issuance for the coach-review app). ADMIN_ALLOWLIST gates only
+# moderation power on the public discussion board — currently just
+# the platform owner. Authors can always delete their own posts.
+ADMIN_ALLOWLIST = {
+    e.strip().lower()
+    for e in os.environ.get("ADMIN_ALLOWLIST", "avillach@gmail.com").split(",")
+    if e.strip()
+}
 ANTHROPIC_SECRET_ARN = os.environ.get("ANTHROPIC_SECRET_ARN", "")
 NOTIFY_TOPIC_ARN = os.environ.get(
     "NOTIFY_TOPIC_ARN",
@@ -586,23 +595,21 @@ def _notify_admin(subject, body):
 def _verify_open_request(event):
     """Like _verify_request but does NOT enforce the coach allowlist —
     used only by the discussion endpoints so verified competitors can
-    post. Returns dict {email, is_coach, name}."""
+    post. Returns dict {email, is_admin, name}. The "coach vs sailor"
+    label is a user-chosen post role, NOT derived here from any
+    allowlist; this helper only resolves identity + admin power."""
     headers = event.get("headers") or {}
     auth = headers.get("authorization") or headers.get("Authorization") or ""
     if not auth.lower().startswith("bearer "):
         raise PermissionError("missing bearer token")
     token = auth.split(None, 1)[1].strip()
 
-    # Session tokens are gated on COACH_ALLOWLIST at issuance — but we
-    # re-derive is_coach from the allowlist here so the flag tracks the
-    # actual moderation source of truth even if session-token issuance
-    # is ever widened.
     if token.startswith("sf."):
         email = _verify_session_token(token)
-        return {"email": email, "is_coach": email in COACH_ALLOWLIST, "name": ""}
+        return {"email": email, "is_admin": email in ADMIN_ALLOWLIST, "name": ""}
 
-    # Google ID token — accept any verified email; flag is_coach
-    # separately so the route handler can decide moderation rights.
+    # Google ID token — accept any verified email; admin flag is
+    # checked against the smaller ADMIN_ALLOWLIST.
     if not GOOGLE_CLIENT_ID:
         raise RuntimeError("GOOGLE_CLIENT_ID not configured")
     info = id_token.verify_oauth2_token(
@@ -615,7 +622,7 @@ def _verify_open_request(event):
         raise PermissionError("token has no email")
     return {
         "email": email,
-        "is_coach": email in COACH_ALLOWLIST,
+        "is_admin": email in ADMIN_ALLOWLIST,
         "name": (info.get("name") or "").strip(),
     }
 
@@ -749,32 +756,49 @@ def handler(event, _ctx):
             if len(posts) > _DISCUSSION_PAGE_MAX:
                 posts = posts[-_DISCUSSION_PAGE_MAX:]
             # Opportunistically authenticate the viewer so we can stamp
-            # `is_mine` / `is_mod` per post — but never leak the raw
-            # author_email back to public callers (PII; would otherwise
-            # end up in browser caches and any forwarded JSON).
+            # `is_mine` / `is_admin_mod` / `my_vote` per post — but
+            # never leak the raw author_email back to public callers.
             viewer_email = None
-            viewer_is_coach = False
+            viewer_is_admin = False
             try:
                 ai = _verify_open_request(event)
                 viewer_email = ai["email"]
-                viewer_is_coach = ai["is_coach"]
+                viewer_is_admin = ai["is_admin"]
             except Exception:
                 pass
             safe_posts = []
             for p in posts:
                 pe = (p.get("author_email") or "").lower()
+                # Role: explicit `role` field wins. Legacy posts (no
+                # role field) default to "sailor" so the old auto-coach
+                # badge no longer surfaces.
+                role = (p.get("role") or "").lower()
+                if role not in ("coach", "sailor"):
+                    role = "sailor"
+                votes = p.get("votes") or {}
+                up_list   = votes.get("up") or []
+                down_list = votes.get("down") or []
                 safe = {
                     "id": p.get("id"),
                     "author_name": p.get("author_name"),
-                    "is_coach": bool(p.get("is_coach")),
+                    "role": role,
                     "body": p.get("body"),
                     "cursor_t_sec": p.get("cursor_t_sec"),
                     "created_at": p.get("created_at"),
+                    "upvotes": len(up_list),
+                    "downvotes": len(down_list),
                 }
-                if viewer_email and pe == viewer_email:
-                    safe["is_mine"] = True
-                if viewer_is_coach:
-                    safe["is_mod"] = True
+                if viewer_email:
+                    if pe == viewer_email:
+                        safe["is_mine"] = True
+                    up_lower   = {e.lower() for e in up_list}
+                    down_lower = {e.lower() for e in down_list}
+                    if viewer_email in up_lower:
+                        safe["my_vote"] = "up"
+                    elif viewer_email in down_lower:
+                        safe["my_vote"] = "down"
+                if viewer_is_admin:
+                    safe["is_admin_mod"] = True
                 safe_posts.append(safe)
             return _resp(200, {"race_id": race_id, "posts": safe_posts})
 
@@ -786,7 +810,7 @@ def handler(event, _ctx):
         except Exception as e:  # noqa: BLE001
             return _resp(500, {"error": "auth_error", "detail": str(e)})
         email = auth_info["email"]
-        is_coach = auth_info["is_coach"]
+        is_admin = auth_info["is_admin"]
         display_name = auth_info["name"] or _shorten_email(email)
 
         if method == "POST" and len(parts) == 3:
@@ -804,41 +828,95 @@ def handler(event, _ctx):
                     cursor_t_sec = float(cursor_t_sec)
                 except (TypeError, ValueError):
                     cursor_t_sec = None
+            role = (body.get("role") or "sailor").lower()
+            if role not in ("coach", "sailor"):
+                role = "sailor"
             post = {
                 "id": uuid.uuid4().hex,
                 "author_email": email,
                 "author_name": display_name,
-                "is_coach": is_coach,
+                "role": role,
                 "body": text,
                 "cursor_t_sec": cursor_t_sec,
                 "created_at": _now_iso(),
+                "votes": {"up": [], "down": []},
             }
             doc = _load_discussion(race_id)
             doc.setdefault("posts", []).append(post)
             doc["race_id"] = race_id
             _save_discussion(race_id, doc)
 
-            # Notify the admin of every new post. Includes a deep link so
-            # the recipient can jump straight to the discussion.
+            # Notify the admin of every new post. The client passes a
+            # rich race-context label ("Regatta · Race N of M · Tue May 12,
+            # 2026") so the email names the race in fleet terms instead
+            # of an opaque race_id. Falls back to race_id for any old
+            # client that doesn't send the field.
             author_label = display_name or email
-            role = "coach" if is_coach else "guest"
+            race_label = (body.get("race_context_label") or "").strip() or race_id
             preview = (text[:300] + "…") if len(text) > 300 else text
             _notify_admin(
-                subject=f"[SailFrames] Tactics post by {author_label}",
+                subject=f"[SailFrames] Tactics — {race_label} — post by {author_label}",
                 body=(
-                    f"New tactics-discussion post on race {race_id}\n"
+                    f"New tactics-discussion post.\n"
                     f"\n"
-                    f"Author : {author_label} ({email}) — {role}\n"
+                    f"Race   : {race_label}\n"
+                    f"Race ID: {race_id}\n"
+                    f"Author : {author_label} ({email}) — self-tagged as {role}\n"
                     f"Posted : {post['created_at']}\n"
                     f"\n"
                     f"---\n"
                     f"{preview}\n"
                     f"---\n"
                     f"\n"
-                    f"View: https://sailframes.com/race.html?race_id={race_id}\n"
+                    f"View: https://sailframes.com/race.html?race={race_id}&tactics=1\n"
                 ),
             )
-            return _resp(200, post)
+            # Return the post WITHOUT author_email (consistent w/ GET).
+            return _resp(200, {
+                "id": post["id"],
+                "author_name": post["author_name"],
+                "role": post["role"],
+                "body": post["body"],
+                "cursor_t_sec": post["cursor_t_sec"],
+                "created_at": post["created_at"],
+                "upvotes": 0,
+                "downvotes": 0,
+                "is_mine": True,
+            })
+
+        # POST /discussions/{race_id}/{post_id}/vote — toggle/cast a vote.
+        # Authors can't vote on their own posts (enforced both sides).
+        # NOTE: read-modify-write on the per-race doc has a small race
+        # window if two users vote simultaneously; acceptable at fleet
+        # scale. Upgrade to S3 conditional writes if traffic grows.
+        if method == "POST" and len(parts) == 5 and parts[4] == "vote":
+            post_id = parts[3]
+            req = json.loads(event.get("body") or "{}")
+            vote = (req.get("vote") or "").lower().strip()
+            if vote not in ("up", "down", "none"):
+                return _resp(400, {"error": "vote must be 'up', 'down', or 'none'"})
+            doc = _load_discussion(race_id)
+            posts = doc.get("posts") or []
+            target = next((p for p in posts if p.get("id") == post_id), None)
+            if target is None:
+                return _resp(404, {"error": "post not found"})
+            if (target.get("author_email") or "").lower() == email:
+                return _resp(400, {"error": "cannot vote on your own post"})
+            votes = target.setdefault("votes", {"up": [], "down": []})
+            votes.setdefault("up", [])
+            votes.setdefault("down", [])
+            # Clear any existing vote from this user, then apply.
+            votes["up"]   = [e for e in votes["up"]   if e.lower() != email]
+            votes["down"] = [e for e in votes["down"] if e.lower() != email]
+            if vote == "up":   votes["up"].append(email)
+            if vote == "down": votes["down"].append(email)
+            _save_discussion(race_id, doc)
+            return _resp(200, {
+                "id": post_id,
+                "upvotes": len(votes["up"]),
+                "downvotes": len(votes["down"]),
+                "my_vote": vote if vote != "none" else None,
+            })
 
         if method == "DELETE" and len(parts) == 4:
             post_id = parts[3]
@@ -848,7 +926,7 @@ def handler(event, _ctx):
             if target is None:
                 return _resp(404, {"error": "post not found"})
             owner_match = (target.get("author_email") or "").lower() == email
-            if not is_coach and not owner_match:
+            if not is_admin and not owner_match:
                 return _resp(403, {"error": "not authorized"})
             doc["posts"] = [p for p in posts if p.get("id") != post_id]
             _save_discussion(race_id, doc)
