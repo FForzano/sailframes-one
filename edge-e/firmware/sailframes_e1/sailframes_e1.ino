@@ -100,7 +100,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.16.01"
+#define FW_VERSION    "2026.05.17.01"
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -5111,12 +5111,41 @@ void uploadTaskFunc(void* param) {
       if (config.wifi_count == 0 || !strlen(config.upload_url)) {
         // No WiFi configured, skip
       }
-      // Skip if no pending files (don't connect WiFi for nothing).
-      // RTCM3-only sessions also count — they need to upload eventually
-      // when on Home-IOT. The upload code itself filters by SSID so a
-      // hotspot connect with only RTCM3 pending is a no-op.
+      // Nothing pending to upload — but we still need to wake WiFi
+      // periodically to check for new firmware. Without this branch a
+      // boat that's fully caught up never connects, never checks the
+      // OTA manifest, and never updates. Diagnosed 2026-05-16 after
+      // the fleet missed multiple firmware pushes despite booting at
+      // home on Home-IOT. The check runs at most once per boot
+      // (g_otaCheckedThisBoot, enforced inside performOTAUpdate); the
+      // stationary + interval gates avoid waking the radio while the
+      // boat is on the water about to record.
       else if (pendingUploads == 0 && pendingRTCM == 0) {
-        // Nothing to upload — don't connect WiFi
+        if (!g_otaCheckedThisBoot) {
+          // Track stationary time the same way the upload branch does.
+          if (gps.valid && gps.speed_kts >= 0.5) {
+            stationaryStart = 0;  // boat moving — skip
+          } else {
+            if (stationaryStart == 0) stationaryStart = now;
+            // Wait 30 s of stationary uptime before competing for the
+            // radio (lets GPS get a fix, BNO settle, BLE wind connect).
+            if (now - stationaryStart >= 30000 &&
+                now - lastUploadCheck >= UPLOAD_CHECK_INTERVAL_MS) {
+              lastUploadCheck = now;
+              Serial.println("[OTA] No pending uploads — running OTA-only check");
+              wifiBusy = true;
+              if (!wifiConnected) connectWiFi();
+              if (wifiConnected) {
+                performOTAUpdate(false);   // body's SSID + version gates apply
+                // Release the radio whether OTA happened or not.
+                wifiTeardownRequested = true;
+              } else {
+                Serial.println("[OTA] WiFi connect failed for OTA-only check");
+                wifiBusy = false;
+              }
+            }
+          }
+        }
       }
       // Only upload when stationary (speed < 0.5 kt) or no GPS fix
       // If no GPS fix, assume stationary (allow upload)
