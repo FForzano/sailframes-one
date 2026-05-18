@@ -2436,7 +2436,6 @@ body.course-editing .boat-legend {
 }
 .td-cursor-link {
     display: inline-block;
-    margin-top: 0.3rem;
     font-size: 0.75rem;
     color: #fbbf24;
     cursor: pointer;
@@ -2446,6 +2445,35 @@ body.course-editing .boat-legend {
     text-decoration: underline dotted;
 }
 .td-cursor-link:hover { color: #fde68a; }
+
+/* Inline row holding "Jump to ..." + per-post WhatsApp share. Always
+   on its own line under the post body so neither button competes
+   with the votes/delete actions row below. */
+.td-post-inline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.3rem;
+}
+
+/* Per-post WhatsApp share — small green pill that matches the
+   drawer-header share button styling so the two are visually
+   related. Sits next to the "Jump to ..." link. */
+.td-share-post {
+    display: inline-block;
+    background: #25d366;        /* WhatsApp green */
+    color: #0b1220;
+    border: none;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    line-height: 1;
+    font-family: inherit;
+}
+.td-share-post:hover { background: #1ebe57; }
 .td-post-actions {
     margin-top: 0.4rem;
     display: flex;

@@ -339,21 +339,13 @@ async function init() {
     console.log('[Race] Initializing race dashboard...');
 
     // Hide admin controls for non-authenticated users. Race-mutating
-    // actions (create / edit / duplicate / course-copy) are coach-only;
-    // guests still see read-only controls (regatta picker, charts,
-    // legs/maneuvers, tactics).
+    // actions (create / edit / duplicate / course-copy) all live inside
+    // the Race-management dropdown now — hiding the wrapper hides them
+    // all in one shot. Guests still see read-only controls (regatta
+    // picker, charts, legs/maneuvers, tactics).
     if (!IS_ADMIN) {
-        for (const id of [
-            'btn-new-race',
-            'btn-edit-race',
-            'btn-edit-course',
-            'btn-duplicate-race',
-            'btn-copy-course-next',
-            'btn-copy-course-all',
-        ]) {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        }
+        const rm = document.getElementById('race-mgmt-dropdown');
+        if (rm) rm.style.display = 'none';
     }
 
     // Initialize map
@@ -417,7 +409,8 @@ async function init() {
     // Tactics-discussion drawer
     setupTacticsDrawer();
 
-    // Toolbar dropdowns (Analytics, Discuss Tactics with…)
+    // Toolbar dropdowns (Race management, Analytics, Discuss Tactics with…)
+    setupToolbarDropdown('btn-race-mgmt', 'race-mgmt-menu');
     setupToolbarDropdown('btn-analytics', 'analytics-menu');
     setupToolbarDropdown('btn-tactics-dd', 'tactics-menu');
 
@@ -7894,14 +7887,40 @@ async function copyCourseToAllRemainingRaces() {
 // --- Event Listeners ---
 
 function setupEventListeners() {
-    // Regatta selection -> load race days
-    document.getElementById('regatta-select').addEventListener('change', (e) => {
-        loadRaceDays(e.target.value || null);
+    // Regatta selection → load race days, then auto-select the latest
+    // day + first race of that day so the user lands inside the most
+    // recent race instead of an empty "Select Day…" state. Saves three
+    // clicks every time someone switches series.
+    document.getElementById('regatta-select').addEventListener('change', async (e) => {
+        const regattaId = e.target.value || null;
+        await loadRaceDays(regattaId);
+        if (!regattaId || !raceDays.length) return;
+        // raceDays is sorted ascending → last entry is the most recent.
+        const latest = raceDays[raceDays.length - 1];
+        const daySel = document.getElementById('raceday-select');
+        if (daySel) daySel.value = latest.date;
+        loadRacesForDay(latest.date);
+        // races[] now reflects the latest day, sorted by start_time.
+        const firstRace = (latest.races && latest.races[0]) || null;
+        if (firstRace) {
+            const raceSel = document.getElementById('race-select');
+            if (raceSel) raceSel.value = firstRace.race_id;
+            loadRaceData(firstRace.race_id);
+        }
     });
 
-    // Race day selection -> load races for that day
+    // Race day selection → load races for that day, then auto-select
+    // the first race so the user doesn't sit on an empty state.
     document.getElementById('raceday-select').addEventListener('change', (e) => {
-        loadRacesForDay(e.target.value || null);
+        const date = e.target.value || null;
+        loadRacesForDay(date);
+        if (!date) return;
+        const firstRace = (races && races[0]) || null;
+        if (firstRace) {
+            const raceSel = document.getElementById('race-select');
+            if (raceSel) raceSel.value = firstRace.race_id;
+            loadRaceData(firstRace.race_id);
+        }
     });
 
     // Race selection -> load race data
@@ -8270,6 +8289,14 @@ function _tdRenderPosts() {
         const cursorBtn = (p.cursor_t_sec != null && currentRace?.start_time)
             ? `<button class="td-cursor-link" data-cursor-t="${Number(p.cursor_t_sec)}" type="button">→ Jump to ${_tdFmtCursorLocal(p.cursor_t_sec)}</button>`
             : '';
+        // Per-post WhatsApp share — sends the full post text + a deep
+        // link to the race at the post's attached cursor moment (or
+        // race start if no cursor was attached). Always visible so any
+        // post can be forwarded to the fleet.
+        const shareBtn = `<button class="td-share-post" data-share-post="${p.id}" type="button" title="Share this post on WhatsApp">Share on WhatsApp</button>`;
+        const inlineRow = (cursorBtn || shareBtn)
+            ? `<div class="td-post-inline">${cursorBtn}${shareBtn}</div>`
+            : '';
         const upN   = Number(p.upvotes   || 0);
         const downN = Number(p.downvotes || 0);
         let voteBlock;
@@ -8302,7 +8329,7 @@ function _tdRenderPosts() {
                     <span class="td-when">${when}</span>
                 </div>
                 <div class="td-body">${_tdEscape(p.body || '')}</div>
-                ${cursorBtn}
+                ${inlineRow}
                 ${actions}
             </div>
         `;
@@ -8311,13 +8338,20 @@ function _tdRenderPosts() {
     list.innerHTML = html;
     list.scrollTop = list.scrollHeight;
 
-    // Wire cursor-jump, vote, delete handlers.
+    // Wire cursor-jump, share, vote, delete handlers.
     for (const btn of list.querySelectorAll('.td-cursor-link')) {
         btn.addEventListener('click', () => {
             const tSec = parseFloat(btn.getAttribute('data-cursor-t'));
             if (Number.isFinite(tSec) && window.SailFramesRace) {
                 window.SailFramesRace.seekTo(tSec);
             }
+        });
+    }
+    for (const btn of list.querySelectorAll('.td-share-post')) {
+        btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-share-post');
+            const post = _tdPostsCache.find(p => p.id === id);
+            if (post) _tdSharePostToWhatsApp(post);
         });
     }
     for (const btn of list.querySelectorAll('.td-vote')) {
@@ -8530,11 +8564,15 @@ function _tdShareUrl() {
     const u = new URL(`${origin}/race.html`);
     u.searchParams.set('race', currentRace.race_id);
     u.searchParams.set('tactics', '1');
-    const tSec = Math.max(0, Math.round(currentTime || 0));
-    if (tSec > 0) {
-        u.searchParams.set('t', String(tSec));
-        u.searchParams.set('focus', 'fleet');
-    }
+    // Always embed the cursor time + auto-zoom to the fleet. Using
+    // playCursorSeconds with currentTime as a fallback mirrors what
+    // the attach-time feature uses — either one can be the freshest
+    // depending on which playback path last updated state. Reading
+    // only currentTime previously produced "?race=...&tactics=1" with
+    // no t/focus when the user hadn't scrubbed via seekTo() yet.
+    const tSec = Math.max(0, Math.round(playCursorSeconds || currentTime || 0));
+    u.searchParams.set('t', String(tSec));
+    u.searchParams.set('focus', 'fleet');
     return u.toString();
 }
 
@@ -8542,17 +8580,17 @@ function _tdShareUrl() {
 // prefilled message linking back to the discussion. The wa.me handler
 // lets the user pick the recipient — your sailors group, a contact,
 // whatever. Falls back to copying the URL when WhatsApp is unreachable.
+//
+// Text is intentionally ASCII — emoji (U+1F4AC 💬, U+1F4CD 📍) don't
+// render on every device/font and were showing up as � in some users'
+// WhatsApp clients.
 function _tdShareToWhatsApp() {
     const url = _tdShareUrl();
     if (!url) { alert('No race loaded.'); return; }
     const label = buildRaceContextLabel();
-    // If the cursor is past t=0, surface the moment in the message so
-    // the recipient sees in plain text what they're being pointed at
-    // before tapping the URL. _tdFmtCursorLocal renders wall-clock
-    // local time (e.g. "14:32:08") using currentRace.start_time.
-    const tSec = Math.max(0, Math.round(currentTime || 0));
-    const tNote = (tSec > 0) ? `\n📍 At ${_tdFmtCursorLocal(tSec)} (race time)` : '';
-    const text = `💬 Tactics discussion on SailFrames\n\n${label}${tNote}\n\nDiscuss this race with the fleet: ${url}`;
+    const tSec = Math.max(0, Math.round(playCursorSeconds || currentTime || 0));
+    const tNote = `\nAt ${_tdFmtCursorLocal(tSec)} (race time)`;
+    const text = `Tactics discussion on SailFrames\n\n${label}${tNote}\n\nDiscuss this race with the fleet: ${url}`;
     // wa.me universal handler: works on mobile (opens app) and on
     // desktop (opens WhatsApp Web / Desktop). User chooses the group.
     const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -8560,6 +8598,59 @@ function _tdShareToWhatsApp() {
     const w = window.open(waUrl, '_blank', 'noopener,noreferrer');
     if (!w) {
         // Pop-up blocker → fall back to copy.
+        try { navigator.clipboard.writeText(url); alert('Link copied to clipboard.'); }
+        catch { prompt('Copy this link:', url); }
+    }
+}
+
+// Per-post WhatsApp share. Composes a message containing the full
+// post body + author + a deep link to the race at the post's
+// attached cursor moment (so recipients land at the exact frame the
+// poster was discussing). If no cursor was attached to the post,
+// the link still works — it just lands at race start with the
+// discussion drawer open.
+function _tdSharePostToWhatsApp(post) {
+    if (!currentRace?.race_id || !post) { alert('No race / post.'); return; }
+    const origin = 'https://sailframes.com';
+    const u = new URL(`${origin}/race.html`);
+    u.searchParams.set('race', currentRace.race_id);
+    u.searchParams.set('tactics', '1');
+    const tSec = (post.cursor_t_sec != null)
+        ? Math.max(0, Math.round(Number(post.cursor_t_sec)))
+        : 0;
+    u.searchParams.set('t', String(tSec));
+    u.searchParams.set('focus', 'fleet');
+    const url = u.toString();
+
+    const label   = buildRaceContextLabel();
+    const author  = post.author_name || 'Anonymous';
+    const role    = post.role === 'coach' ? ' (coach)' : '';
+    const when    = post.created_at
+        ? new Date(post.created_at).toLocaleString('en-US', {
+              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+          })
+        : '';
+    const tNote = (post.cursor_t_sec != null && currentRace.start_time)
+        ? `\nAt ${_tdFmtCursorLocal(post.cursor_t_sec)} (race time)`
+        : '';
+
+    // Body in block-quote form so the post text is visually framed.
+    // ASCII only — no emoji (some recipient devices show � for them).
+    const quoted = (post.body || '')
+        .split('\n')
+        .map(line => '> ' + line)
+        .join('\n');
+
+    const text =
+        `Tactics post on SailFrames\n\n` +
+        `${label}${tNote}\n\n` +
+        `${quoted}\n\n` +
+        `— ${author}${role}${when ? ' · ' + when : ''}\n\n` +
+        `See the race at this moment: ${url}`;
+
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    const w = window.open(waUrl, '_blank', 'noopener,noreferrer');
+    if (!w) {
         try { navigator.clipboard.writeText(url); alert('Link copied to clipboard.'); }
         catch { prompt('Copy this link:', url); }
     }

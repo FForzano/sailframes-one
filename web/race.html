@@ -70,7 +70,7 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
-    <link rel="stylesheet" href="./assets/css/race.css?v=52">
+    <link rel="stylesheet" href="./assets/css/race.css?v=53">
     <link rel="stylesheet" href="./assets/css/race-chat.css?v=10">
     <link rel="stylesheet" href="./assets/css/race-start-review.css?v=2">
     <script src="./config.js"></script>
@@ -93,12 +93,25 @@
             <select id="race-select" title="Race">
                 <option value="">Select Race...</option>
             </select>
-            <button id="btn-new-race" class="btn-primary" title="Create new race">+ New Race</button>
-            <button id="btn-edit-race" class="btn-secondary" title="Edit race" disabled>Edit</button>
-            <button id="btn-duplicate-race" class="btn-secondary" title="Duplicate race (copy boats, date, course; times left blank)" disabled>Duplicate</button>
-            <button id="btn-edit-course" class="btn-secondary" title="Edit course on map" disabled>Edit Course</button>
-            <button id="btn-copy-course-next" class="btn-secondary" title="Copy this race's marks, start/finish lines, and course sequence to the next race of the day" disabled>Copy Course →</button>
-            <button id="btn-copy-course-all" class="btn-secondary" title="Copy this race's course to every later race on the same day" disabled>Copy → All</button>
+            <!-- Race management dropdown: coach-only actions for
+                 creating, editing, duplicating, and propagating
+                 courses. Hidden entirely for non-coach viewers via
+                 IS_ADMIN gate in race-app init. Each menu item keeps
+                 its original ID so existing click handlers + the
+                 race-load enable/disable logic bind unchanged. -->
+            <div class="tb-dropdown" id="race-mgmt-dropdown">
+                <button id="btn-race-mgmt" class="btn-secondary" type="button"
+                        aria-haspopup="true" aria-expanded="false"
+                        title="Create / edit / duplicate races + copy courses">Race management ▾</button>
+                <div class="tb-menu" id="race-mgmt-menu" hidden role="menu">
+                    <button id="btn-new-race" class="tb-menu-item" role="menuitem" title="Create new race">+ New Race</button>
+                    <button id="btn-edit-race" class="tb-menu-item" role="menuitem" title="Edit race" disabled>Edit</button>
+                    <button id="btn-duplicate-race" class="tb-menu-item" role="menuitem" title="Duplicate race (copy boats, date, course; times left blank)" disabled>Duplicate</button>
+                    <button id="btn-edit-course" class="tb-menu-item" role="menuitem" title="Edit course on map" disabled>Edit Course</button>
+                    <button id="btn-copy-course-next" class="tb-menu-item" role="menuitem" title="Copy this race's marks, start/finish lines, and course sequence to the next race of the day" disabled>Copy Course →</button>
+                    <button id="btn-copy-course-all" class="tb-menu-item" role="menuitem" title="Copy this race's course to every later race on the same day" disabled>Copy → All</button>
+                </div>
+            </div>
             <!-- Analytics dropdown: groups all per-race analysis tools
                  under one toolbar entry so the header stays compact.
                  Each item keeps its original ID so existing handlers
@@ -455,6 +468,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=103"></script>
+    <script type="module" src="./assets/js/race-app.js?v=107"></script>
 </body>
 </html>
