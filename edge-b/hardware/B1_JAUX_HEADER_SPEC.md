@@ -1,6 +1,6 @@
-# B1 Auxiliary Header Spec (J10–J14)
+# B1 Auxiliary Header Spec (J10–J15)
 
-Five male 2.54 mm pin headers on the B1 PCB for future expansion: 3× I2C taps, 1× GPIO/ADC bank, 1× UART debug. Defined in commit `15a4970`.
+Six male 2.54 mm pin headers on the B1 PCB for future expansion: 3× I2C taps, 1× GPIO/ADC bank, 1× UART debug, and 1× consolidated J_AUX. Defined in commits `15a4970` (J10–J14) and `2nd commit` (J15).
 
 ## Why male pin headers?
 
@@ -115,6 +115,43 @@ Standard 4-conductor Dupont jumper (female-to-female or female-to-XH). For longe
 ### Cabling
 
 4-conductor Dupont. Note the TX↔RX cross: PCB TX0 → adapter RX, PCB RX0 → adapter TX. Mis-wiring won't damage anything but no data will flow.
+
+---
+
+## J15 — J_AUX consolidated expansion (6-pin)
+
+**Purpose:** single-cable expansion port carrying the most-likely-needed signals on one header. Lets you connect an external "expansion module" that uses I2C and/or UART with a single 6-conductor cable, instead of routing separate 4-pin cables for each protocol.
+
+### Pin map (6-pin)
+
+| Pin | Net | Direction | Notes |
+|-----|-----|-----------|-------|
+| 1 | V3V3 | Power out | Shared with J10–J14 V3V3 rail |
+| 2 | GND | Reference | Shared with all GND |
+| 3 | I2C_SDA | Bidirectional, open-drain | Same I2C bus as J10–J12 and BNO085 (J8). 4.7 kΩ pull-up already on PCB |
+| 4 | I2C_SCL | Bidirectional, open-drain | Same I2C bus. 4.7 kΩ pull-up on PCB |
+| 5 | RX0 | UART0 RX (input) | ESP32 GPIO3. Also on J14 — both connectors share this net. **Conflicts with USB-C** — see UART section |
+| 6 | TX0 | UART0 TX (output) | ESP32 GPIO1. Also on J14 |
+
+### Use cases
+
+- **Wind sensor module** with both I2C config and UART data output (e.g., Calypso Ultrasonic in wired-UART mode, or a custom anemometer ESP32 mini-board)
+- **Smart sensor hub** module that aggregates multiple sensors and reports via I2C or UART
+- **Display module** with I2C control + UART status output
+- **Companion microcontroller** (e.g., ATtiny for low-power housekeeping) communicating via UART with optional I2C config
+
+### Wiring vs J14 UART debug
+
+J15 (J_AUX) and J14 (UART_DBG) share the same UART0 nets (RX0, TX0). Only one of:
+- USB-C cable on ESP32 DevKit V1, OR
+- External UART adapter on J14, OR
+- External UART module on J15
+
+can use UART0 at any given time. Pick one.
+
+### Cabling
+
+6-conductor cable (Dupont, JST-SH 1.0 mm with adapter, or custom ribbon). Pin 1 (square pad on PCB) is V3V3.
 
 ---
 
