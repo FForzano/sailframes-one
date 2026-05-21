@@ -120,38 +120,36 @@ Standard 4-conductor Dupont jumper (female-to-female or female-to-XH). For longe
 
 ## J15 — J_AUX consolidated expansion (6-pin)
 
-**Purpose:** single-cable expansion port carrying the most-likely-needed signals on one header. Lets you connect an external "expansion module" that uses I2C and/or UART with a single 6-conductor cable, instead of routing separate 4-pin cables for each protocol.
+**Purpose:** single-cable expansion port carrying I²C bus + an interrupt line + dual-voltage power (3.3 V and 5 V) on one header. Designed for the most common B1 expansion scenarios: external I²C sensors that prefer 5 V (e.g., KY-038 sound detector), I²C sensors with a DRDY/INT signal (e.g., RM3100 magnetometer), and any future module that needs the boost rail.
 
 ### Pin map (6-pin)
 
 | Pin | Net | Direction | Notes |
 |-----|-----|-----------|-------|
-| 1 | V3V3 | Power out | Shared with J10–J14 V3V3 rail |
-| 2 | GND | Reference | Shared with all GND |
-| 3 | I2C_SDA | Bidirectional, open-drain | Same I2C bus as J10–J12 and BNO085 (J8). 4.7 kΩ pull-up already on PCB |
-| 4 | I2C_SCL | Bidirectional, open-drain | Same I2C bus. 4.7 kΩ pull-up on PCB |
-| 5 | RX0 | UART0 RX (input) | ESP32 GPIO3. Also on J14 — both connectors share this net. **Conflicts with USB-C** — see UART section |
-| 6 | TX0 | UART0 TX (output) | ESP32 GPIO1. Also on J14 |
+| 1 | V3V3 | Power out (3.3 V) | Required for all I²C sensors and the KY-038 (operates 3.3 V or 5 V; 3.3 V keeps the digital output at 3.3 V logic level safe for ESP32 GPIO) |
+| 2 | GND | Reference | Standard ground |
+| 3 | I2C_SDA | Bidirectional, open-drain | Same I²C bus as J10–J12 and BNO085 (J8, address 0x4B). 4.7 kΩ pull-up already on PCB (R21). RM3100 default address 0x20–0x23 selectable → no conflict |
+| 4 | I2C_SCL | Bidirectional, open-drain | Same I²C bus. 4.7 kΩ pull-up on PCB (R22) |
+| 5 | AUX_INT | Input-only (GPIO36, SVP, ADC1_CH0) | Interrupt-style input for sensors that signal "data available". Use cases: KY-038 digital output (rising-edge interrupt), RM3100 DRDY, future sensor wake/IRQ. Same net also on J13 pin 3 and U4 pin 2 |
+| 6 | V5_SW | Power out (5 V, switched) | From the Acxico Qi receiver / MT3608 boost output (~5.13 V validated by bench test). Available because the Qi charging path generates this rail anyway. Useful for sensors that prefer 5 V (KY-038 supports either; future sensors may require 5 V) |
 
 ### Use cases
 
-- **Wind sensor module** with both I2C config and UART data output (e.g., Calypso Ultrasonic in wired-UART mode, or a custom anemometer ESP32 mini-board)
-- **Smart sensor hub** module that aggregates multiple sensors and reports via I2C or UART
-- **Display module** with I2C control + UART status output
-- **Companion microcontroller** (e.g., ATtiny for low-power housekeeping) communicating via UART with optional I2C config
+- **KY-038 sound sensor** — wire V3V3 (or V5_SW), GND, and digital output to AUX_INT
+- **PNI RM3100 magnetometer** — wire V3V3, GND, I²C, and DRDY to AUX_INT
+- **External MEMS pressure sensor** (DPS310 or BMP388) — wire V3V3, GND, I²C; AUX_INT unused (or used for FIFO interrupt)
+- **Future 5 V sensor module** — wire V5_SW, GND, and digital/I²C as needed
+- **Smart sensor hub** module with I²C config and an INT/wake line
 
-### Wiring vs J14 UART debug
+### Constraints
 
-J15 (J_AUX) and J14 (UART_DBG) share the same UART0 nets (RX0, TX0). Only one of:
-- USB-C cable on ESP32 DevKit V1, OR
-- External UART adapter on J14, OR
-- External UART module on J15
-
-can use UART0 at any given time. Pick one.
+- **AUX_INT (GPIO36) is input-only.** Cannot drive output. Cannot use as I²C, SPI, or PWM master. Pure digital input or ADC.
+- **V5_SW is the SWITCHED 5 V rail** — it turns off when the device powers down via the AO3401A switch. If you need always-on 5 V, would need to tap V5_UNSW instead (not recommended for cable headers — battery drain).
+- **Pin 1 V3V3 and Pin 6 V5_SW shared rail capacity** — total current across all expansion devices should stay under ~500 mA for V3V3 and ~1 A for V5_SW (limited by MT3608 boost output).
 
 ### Cabling
 
-6-conductor cable (Dupont, JST-SH 1.0 mm with adapter, or custom ribbon). Pin 1 (square pad on PCB) is V3V3.
+6-conductor cable (Dupont, JST-SH 1.0 mm with adapter, or custom ribbon). Pin 1 (square pad on PCB) is V3V3. Note the mixed-voltage layout: pin 1 is 3.3 V and pin 6 is 5 V — wire colors should differentiate to avoid plugging in backward.
 
 ---
 
