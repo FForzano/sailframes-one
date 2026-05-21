@@ -62,6 +62,7 @@
 #define CONFIG_BT_NIMBLE_SVC_GAP_DEVICE_NAME "SailFrames-E1"
 #include <NimBLEDevice.h>
 #include <string>
+#include "v2_types.h"  // v2.0.0 foundation: HardwarePlatform/UnitRole/RadioMode enums
 
 // ============================================================
 // PIN DEFINITIONS
@@ -100,7 +101,11 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.17.01"
+#define FW_VERSION    "2026.05.20.01"
+// v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
+// IMU + GPS fix-rate changes from SF_FIRMWARE_V2_SPEC.md are mechanism-only
+// in this stage — defaults preserve pre-2.0 behavior. Per-boat opt-in via
+// imu_interval_ms= and gps_set_fixrate= in /config.txt.
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -137,7 +142,7 @@
 #define GPS_FIX_TIMEOUT_MS  300000
 #define DISPLAY_UPDATE_MS   500   // TFT can handle faster updates (no I2C contention)
 #define FLUSH_INTERVAL_MS   10000
-#define IMU_INTERVAL_MS     1000   // 1 Hz (was 50ms/20Hz - overkill for sailing)
+#define IMU_INTERVAL_MS     1000   // Legacy default. Runtime value is config.imu_interval_ms (override in /config.txt).
 #define PRES_INTERVAL_MS    10000  // 0.1 Hz (every 10 sec - weather trends only)
 
 // Wind sensor (Calypso Mini BLE)
@@ -285,6 +290,13 @@ struct RTCM3Parser {
   int frameTotal = 0;
 } rtcm;
 
+// v2.0.0 foundation globals. Types live in v2_types.h (included at top
+// of file) so Arduino's auto-generated forward declarations can resolve
+// them.
+HardwarePlatform g_hw = HW_E1;
+UnitRole         g_role = ROLE_RACING_BOAT;
+RadioMode        g_radio_mode = MODE_BOOT;
+
 #define MAX_WIFI_NETWORKS 5
 
 struct WiFiNetwork {
@@ -308,6 +320,14 @@ struct Config {
   float stop_speed_knots = 0.5;
   int start_delay_sec = 10;
   int stop_delay_sec = 180;
+
+  // v2.0.0 foundation (SF_FIRMWARE_V2_SPEC.md Stage 1)
+  // Defaults preserve pre-2.0 behavior so existing fleet configs stay valid.
+  char hardware_platform[8] = "e1";       // "e1" or "b1"
+  char unit_role[24]        = "racing_boat";
+  int  config_version       = 0;          // bumped by cloud config sync (Stage 3)
+  int  imu_interval_ms      = 1000;       // 1000 = legacy 1 Hz; spec target 100 = 10 Hz
+  bool gps_set_fixrate      = false;      // when true, send PQTMCFGFIXRATE,W,<ms> at boot
 } config;
 
 // ============================================================
@@ -956,6 +976,25 @@ void appendBootLog(const char* line) {
   if (sdMutex) xSemaphoreGive(sdMutex);
 }
 
+// v2.0.0 radio mode transition stub (SF_FIRMWARE_V2_SPEC.md Stage 1).
+// Stage 1 ships the state variable and logging only — the actual WiFi/BLE/
+// ESP-NOW teardown and bringup move into this function in Stage 2 once
+// the existing implicit "WiFi STA + BLE-C" coexistence is converted to a
+// single Core-1 owner. Callers may invoke this now to record intent.
+void radioModeTransition(RadioMode target, const char* reason) {
+  if (target == g_radio_mode) return;
+  RadioMode prev = g_radio_mode;
+  g_radio_mode = target;
+  Serial.printf("[RADIO] %s -> %s (%s)\n",
+                radioModeName(prev), radioModeName(target),
+                reason ? reason : "");
+  char line[96];
+  snprintf(line, sizeof(line), "radio %s->%s reason=%s",
+           radioModeName(prev), radioModeName(target),
+           reason ? reason : "-");
+  appendBootLog(line);
+}
+
 // Format gps.utc_time (HHMMSS) + gps.date (DDMMYY) into ISO8601 "YYYY-MM-DDTHH:MM:SSZ".
 // Returns false if either field is not yet populated.
 static bool formatGpsIso(char* out, size_t outSize) {
@@ -1050,25 +1089,25 @@ void setup() {
     imuOK = true;
     Wire.setClock(400000);  // Switch to fast mode after init
     Serial.println("[IMU] BNO085 detected, enabling reports");
-    if (!bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000)) {
+    if (!bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, config.imu_interval_ms * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable game rotation vector");
     }
-    if (!bno08x.enableReport(SH2_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000)) {
+    if (!bno08x.enableReport(SH2_ROTATION_VECTOR, config.imu_interval_ms * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable rotation vector");
     }
-    if (!bno08x.enableReport(SH2_ACCELEROMETER, IMU_INTERVAL_MS * 1000)) {
+    if (!bno08x.enableReport(SH2_ACCELEROMETER, config.imu_interval_ms * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable accelerometer");
     }
-    if (!bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, IMU_INTERVAL_MS * 1000)) {
+    if (!bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, config.imu_interval_ms * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable gyroscope");
     }
-    if (!bno08x.enableReport(SH2_LINEAR_ACCELERATION, IMU_INTERVAL_MS * 1000)) {
+    if (!bno08x.enableReport(SH2_LINEAR_ACCELERATION, config.imu_interval_ms * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable linear acceleration");
     }
     if (!bno08x.enableReport(SH2_STABILITY_CLASSIFIER, 500000)) {
       Serial.println("[IMU] WARNING: Failed to enable stability classifier");
     }
-    if (!bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, IMU_INTERVAL_MS * 1000)) {
+    if (!bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, config.imu_interval_ms * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable magnetometer");
     }
     Serial.println("[IMU] BNO085 OK");
@@ -1425,6 +1464,23 @@ void configureLG290P() {
   sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1046,1");  // Galileo ephemeris
   delay(200);
 
+  // v2.0.0 Stage 1 — optional fix-rate bump for 10 Hz GNSS.
+  // Off by default (gps_set_fixrate=false). Per LG290P (Quectel) PQTM docs,
+  // PQTMCFGFIXRATE,W,<period_ms> sets the fix interval; 100 = 10 Hz.
+  // Syntax unverified against AANR01A06S; sendPQTM logs [RSP] with any error.
+  // Save to NVM only if the command succeeds — avoids persisting a bad value.
+  if (config.gps_set_fixrate) {
+    int period_ms = (config.gps_rate_hz > 0) ? (1000 / config.gps_rate_hz) : 100;
+    char body[48];
+    snprintf(body, sizeof(body), "PQTMCFGFIXRATE,W,%d", period_ms);
+    Serial.printf("[GPS] Requesting fix rate: %d ms (~%d Hz)\n", period_ms, config.gps_rate_hz);
+    if (sendPQTM(body)) {
+      sendPQTM("PQTMSAVEPAR");
+    } else {
+      Serial.println("[GPS] PQTMCFGFIXRATE failed — leaving fix rate at module default");
+    }
+  }
+
   // Step 10: Verify configuration — read back rates to confirm
   Serial.println("[GPS] Verifying configuration...");
   sendPQTM("PQTMCFGRCVRMODE,R");
@@ -1774,13 +1830,13 @@ void readIMU() {
   // BNO085 using Adafruit library with SHTP protocol
   if (bno08x.wasReset()) {
     Serial.println("[IMU] BNO085 was reset, re-enabling reports");
-    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000);
-    bno08x.enableReport(SH2_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000);
-    bno08x.enableReport(SH2_ACCELEROMETER, IMU_INTERVAL_MS * 1000);
-    bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, IMU_INTERVAL_MS * 1000);
-    bno08x.enableReport(SH2_LINEAR_ACCELERATION, IMU_INTERVAL_MS * 1000);
+    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, config.imu_interval_ms * 1000);
+    bno08x.enableReport(SH2_ROTATION_VECTOR, config.imu_interval_ms * 1000);
+    bno08x.enableReport(SH2_ACCELEROMETER, config.imu_interval_ms * 1000);
+    bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, config.imu_interval_ms * 1000);
+    bno08x.enableReport(SH2_LINEAR_ACCELERATION, config.imu_interval_ms * 1000);
     bno08x.enableReport(SH2_STABILITY_CLASSIFIER, 500000);
-    bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, IMU_INTERVAL_MS * 1000);
+    bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, config.imu_interval_ms * 1000);
   }
 
   // Read sensor events - we have 7 reports enabled so need enough reads
@@ -2019,8 +2075,39 @@ void loadConfig() {
     else if (k == "stop_speed_knots") config.stop_speed_knots = v.toFloat();
     else if (k == "start_delay_sec") config.start_delay_sec = v.toInt();
     else if (k == "stop_delay_sec") config.stop_delay_sec = v.toInt();
+    // v2.0.0 foundation
+    else if (k == "hardware_platform") v.toCharArray(config.hardware_platform, sizeof(config.hardware_platform));
+    else if (k == "unit_role")         v.toCharArray(config.unit_role, sizeof(config.unit_role));
+    else if (k == "config_version")    config.config_version = v.toInt();
+    else if (k == "imu_interval_ms")   config.imu_interval_ms = v.toInt();
+    else if (k == "gps_set_fixrate")   config.gps_set_fixrate = (v == "true" || v == "1");
   }
   f.close();
+
+  // Map textual platform/role into typed globals. Unknown values fall back
+  // to defaults rather than rejecting the config — keeps the device booting
+  // even if a cloud-pushed config arrives with a future role name.
+  if (strcasecmp(config.hardware_platform, "b1") == 0) g_hw = HW_B1;
+  else                                                  g_hw = HW_E1;
+
+  if      (strcasecmp(config.unit_role, "racing_boat")     == 0) g_role = ROLE_RACING_BOAT;
+  else if (strcasecmp(config.unit_role, "rc_signal")       == 0) g_role = ROLE_RC_SIGNAL;
+  else if (strcasecmp(config.unit_role, "rc_pin")          == 0) g_role = ROLE_RC_PIN;
+  else if (strcasecmp(config.unit_role, "mark")            == 0) g_role = ROLE_MARK;
+  else if (strcasecmp(config.unit_role, "committee_chase") == 0) g_role = ROLE_COMMITTEE_CHASE;
+  else if (strcasecmp(config.unit_role, "spare")           == 0) g_role = ROLE_SPARE;
+  else                                                            g_role = ROLE_RACING_BOAT;
+
+  // Clamp IMU interval to sane range. BNO085 fusion runs at 400 Hz internally
+  // so anything ≥10 ms is fine; cap at 5000 ms to avoid stalled IMU watchdog.
+  if (config.imu_interval_ms < 10)   config.imu_interval_ms = 10;
+  if (config.imu_interval_ms > 5000) config.imu_interval_ms = 5000;
+
+  // gps_rate_hz field has been declared but unused since the field was
+  // introduced. Stage 1 wires it via configureLG290P() when gps_set_fixrate
+  // is true. Clamp to LG290P-supported range.
+  if (config.gps_rate_hz < 1)  config.gps_rate_hz = 1;
+  if (config.gps_rate_hz > 10) config.gps_rate_hz = 10;
 
   Serial.printf("[CFG] Boat: %s, Rate: %dHz, WiFi networks: %d\n",
     config.boat_id, config.gps_rate_hz, config.wifi_count);
@@ -2035,6 +2122,12 @@ void loadConfig() {
     Serial.printf(" (offset: %d°)", config.wind_offset);
   }
   Serial.println();
+  Serial.printf("[CFG] Platform: %s | Role: %s | Config version: %d\n",
+                hwName(g_hw), roleName(g_role), config.config_version);
+  Serial.printf("[CFG] IMU interval: %d ms | GPS fixrate enabled: %s (target %d Hz)\n",
+                config.imu_interval_ms,
+                config.gps_set_fixrate ? "yes" : "no",
+                config.gps_rate_hz);
 }
 
 // ============================================================
@@ -4755,6 +4848,27 @@ void processCommand(String cmd, bool fromTelnet) {
     rtcmLastType = 0;
     tprintln("RTCM3 counters reset");
 
+  // v2.0.0 foundation commands (SF_FIRMWARE_V2_SPEC.md Stage 1)
+  } else if (cmd == "hwid") {
+    tprintf("platform=%s (config=%s)\n", hwName(g_hw), config.hardware_platform);
+
+  } else if (cmd == "role") {
+    tprintf("role=%s radio_mode=%s\n", roleName(g_role), radioModeName(g_radio_mode));
+
+  } else if (cmd == "configver") {
+    tprintf("config_version=%d boat_id=%s fw=%s\n",
+            config.config_version, config.boat_id, FW_VERSION);
+
+  } else if (cmd == "flags") {
+    tprintf("imu_interval_ms=%d\n", config.imu_interval_ms);
+    tprintf("gps_set_fixrate=%s (target %d Hz)\n",
+            config.gps_set_fixrate ? "on" : "off", config.gps_rate_hz);
+    tprintf("wind_enabled=%s\n", config.wind_enabled ? "on" : "off");
+    tprintf("telnet=%s\n", telnetEnabled ? "on" : "off");
+
+  } else if (cmd == "radiomode") {
+    tprintf("radio_mode=%s\n", radioModeName(g_radio_mode));
+
   } else if (cmd == "help") {
     tprintln("=== Commands ===");
     tprintln("  status     - Show device status");
@@ -4790,6 +4904,11 @@ void processCommand(String cmd, bool fromTelnet) {
     tprintln("  disconnect - Disconnect WiFi");
     tprintln("  update     - OTA pull from S3 manifest (manual)");
     tprintln("  reboot     - Restart device");
+    tprintln("  hwid       - Show detected hardware platform (E1/B1)");
+    tprintln("  role       - Show unit role + radio mode");
+    tprintln("  configver  - Show config version + boat_id + firmware");
+    tprintln("  flags      - Show v2.0.0 feature flag state");
+    tprintln("  radiomode  - Show current radio mode");
     tprintln("  help       - Show this help");
     tprintln("================");
 
@@ -5405,7 +5524,7 @@ void loop() {
   // Sensor reads are I2C on Core 1, upload runs on Core 0 — no conflict.
   // SD logging (logIMU/logPressure) is guarded by `logging` which is always
   // false during upload (task checks !logging before starting).
-  if (now - lastIMU >= IMU_INTERVAL_MS) {
+  if (now - lastIMU >= (unsigned long)config.imu_interval_ms) {
     g_loopSection = "imu";
     readIMU();
     if (logging) { g_loopSection = "imu.log"; logIMU(); }
