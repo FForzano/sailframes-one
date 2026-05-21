@@ -13,24 +13,21 @@
  *   - 100K/100K voltage divider on GPIO34 for battery monitoring
  *
  * Behavior:
- *   Power on → init sensors → configure LG290P for raw RTCM3 output
+ *   Power on → init sensors → configure LG290P (Rover mode, 10 Hz NMEA)
  *   → scan for Calypso wind sensor (BLE) → wait for GPS fix
- *   → auto-log to SD (NMEA CSV + IMU CSV + Wind CSV + RTCM3 binary)
+ *   → auto-log to SD (NMEA CSV + IMU CSV + Wind CSV + Pres CSV)
  *   → when yacht club Wi-Fi detected → auto-upload to AWS S3
  *   Power off → done
  *
- * PPK Workflow:
- *   1. Collect *_raw.rtcm3 from SD card
- *   2. Convert to RINEX using RTKCONV (input format: RTCM3)
- *   3. Download CORS RINEX from NOAA UFCORS for matching time window
- *   4. Process with RTKPOST → centimeter-level positions
+ * NOTE: PPK / raw-RTCM3 capture was retired in firmware 2026.05.20.09.
+ * See docs/RTCM_PPK_ARCHIVE.md for the previous architecture and
+ * git SHA 08cdadfe for the last firmware revision that wrote .rtcm3.
  *
  * Log files per session:
- *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_nav.csv
- *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_imu.csv
- *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_wind.csv
- *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_pres.csv
- *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_raw.rtcm3
+ *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_nav.csv  (10 Hz)
+ *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_imu.csv  (10 Hz)
+ *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_wind.csv (1 Hz when Calypso paired)
+ *   /sf/YYYYMMDD/E1_YYYYMMDD_HHMMSS_pres.csv (0.1 Hz, DPS310 only)
  *
  * License: Apache 2.0
  * Project: https://github.com/sailframes
@@ -101,7 +98,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.08"
+#define FW_VERSION    "2026.05.20.09"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -128,9 +125,9 @@
 // ArduinoOTA with a manifest-pull update that doesn't touch mDNS.
 #define ENABLE_ARDUINO_OTA  0
 
-// SSID where large RTCM3 PPK files are allowed to upload. On any other
-// network (e.g. iPhone hotspot) RTCM3 files are skipped — they're too big
-// to push over a mobile connection and don't need to be uploaded mid-event.
+// Home WiFi SSID. Boats prefer this network when in range. OTA pull
+// is gated to this SSID — see performOTAUpdate. (Previously also gated
+// the now-retired .rtcm3 PPK upload path.)
 #define HOME_WIFI_SSID "Home-IOT"
 
 #define GPS_BAUD      460800  // LG290P configured rate
@@ -279,16 +276,10 @@ struct PressureData {
   unsigned long lastRead = 0;
 } pressure;
 
-struct RTCM3Parser {
-  enum State { WAIT_SYNC, READ_HEADER, READ_PAYLOAD };
-  State state = WAIT_SYNC;
-  uint8_t header[3];
-  int headerIdx = 0;
-  uint16_t payloadLen = 0;
-  uint8_t frameBuf[1200];
-  int frameIdx = 0;
-  int frameTotal = 0;
-} rtcm;
+// RTCM3 byte parser + per-message-type counters were removed in
+// firmware 2026.05.20.09 alongside the rest of the PPK pipeline.
+// See docs/RTCM_PPK_ARCHIVE.md and git SHA 08cdadfe for the previous
+// implementation.
 
 // v2.0.0 foundation globals. Types live in v2_types.h (included at top
 // of file) so Arduino's auto-generated forward declarations can resolve
@@ -345,14 +336,13 @@ TFT_eSPI tft = TFT_eSPI();
 Adafruit_BNO08x bno08x;  // No hardware reset pin
 Adafruit_DPS310 dps;         // DPS310 pressure/temperature sensor
 sh2_SensorValue_t sensorValue;
-File navFile, imuFile, rawFile, windFile, presFile;
+File navFile, imuFile, windFile, presFile;
 bool sdOK = false, imuOK = false, oledOK = false, presOK = false, logging = false;
 volatile bool sdWriting = false;  // Flag to skip display updates during SD writes
 unsigned long lastDisplayUpdate = 0;
 const unsigned long DISPLAY_UPDATE_INTERVAL = 200;  // Only update display every 200ms
 bool uploading = false;
-int pendingUploads = 0;  // N: sessions with non-RTCM3 files still to upload
-int pendingRTCM = 0;     // R: sessions with RTCM3 (PPK) files still to upload
+int pendingUploads = 0;  // N: sessions with files still to upload
 bool wifiConnected = false;
 bool d2LayoutDrawn = false;  // Display layout flag - reset to redraw full screen
 bool otaInProgress = false;
@@ -415,25 +405,6 @@ bool windScanning = false;
 bool windOK = false;
 bool bleInitialized = false;  // Track BLE init state for safe deinit
 unsigned long totalBytes = 0;
-unsigned long rtcmFrameCount = 0;  // Count RTCM3 frames for debugging
-unsigned long rtcmSyncCount = 0;   // Count 0xD3 sync bytes seen (debug)
-
-// RTCM3 message type counters for PPK debugging
-unsigned long rtcm1006Count = 0;   // Reference station ARP
-unsigned long rtcm1019Count = 0;   // GPS ephemeris
-unsigned long rtcm1020Count = 0;   // GLONASS ephemeris
-unsigned long rtcm1042Count = 0;   // BeiDou ephemeris
-unsigned long rtcm1046Count = 0;   // Galileo ephemeris
-unsigned long rtcm1074Count = 0;   // GPS MSM4 (fallback if MSM7 not enabled)
-unsigned long rtcm1084Count = 0;   // GLONASS MSM4
-unsigned long rtcm1094Count = 0;   // Galileo MSM4
-unsigned long rtcm1124Count = 0;   // BeiDou MSM4
-unsigned long rtcm1077Count = 0;   // GPS MSM7 (needed for PPK!)
-unsigned long rtcm1087Count = 0;   // GLONASS MSM7 (needed for PPK!)
-unsigned long rtcm1097Count = 0;   // Galileo MSM7 (needed for PPK!)
-unsigned long rtcm1127Count = 0;   // BeiDou MSM7 (needed for PPK!)
-unsigned long rtcmOtherCount = 0;  // Other message types
-uint16_t rtcmLastType = 0;         // Last message type seen
 char nmeaBuf[256];
 int nmeaIdx = 0;
 
@@ -1265,35 +1236,9 @@ void setup() {
     Serial.println("[GPS]   - GPS power and antenna");
   }
 
-  // Send CFGRTCM command on every boot to enable MSM7 output
-  // This command IS accepted via UART (unlike CFGMSGRATE for MSM7)
-  // Format: $PQTMCFGRTCM,W,<mode>,<minElev>,<minCN0>,<outMask>,<inMask>,<base>,<ref>*checksum
-  // mode=7 (rover+base), outMask=07 (MSM7), inMask=06, base=1, ref=0
-  // paulout - Serial.println("[GPS] Sending CFGRTCM for MSM7 output...");
-  // paulout -   delay(500);  // Short delay before command
-  // paulout -   Serial2.println("$PQTMCFGRTCM,W,7,0,-90,07,06,1,0*26");
-  // paulout -   delay(500);  // Wait for response
-
-  // Check for response
-  String rtcmResp = "";
-  unsigned long respStart = millis();
-  while (millis() - respStart < 500) {
-    while (Serial2.available()) {
-      char c = Serial2.read();
-      if (c == '$' || rtcmResp.length() > 0) {
-        rtcmResp += c;
-        if (c == '\n') break;
-      }
-    }
-    if (rtcmResp.endsWith("\n")) break;
-    delay(1);
-  }
-  if (rtcmResp.length() > 0) {
-    rtcmResp.trim();
-    Serial.printf("[GPS] CFGRTCM response: %s\n", rtcmResp.c_str());
-  } else {
-    Serial.println("[GPS] CFGRTCM: No response (may still work)");
-  }
+  // RTCM3 raw-observation capture retired in .09 — the CFGRTCM probe
+  // here previously drained the response buffer; configureLG290P() below
+  // does its own command/response handling so no explicit probe is needed.
 
   delay(500);
   configureLG290P();
@@ -1395,21 +1340,23 @@ void setup() {
 // Do NOT save or restart after CFGRTCM.
 // ============================================================
 void configureLG290P() {
-  // Configures the Waveshare LG290P for the SailFrames recording profile.
+  // Configures the Waveshare LG290P for 10 Hz NMEA-only operation.
   //
-  // Mode trade-off (settled 2026-05-21 after .07 -> .08 revert):
-  //   * Base mode (W,2): MSM4/MSM7 RTCM3 observations emit, fix rate
-  //     locked at 1 Hz (LG290P&LGx80P Protocol Spec v1.1 §2.3.28).
-  //   * Rover mode (W,1): 10 Hz fix rate available, but PQTMCFGRTCM,W,7
-  //     does NOT actually emit MSM frames on AANR01A06S — empirically
-  //     confirmed across E2/E4 (22 min car ride, 1.5 KB .rtcm3, zero
-  //     MSM7 frames, only ephemeris). Spec says PQTMCFGRTCM is
-  //     mode-agnostic; the device disagrees.
-  // Net: stay in Base mode + 1 Hz GPS to preserve PPK. IMU stays at
-  // 10 Hz (independent of LG290P mode).
-  Serial.println("[GPS] Configuring LG290P for PPK (Base mode, 1 Hz, MSM7)...");
+  // PPK / RTCM3 raw-observation capture was removed in 2026.05.20.09 —
+  // see docs/RTCM_PPK_ARCHIVE.md for the previous architecture and
+  // git SHA 08cdadfe (firmware .08) for the last working PPK-era
+  // configureLG290P + parsers + upload path. The trade-off:
+  //   * 10 Hz nav fixes are critical for on-the-water OCS (over-line
+  //     detection at race start) and per-tack motion analysis.
+  //   * PPK gave decimeter accuracy *after* the race — useful but the
+  //     LG290P's "MSM in Base mode only" lock meant we couldn't have
+  //     both. OCS won.
+  // The LG290P drives NMEA at the fix rate, so 10 Hz fix = 10 Hz
+  // RMC/GGA/GSA/GSV. Rover mode is required to unlock the 10 Hz rate
+  // per LG290P&LGx80P Protocol Spec v1.1 §2.3.28.
+  Serial.println("[GPS] Configuring LG290P for Rover @ 10 Hz NMEA...");
 
-  // Step 1: Query firmware version
+  // Step 1: Query firmware version (for boot.log forensics)
   Serial.println("[GPS] Querying firmware version...");
   sendPQTM("PQTMVERNO");
 
@@ -1418,41 +1365,27 @@ void configureLG290P() {
   sendPQTM("PQTMCFGRCVRMODE,R");
   delay(300);
 
-  // Step 3: Set base station mode (mode 2). MSM RTCM3 observations only
-  // emit in this mode on AANR01A06S — Rover mode's PQTMCFGRTCM,W,7 was
-  // tested in .07 and silently produced ephemeris-only output (~1.5 KB
-  // .rtcm3 over 22 minutes of E2/E4 driving). Fix rate is locked at
-  // 1 Hz as a side effect.
-  Serial.println("[GPS] Setting base station mode for MSM output...");
-  sendPQTM("PQTMCFGRCVRMODE,W,2");
+  // Step 3: Set Rover mode (unlocks 10 Hz fix rate)
+  Serial.println("[GPS] Setting Rover mode...");
+  sendPQTM("PQTMCFGRCVRMODE,W,1");
   delay(200);
 
-  // Step 4: Enable RTCM3 protocol on UART2 and UART3 so the MSM/ephemeris
-  // bytes actually reach the ESP32. Mode-agnostic.
-  Serial.println("[GPS] Enabling RTCM3 protocol on UARTs...");
-  sendPQTM("PQTMCFGPROT,W,1,3,00000005,00000005");  // UART3
-  sendPQTM("PQTMCFGPROT,W,1,2,00000005,00000005");  // UART2
-
-  // Step 5: Re-enable NMEA messages — Base mode auto-disables them per
-  // §2.3.25. These are needed for the TFT display + nav CSV.
+  // Step 4: Enable NMEA messages. Rover mode keeps NMEA on by default
+  // but explicit rates ensure a previous base-mode session (which
+  // auto-disabled NMEA) re-enables cleanly.
   Serial.println("[GPS] Enabling NMEA messages...");
   sendPQTM("PQTMCFGMSGRATE,W,GGA,1");
   sendPQTM("PQTMCFGMSGRATE,W,RMC,1");
   sendPQTM("PQTMCFGMSGRATE,W,GSA,1");
   sendPQTM("PQTMCFGMSGRATE,W,GSV,1");
 
-  // Step 6: Enable ephemeris messages. Base mode suppresses these by
-  // default but explicit per-message rates restore them. PPK lambda
-  // also pulls IGS broadcast nav as a redundancy.
-  Serial.println("[GPS] Enabling ephemeris messages...");
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1019,1");  // GPS
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1020,1");  // GLONASS
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1042,1");  // BeiDou
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1046,1");  // Galileo
+  // Step 5: Set fix rate to 100 ms (10 Hz). BEFORE save+restart so the
+  // new rate is in NVM and applied by the same-boot restart.
+  Serial.println("[GPS] Setting fix rate to 10 Hz (100 ms)...");
+  sendPQTM("PQTMCFGFIXRATE,W,100");
+  delay(200);
 
-  // Step 7: Save NVM + restart to apply base mode. No fix-rate command
-  // here — Base mode is fix-rate-locked to 1 Hz per §2.3.28 and
-  // PQTMCFGFIXRATE returns ERROR,1 in this mode anyway.
+  // Step 6: Save NVM + restart to apply mode + rate together
   Serial.println("[GPS] Saving to NVM...");
   sendPQTM("PQTMSAVEPAR");
   delay(500);
@@ -1464,115 +1397,23 @@ void configureLG290P() {
   // Drain any buffered data after restart
   while (Serial2.available()) Serial2.read();
 
-  // Step 8: Send CFGRTCM for MSM7 output. RAM-only — must re-send every
-  // boot. Same payload as pre-.07 firmware. In Base mode this command
-  // actually produces MSM7 frames (1077/1087/1097/1127), unlike Rover.
-  Serial.println("[GPS] Enabling MSM7 output (RAM only)...");
-  sendPQTM("PQTMCFGRTCM,W,7,0,-90,07,06,1,0");
-  delay(200);
-
-  // Step 9: Re-send ephemeris rates AFTER restart.
-  Serial.println("[GPS] Enabling ephemeris messages (post-restart)...");
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1019,1");
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1020,1");
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1042,1");
-  sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1046,1");
-  delay(200);
-
-  // Step 10: Verify — read back active configuration. Expect RCVRMODE=2
-  // (base), FIXRATE=1000 ms, and per-message rates all "1".
+  // Step 7: Verify — read back active configuration
   Serial.println("[GPS] Verifying configuration...");
   sendPQTM("PQTMCFGRCVRMODE,R");
   sendPQTM("PQTMCFGFIXRATE,R");
-  sendPQTM("PQTMCFGRTCM,R");
-  sendPQTM("PQTMCFGMSGRATE,R,RTCM3-1019");
-  sendPQTM("PQTMCFGMSGRATE,R,RTCM3-1020");
-  sendPQTM("PQTMCFGMSGRATE,R,RTCM3-1042");
-  sendPQTM("PQTMCFGMSGRATE,R,RTCM3-1046");
 
   Serial.println("[GPS] Configuration complete:");
-  Serial.println("[GPS]   Mode: Base station (for MSM output)");
-  Serial.println("[GPS]   NMEA: GGA, RMC, GSA, GSV @ 1 Hz (Base mode rate lock)");
-  Serial.println("[GPS]   RTCM3: MSM7 (1077/1087/1097/1127) @ 1 Hz");
-  Serial.println("[GPS]   Ephemeris: 1019/1020/1042/1046 explicit rates");
+  Serial.println("[GPS]   Mode: Rover @ 10 Hz");
+  Serial.println("[GPS]   NMEA: GGA, RMC, GSA, GSV @ 10 Hz");
+  Serial.println("[GPS]   RTCM3: disabled (PPK retired — see docs/RTCM_PPK_ARCHIVE.md)");
 }
 
 // ============================================================
-// READ GPS — NMEA text + RTCM3 binary
+// READ GPS — NMEA text only (RTCM3 capture retired in .09)
 // ============================================================
 void readGPS() {
   while (Serial2.available()) {
     uint8_t c = Serial2.read();
-
-    // RTCM3 sync - count all 0xD3 bytes for debugging
-    if (c == 0xD3) {
-      rtcmSyncCount++;
-      if (rtcm.state == RTCM3Parser::WAIT_SYNC) {
-        rtcm.state = RTCM3Parser::READ_HEADER;
-        rtcm.header[0] = c;
-        rtcm.headerIdx = 1;
-        continue;
-      }
-    }
-
-    if (rtcm.state == RTCM3Parser::READ_HEADER) {
-      rtcm.header[rtcm.headerIdx++] = c;
-      if (rtcm.headerIdx >= 3) {
-        rtcm.payloadLen = ((rtcm.header[1] & 0x03) << 8) | rtcm.header[2];
-        if (rtcm.payloadLen > 1023) {
-          rtcm.state = RTCM3Parser::WAIT_SYNC;
-          if (c == '$') { nmeaBuf[0] = '$'; nmeaIdx = 1; }
-          continue;
-        }
-        rtcm.frameTotal = 3 + rtcm.payloadLen + 3;
-        memcpy(rtcm.frameBuf, rtcm.header, 3);
-        rtcm.frameIdx = 3;
-        rtcm.state = RTCM3Parser::READ_PAYLOAD;
-      }
-      continue;
-    }
-
-    if (rtcm.state == RTCM3Parser::READ_PAYLOAD) {
-      if (rtcm.frameIdx < (int)sizeof(rtcm.frameBuf))
-        rtcm.frameBuf[rtcm.frameIdx++] = c;
-      if (rtcm.frameIdx >= rtcm.frameTotal) {
-        if (rawFile && logging) {
-          sdWriting = true;
-          rawFile.write(rtcm.frameBuf, rtcm.frameTotal);
-          sdWriting = false;
-        }
-        totalBytes += rtcm.frameTotal;
-        rtcmFrameCount++;
-
-        // Decode RTCM3 message type from first 12 bits of payload (bytes 3-4)
-        // Message type = (byte3 << 4) | (byte4 >> 4)
-        uint16_t msgType = ((uint16_t)rtcm.frameBuf[3] << 4) | (rtcm.frameBuf[4] >> 4);
-        rtcmLastType = msgType;
-
-        // Count by message type and print to Serial for debugging
-        switch (msgType) {
-          case 1006: rtcm1006Count++; break;
-          case 1019: rtcm1019Count++; break;
-          case 1020: rtcm1020Count++; break;
-          case 1042: rtcm1042Count++; break;
-          case 1046: rtcm1046Count++; break;
-          case 1074: rtcm1074Count++; break;  // GPS MSM4
-          case 1084: rtcm1084Count++; break;  // GLONASS MSM4
-          case 1094: rtcm1094Count++; break;  // Galileo MSM4
-          case 1124: rtcm1124Count++; break;  // BeiDou MSM4
-          case 1077: rtcm1077Count++; break;  // GPS MSM7
-          case 1087: rtcm1087Count++; break;  // GLONASS MSM7
-          case 1097: rtcm1097Count++; break;  // Galileo MSM7
-          case 1127: rtcm1127Count++; break;  // BeiDou MSM7
-          default: rtcmOtherCount++; break;
-        }
-
-        rtcm.state = RTCM3Parser::WAIT_SYNC;
-      }
-      continue;
-    }
-
-    // NMEA parsing
     if (c == '$') {
       nmeaIdx = 0;
       nmeaBuf[nmeaIdx++] = c;
@@ -1781,7 +1622,6 @@ void handleLowBattery() {
   if (logging) {
     if (navFile) { navFile.flush(); navFile.close(); }
     if (imuFile) { imuFile.flush(); imuFile.close(); }
-    if (rawFile) { rawFile.flush(); rawFile.close(); }
     if (windFile) { windFile.flush(); windFile.close(); }
     if (presFile) { presFile.flush(); presFile.close(); }
     logging = false;
@@ -2140,7 +1980,6 @@ void setupOTA() {
     if (logging) {
       navFile.close();
       if (imuFile) imuFile.close();
-      rawFile.close();
       logging = false;
     }
   });
@@ -2346,11 +2185,10 @@ void startLogging() {
     Serial.printf("[LOG] %s mkdir failed (may already exist)\n", dd);
   }
 
-  // Build file paths
-  char np[64], ip[64], rp[64], wp[64], pp[64];
+  // Build file paths (RTCM3 raw capture retired in .09 — see archive doc)
+  char np[64], ip[64], wp[64], pp[64];
   snprintf(np, sizeof(np), "%s/%s_%s_%s_nav.csv", dd, config.boat_id, ds, ts);
   snprintf(ip, sizeof(ip), "%s/%s_%s_%s_imu.csv", dd, config.boat_id, ds, ts);
-  snprintf(rp, sizeof(rp), "%s/%s_%s_%s_raw.rtcm3", dd, config.boat_id, ds, ts);
   snprintf(wp, sizeof(wp), "%s/%s_%s_%s_wind.csv", dd, config.boat_id, ds, ts);
   snprintf(pp, sizeof(pp), "%s/%s_%s_%s_pres.csv", dd, config.boat_id, ds, ts);
 
@@ -2361,10 +2199,6 @@ void startLogging() {
   Serial.printf("[LOG] Opening IMU: %s\n", ip);
   imuFile = SD.open(ip, FILE_WRITE);
   Serial.printf("[LOG] IMU file %s\n", imuFile ? "OK" : "FAILED");
-
-  Serial.printf("[LOG] Opening RAW: %s\n", rp);
-  rawFile = SD.open(rp, FILE_WRITE);
-  Serial.printf("[LOG] RAW file %s\n", rawFile ? "OK" : "FAILED");
 
 #if ENABLE_WIND
   if (config.wind_enabled) {
@@ -2408,8 +2242,6 @@ void startLogging() {
     if (config.wind_enabled) Serial.printf("[LOG] WIND: %s\n", wp);
 #endif
     if (presOK) Serial.printf("[LOG] PRES: %s\n", pp);
-    Serial.printf("[LOG] RAW: %s\n", rp);
-    Serial.println("[LOG] RTCM3 MSM7 raw data -> PPK via RTKLIB");
     Serial.println("[LOG] ========================================");
   } else {
     Serial.println("[LOG] ERROR: Failed to open NAV file!");
@@ -2772,7 +2604,7 @@ void updateDisplayD2() {
   static bool prevWifiConnected = false;
   static unsigned long lastStatusUpdate = 0;
 
-  static int prevPendingN = -1, prevPendingR = -1;
+  static int prevPendingN = -1;
   bool statusChanged = (wind.connected != prevWindConnected) ||
                        (wifiConnected != prevWifiConnected) ||
                        (abs(imu.heel - prevHeel) > 0.5) ||
@@ -2781,7 +2613,6 @@ void updateDisplayD2() {
                        (abs(awa - prevAWA2) > 1) ||
                        (battery.percent != prevBattery) ||
                        (pendingUploads != prevPendingN) ||
-                       (pendingRTCM != prevPendingR) ||
                        (millis() - lastStatusUpdate > 2000);
 
   if (statusChanged) {
@@ -2794,7 +2625,6 @@ void updateDisplayD2() {
     prevAWA2 = awa;
     prevBattery = battery.percent;
     prevPendingN = pendingUploads;
-    prevPendingR = pendingRTCM;
 
     // BOTTOM BAR: Two rows - WHITE on BLACK
     // Clear entire bottom bar first (50px tall)
@@ -2838,17 +2668,8 @@ void updateDisplayD2() {
 
     if (uploading && uploadTotal > 0) {
       snprintf(right, sizeof(right), "%s %d/%d", wifiInd, uploadCount, uploadTotal);
-    } else if (pendingUploads > 0 || pendingRTCM > 0) {
-      // N = sessions with non-RTCM3 files pending, R = sessions with RTCM3 pending
-      char counts[16];
-      if (pendingUploads > 0 && pendingRTCM > 0) {
-        snprintf(counts, sizeof(counts), "N%d R%d", pendingUploads, pendingRTCM);
-      } else if (pendingUploads > 0) {
-        snprintf(counts, sizeof(counts), "N%d", pendingUploads);
-      } else {
-        snprintf(counts, sizeof(counts), "R%d", pendingRTCM);
-      }
-      snprintf(right, sizeof(right), "%s %s", wifiInd, counts);
+    } else if (pendingUploads > 0) {
+      snprintf(right, sizeof(right), "%s N%d", wifiInd, pendingUploads);
     } else if (wifiConnected) {
       snprintf(right, sizeof(right), "%s %s", wifiInd, WiFi.localIP().toString().c_str());
     } else {
@@ -3090,15 +2911,8 @@ void updateDisplayD3() {
     const char* wifiInd = wifiConnected ? getWifiIndicator() : "";
     if (uploading && uploadTotal > 0) {
       snprintf(right, sizeof(right), "%d/%d %s", uploadCount, uploadTotal, wifiInd);
-    } else if (pendingUploads > 0 || pendingRTCM > 0) {
-      // N = sessions with non-RTCM3 pending, R = sessions with RTCM3 pending
-      if (pendingUploads > 0 && pendingRTCM > 0) {
-        snprintf(right, sizeof(right), "N%d R%d %s", pendingUploads, pendingRTCM, wifiInd);
-      } else if (pendingUploads > 0) {
-        snprintf(right, sizeof(right), "N%d %s", pendingUploads, wifiInd);
-      } else {
-        snprintf(right, sizeof(right), "R%d %s", pendingRTCM, wifiInd);
-      }
+    } else if (pendingUploads > 0) {
+      snprintf(right, sizeof(right), "N%d %s", pendingUploads, wifiInd);
     } else if (wifiConnected) {
       snprintf(right, sizeof(right), "%s %s", wifiInd, WiFi.localIP().toString().c_str());
     } else {
@@ -4334,15 +4148,7 @@ void processCommand(String cmd, bool fromTelnet) {
     tprintf("Battery: %.2fV (%d%%)%s\n", battery.voltage, battery.percent,
       battery.critical ? " CRITICAL!" : "");
     tprintf("Logging: %s\n", logging ? "YES" : "NO");
-    tprintf("Data: %lu KB, RTCM: %lu frames (0xD3: %lu)\n", totalBytes / 1024, rtcmFrameCount, rtcmSyncCount);
-    tprintf("RTCM3 MSM7: 1077=%lu 1087=%lu 1097=%lu 1127=%lu\n",
-      rtcm1077Count, rtcm1087Count, rtcm1097Count, rtcm1127Count);
-    tprintf("RTCM3 MSM4: 1074=%lu 1084=%lu 1094=%lu 1124=%lu\n",
-      rtcm1074Count, rtcm1084Count, rtcm1094Count, rtcm1124Count);
-    tprintf("RTCM3 Eph:  1019=%lu 1020=%lu 1042=%lu 1046=%lu\n",
-      rtcm1019Count, rtcm1020Count, rtcm1042Count, rtcm1046Count);
-    tprintf("RTCM3 Ref:  1006=%lu, Other=%lu, Last=%u\n",
-      rtcm1006Count, rtcmOtherCount, rtcmLastType);
+    tprintf("Data logged: %lu KB\n", totalBytes / 1024);
     tprintf("WiFi: %s\n", wifiConnected ? connectedSSID : "disconnected");
     if (wifiConnected) {
       tprintf("IP: %s\n", WiFi.localIP().toString().c_str());
@@ -4895,7 +4701,6 @@ void processCommand(String cmd, bool fromTelnet) {
       if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(1000))) {
         navFile.flush(); navFile.close();
         imuFile.flush(); imuFile.close();
-        rawFile.flush(); rawFile.close();
         if (windFile) { windFile.flush(); windFile.close(); }
         if (presFile) { presFile.flush(); presFile.close(); }
         xSemaphoreGive(sdMutex);
@@ -4914,63 +4719,6 @@ void processCommand(String cmd, bool fromTelnet) {
     tprintf("Speed: %.1f kt\n", gps.speed_kts);
     tprintf("Start threshold: >%.1f kt for %d sec\n", config.start_speed_knots, config.start_delay_sec);
     tprintf("Stop threshold: <%.1f kt for %d sec\n", config.stop_speed_knots, config.stop_delay_sec);
-
-  } else if (cmd == "rtcm") {
-    // Detailed RTCM3 debug info for PPK troubleshooting
-    tprintln("=== RTCM3 Debug ===");
-    tprintf("Total frames: %lu (0xD3 syncs: %lu)\n", rtcmFrameCount, rtcmSyncCount);
-    tprintln("");
-    tprintln("MSM7 Observations (REQUIRED for PPK):");
-    tprintf("  1077 GPS:     %lu\n", rtcm1077Count);
-    tprintf("  1087 GLONASS: %lu\n", rtcm1087Count);
-    tprintf("  1097 Galileo: %lu\n", rtcm1097Count);
-    tprintf("  1127 BeiDou:  %lu\n", rtcm1127Count);
-    tprintln("");
-    tprintln("MSM4 Observations (fallback, less precise):");
-    tprintf("  1074 GPS:     %lu\n", rtcm1074Count);
-    tprintf("  1084 GLONASS: %lu\n", rtcm1084Count);
-    tprintf("  1094 Galileo: %lu\n", rtcm1094Count);
-    tprintf("  1124 BeiDou:  %lu\n", rtcm1124Count);
-    tprintln("");
-    tprintln("Ephemeris:");
-    tprintf("  1019 GPS:     %lu\n", rtcm1019Count);
-    tprintf("  1020 GLONASS: %lu\n", rtcm1020Count);
-    tprintf("  1042 BeiDou:  %lu\n", rtcm1042Count);
-    tprintf("  1046 Galileo: %lu\n", rtcm1046Count);
-    tprintln("");
-    tprintf("Reference station (1006): %lu\n", rtcm1006Count);
-    tprintf("Other messages: %lu\n", rtcmOtherCount);
-    tprintf("Last message type: %u\n", rtcmLastType);
-    tprintln("");
-    if (rtcm1077Count == 0 && rtcm1087Count == 0 && rtcm1097Count == 0 && rtcm1127Count == 0) {
-      tprintln("WARNING: No MSM7 messages received!");
-      tprintln("PPK post-processing will FAIL.");
-      tprintln("Run 'gpscfg' to reconfigure LG290P.");
-    } else {
-      tprintln("MSM7 data is being received - PPK should work.");
-    }
-    tprintln("==================");
-
-  } else if (cmd == "rtcmreset") {
-    // Reset RTCM3 counters for fresh debugging
-    rtcmFrameCount = 0;
-    rtcmSyncCount = 0;
-    rtcm1006Count = 0;
-    rtcm1019Count = 0;
-    rtcm1020Count = 0;
-    rtcm1042Count = 0;
-    rtcm1046Count = 0;
-    rtcm1074Count = 0;
-    rtcm1084Count = 0;
-    rtcm1094Count = 0;
-    rtcm1124Count = 0;
-    rtcm1077Count = 0;
-    rtcm1087Count = 0;
-    rtcm1097Count = 0;
-    rtcm1127Count = 0;
-    rtcmOtherCount = 0;
-    rtcmLastType = 0;
-    tprintln("RTCM3 counters reset");
 
   // v2.0.0 foundation commands (SF_FIRMWARE_V2_SPEC.md Stage 1)
   } else if (cmd == "hwid") {
@@ -4998,8 +4746,6 @@ void processCommand(String cmd, bool fromTelnet) {
     tprintln("  gps        - Detailed GPS info");
     tprintln("  gpsraw     - Show raw GPS serial data");
     tprintln("  gpscfg     - Reconfigure GPS module");
-    tprintln("  rtcm       - RTCM3 debug (PPK status)");
-    tprintln("  rtcmreset  - Reset RTCM3 counters");
     tprintln("  imu        - Detailed IMU info");
     tprintln("  imutest    - Test IMU axes (5 sec)");
     tprintln("  cal        - Calibrate IMU (set level)");
@@ -5120,7 +4866,6 @@ void updateRecordingState() {
       if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(1000))) {
         navFile.flush(); navFile.close();
         imuFile.flush(); imuFile.close();
-        rawFile.flush(); rawFile.close();
         if (windFile) { windFile.flush(); windFile.close(); }
         if (presFile) { presFile.flush(); presFile.close(); }
         xSemaphoreGive(sdMutex);
@@ -5158,30 +4903,26 @@ void countPendingUploads() {
     return;  // SD busy, try again later
   }
 
-  int navCount = 0;   // N: sessions with non-RTCM3 files still pending
-  int rtcmCount = 0;  // R: sessions with RTCM3 files still pending
+  int navCount = 0;   // N: sessions with files still pending
   File root = SD.open("/sf");
   if (!root) {
     xSemaphoreGive(sdMutex);
     pendingUploads = 0;
-    pendingRTCM = 0;
     return;
   }
 
-  // Walk each session, classifying unuploaded files into nav vs RTCM3.
-  // A session can contribute to N, R, both, or neither.
+  // Walk each session, classifying unuploaded files. Stops at the first
+  // pending file per session (the per-file flag flips and we move on).
   File session = root.openNextFile();
   while (session) {
     yield();  // Prevent watchdog timeout
     if (session.isDirectory()) {
       String sessName = session.name();
       if (!sessName.startsWith(".")) {
-        bool hasNavPending = false;
-        bool hasRtcmPending = false;
+        bool hasPending = false;
         File f = session.openNextFile();
         while (f) {
-          // Short-circuit once we know both
-          if (hasNavPending && hasRtcmPending) {
+          if (hasPending) {
             f.close();
             f = session.openNextFile();
             continue;
@@ -5190,18 +4931,13 @@ void countPendingUploads() {
           if (!fname.endsWith(".uploaded") && !fname.startsWith(".")) {
             String markerPath = String("/sf/") + sessName + "/" + fname + ".uploaded";
             if (!SD.exists(markerPath.c_str())) {
-              if (fname.endsWith(".rtcm3")) {
-                hasRtcmPending = true;
-              } else {
-                hasNavPending = true;
-              }
+              hasPending = true;
             }
           }
           f.close();
           f = session.openNextFile();
         }
-        if (hasNavPending) navCount++;
-        if (hasRtcmPending) rtcmCount++;
+        if (hasPending) navCount++;
       }
     }
     session.close();
@@ -5210,7 +4946,6 @@ void countPendingUploads() {
   root.close();
   xSemaphoreGive(sdMutex);
   pendingUploads = navCount;
-  pendingRTCM = rtcmCount;
 }
 
 // ============================================================
@@ -5316,7 +5051,7 @@ void uploadTaskFunc(void* param) {
 
   // Count pending uploads immediately on boot (don't wait 30 seconds)
   countPendingUploads();
-  Serial.printf("[UPLOAD] Initial pending: N=%d R=%d\n", pendingUploads, pendingRTCM);
+  Serial.printf("[UPLOAD] Initial pending: N=%d\n", pendingUploads);
 
   while (true) {
     esp_task_wdt_reset();
@@ -5336,9 +5071,9 @@ void uploadTaskFunc(void* param) {
 
       // Force recount now that logging stopped (count was skipped during recording)
       countPendingUploads();
-      Serial.printf("[UPLOAD] Recording stopped: N=%d R=%d pending\n", pendingUploads, pendingRTCM);
+      Serial.printf("[UPLOAD] Recording stopped: N=%d pending\n", pendingUploads);
 
-      if (pendingUploads == 0 && pendingRTCM == 0) {
+      if (pendingUploads == 0) {
         Serial.println("[UPLOAD] Nothing to upload");
       } else if (uploadRetryCount >= MAX_UPLOAD_RETRIES && now - lastUploadAttempt < UPLOAD_RETRY_DELAY_MS) {
         Serial.println("[UPLOAD] Recording stopped but WiFi backing off — will retry later");
@@ -5362,7 +5097,7 @@ void uploadTaskFunc(void* param) {
       // (g_otaCheckedThisBoot, enforced inside performOTAUpdate); the
       // stationary + interval gates avoid waking the radio while the
       // boat is on the water about to record.
-      else if (pendingUploads == 0 && pendingRTCM == 0) {
+      else if (pendingUploads == 0) {
         if (!g_otaCheckedThisBoot) {
           // Track stationary time the same way the upload branch does.
           if (gps.valid && gps.speed_kts >= 0.5) {
@@ -5414,8 +5149,8 @@ void uploadTaskFunc(void* param) {
               }
             } else {
               shouldUpload = true;
-              Serial.printf("[UPLOAD] Triggered: periodic check (N=%d R=%d)\n",
-                            pendingUploads, pendingRTCM);
+              Serial.printf("[UPLOAD] Triggered: periodic check (N=%d)\n",
+                            pendingUploads);
             }
           }
         }
@@ -5701,7 +5436,6 @@ void loop() {
   if (logging && now - lastFlush >= FLUSH_INTERVAL_MS) {
     navFile.flush();
     if (imuFile) imuFile.flush();
-    rawFile.flush();
 #if ENABLE_WIND
     if (windFile) windFile.flush();
 #endif

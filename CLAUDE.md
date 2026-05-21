@@ -24,10 +24,12 @@ the web race dashboard.
 The fleet captures GPS + IMU + (some) wind during races, uploads to S3
 post-sail, and provides a web dashboard for race replay and analytics.
 
-**Strategic differentiator:** SailFrames is the first sailing analytics
-platform using PPK (Post-Processed Kinematic) GNSS — leveraging free NOAA
-CORS base station data via RTKLIB for sub-meter accuracy with no base
-station hardware.
+**Strategic focus:** SailFrames is a 10 Hz high-precision GNSS + IMU
+motion-analytics platform for sailing. Per-tack motion, real-time OCS
+(over-the-line detection at race start), and detailed playback drive
+the product. Raw-RTCM3 PPK was tested through firmware
+`2026.05.20.08` and retired in `.09` — see `docs/RTCM_PPK_ARCHIVE.md`
+for the previous architecture if we revisit it.
 
 ---
 
@@ -73,10 +75,10 @@ sailframes/core/
 | Component | Part | Interface | Notes |
 |---|---|---|---|
 | MCU | ELEGOO ESP32 DevKit V1 (CP2102) | USB-C | Dual-core 240 MHz, Wi-Fi + BLE |
-| GPS | Waveshare LG290P GNSS module | UART2 (GPIO16/17) | Quad-band, PPK-capable, ~$109 with antenna |
+| GPS | Waveshare LG290P GNSS module | UART2 (GPIO16/17) | Quad-band, 10 Hz NMEA (Rover mode), ~$109 with antenna |
 | IMU | GY-BNO08X (BNO085) | I2C (GPIO21/22) @ 0x4A | Heel/pitch, GAME_ROTATION_VECTOR mode |
 | Display | Hosyond 3.5" IPS TFT (ST7796U) | SPI VSPI (480×320) | Sunlight-readable, white background |
-| Storage | microSD module | SPI HSPI (separate bus) | CSV + raw RTCM3 binary for PPK |
+| Storage | microSD module | SPI HSPI (separate bus) | CSV per-sensor (nav/imu/wind/pres) |
 | Power | DWEII USB-C 5V 2A boost charger | 5V → ESP32 VIN | LiPo charging + protection + boost |
 | Battery | 906090 3.7V 6000 mAh LiPo | JST PH 2.0 mm | ~10+ hours runtime |
 | Enclosure | YETLEBOX IP67 ABS clear lid | — | Daily install/remove |
@@ -147,11 +149,13 @@ Freerouting + manual cleanup.
 
 ## E1 Firmware (`edge-e/firmware/sailframes_e1/sailframes_e1.ino`)
 
-- NMEA parsing (GGA/RMC/GSA/GSV) from LG290P
-- Raw RTCM3 binary capture for PPK post-processing
-- BNO085 reads at 1 Hz (was 20 Hz, reduced — sailing doesn't need 20 Hz)
+- NMEA parsing (GGA/RMC/GSA/GSV) from LG290P at **10 Hz** (Rover mode)
+- BNO085 reports at **10 Hz** (was 1 Hz pre-`.05`; baked into firmware
+  since `.05`. 10 Hz IMU + 10 Hz GNSS pair for accurate OCS and tack
+  analysis)
 - DPS310 pressure at 0.1 Hz (weather trends; not gust detection)
-- SD logging: CSV (human-readable) + raw `.rtcm3` binary
+- SD logging: CSV per sensor (human-readable). RTCM3 raw capture
+  retired in `.09` — see `docs/RTCM_PPK_ARCHIVE.md`
 - TFT: speed/COG huge, status bar, Vakaros-style white background
 - Battery monitoring (GPIO34 ADC + voltage divider)
 - Wi-Fi auto-upload to S3 over plain HTTP on yacht-club / Home-IOT detection
@@ -184,10 +188,9 @@ use `huge_app` — it disables OTA.
 Row 1 (y=440, font 2): heel + pitch + AWS + AWA when wind connected;
 heel + pitch alone when no wind sensor. Single row.
 
-Row 2 (y=458): left = `BAT N% [W]`, right = WiFi indicator + upload counts.
-Counts split into:
-- `N` = sessions with non-RTCM3 files still pending
-- `R` = sessions with RTCM3 files still pending
+Row 2 (y=458): left = `BAT N% [W] FW<YY.MM.DD.N>`, right = WiFi
+indicator + IP (when idle) or upload counter (`N<count>` sessions
+with files pending, or `<n>/<total>` during active upload).
 
 ### Serial / telnet commands
 
@@ -198,7 +201,7 @@ Counts split into:
 | `upload` | Trigger Wi-Fi upload |
 | `clearmarkers` | Delete `.uploaded` markers (retry uploads) |
 | `cleanup` | Delete already-uploaded files |
-| `status` | GPS/IMU/SD/WiFi/RTCM frame count |
+| `status` | GPS/IMU/SD/WiFi/battery snapshot |
 | `gps` / `gpsraw` / `gpscfg` | GPS debug |
 | `config` | Show config |
 | `telneton` / `telnetoff` | Enable/disable runtime telnet listener |
@@ -212,11 +215,10 @@ deadlocked Core 1 inside LWIP under upload contention (firmware
 ```
 /sf/
 ├── 20260405_225030/                # Session folder (GPS datetime)
-│   ├── E1_20260405_225030_nav.csv  # NMEA parsed
-│   ├── E1_20260405_225030_imu.csv
-│   ├── E1_20260405_225030_raw.rtcm3
-│   ├── E1_20260405_225030_wind.csv
-│   └── E1_20260405_225030_pres.csv
+│   ├── E1_20260405_225030_nav.csv  # NMEA parsed @ 10 Hz
+│   ├── E1_20260405_225030_imu.csv  # BNO085 @ 10 Hz
+│   ├── E1_20260405_225030_wind.csv # Calypso @ 1 Hz
+│   └── E1_20260405_225030_pres.csv # DPS310 @ 0.1 Hz
 ├── boot.log                         # Reset reason / heap per boot
 ├── config.txt
 └── wind_mac.txt                     # Calypso MAC; presence = wind enabled
@@ -326,53 +328,44 @@ heap corruption.
 
 ## GNSS Strategy
 
-| Tier | Receiver | Use | Cost | Accuracy |
+| Tier | Receiver | Use | Cost | Mode |
 |---|---|---|---|---|
-| Fleet (E1 ×6) | Quectel LG290P (Waveshare) | All 6 boats | ~$109 | Sub-meter (PPK) |
+| Fleet (E1 ×6) | Quectel LG290P (Waveshare) | All 6 boats | ~$109 | Rover, 10 Hz NMEA |
 
-LG290P logs raw RTCM3 observations during racing. Post-race we download
-NOAA CORS base data (`geodesy.noaa.gov/UFCORS`, free, ~1 hr after
-recording) and process in RTKLIB.
+LG290P operates in Rover mode (`PQTMCFGRCVRMODE,W,1`) with a 100 ms
+fix interval (`PQTMCFGFIXRATE,W,100`) — 10 Hz NMEA RMC/GGA/GSA/GSV
+emitted on every fix. Drives the 10 Hz nav.csv used for OCS, tack
+detection, and per-second motion analysis.
+
+PPK was tested through firmware `.08` and retired in `.09` — see
+`docs/RTCM_PPK_ARCHIVE.md` for the previous architecture and revival
+path. Short story: base station mode locked fix rate at 1 Hz, and on
+LG290P firmware AANR01A06S `PQTMCFGRTCM` silently does not emit MSM
+in Rover mode despite the spec describing it as mode-agnostic. 10 Hz
+NMEA won the trade-off.
 
 ### LG290P configuration
 
-The Waveshare LG290P uses Quectel's PQTM commands. Best configured via
-**QGNSS on Windows** — PyGPSClient on macOS has limited support.
+The Waveshare LG290P uses Quectel's PQTM commands. Configured at every
+boot by the firmware — see `configureLG290P()`. No QGNSS preconfig
+required.
 
 USB-C: PC config (CH343 USB-serial). UART SH1.0: ESP32 connection at
 460800 baud. RST button: single press reboots; no factory reset.
 
-RTCM3 PPK config (saved to NVM):
+Boot-time commands the firmware sends:
 ```
-$PQTMCFGRTCM,W,7,0,-90,07,06,1,0*       # MSM7 for all constellations
-$PQTMCFGMSGRATE,W,RTCM3-1019,1*         # GPS ephemeris
-$PQTMCFGMSGRATE,W,RTCM3-1020,1*         # GLONASS ephemeris
-$PQTMCFGMSGRATE,W,RTCM3-1042,1*         # BeiDou ephemeris
-$PQTMCFGMSGRATE,W,RTCM3-1046,1*         # Galileo ephemeris
-$PQTMCFGMSGRATE,W,RTCM3-1006,10*        # Station ref every 10 epochs
-$PQTMCFGCNST,W,1,1,1,1,1,1*             # Enable all constellations
-$PQTMSAVEPAR*
-$PQTMHOT*
+PQTMCFGRCVRMODE,W,1    # Rover mode — unlocks 10 Hz fix rate
+PQTMCFGMSGRATE,W,GGA,1 # NMEA per fix
+PQTMCFGMSGRATE,W,RMC,1
+PQTMCFGMSGRATE,W,GSA,1
+PQTMCFGMSGRATE,W,GSV,1
+PQTMCFGFIXRATE,W,100   # 100 ms = 10 Hz
+PQTMSAVEPAR + PQTMSRR  # persist to NVM + restart
 ```
 
 **PQTMCFGMSGRATE syntax:** firmware AANR01A06S uses TWO parameters
 (message, rate). Three-parameter form returns `ERROR,1`.
-
-**E1 firmware sends RTCM3 config at every boot** (not relying on QGNSS
-pre-config), so devices replaced from spare stock work without manual
-configuration.
-
-RTCM3 messages output:
-- 1077 / 1087 / 1097 / 1127 — GPS / GLO / GAL / BDS MSM7 (every epoch)
-- 1019 / 1020 / 1042 / 1046 — ephemerides (~30 s)
-- 1006 — station reference (every 10 epochs)
-
-### PPK post-processing
-
-1. Race produces `*.rtcm3` files on SD
-2. Download CORS base data from NOAA UFCORS for that day
-3. RTKLIB (RTKPOST): rover .rtcm3 + base obs + nav → fixed solution
-4. No base station hardware needed — uses free NOAA infrastructure
 
 ### Dashboard GPS display
 
@@ -475,8 +468,8 @@ HTML/JS-only changes.)
 
 [AWS pipeline]
   S3 ObjectCreated → Lambda (process_upload) → processed JSON
-  CORS download Lambda → GPS rinex/nav → PPK-ready bundle
   NOAA buoy fetch Lambda → /api/buoys/data
+  (PPK lambda retired with firmware .09 — see docs/RTCM_PPK_ARCHIVE.md)
 
 [Web]
   Browser → CloudFront → S3-static (race.html, JS, CSS)
