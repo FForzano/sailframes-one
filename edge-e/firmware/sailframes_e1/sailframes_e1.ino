@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.06.20.01"
+#define FW_VERSION    "2026.05.20.01"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // IMU + GPS fix-rate changes from SF_FIRMWARE_V2_SPEC.md are mechanism-only
 // in this stage — defaults preserve pre-2.0 behavior. Per-boat opt-in via
