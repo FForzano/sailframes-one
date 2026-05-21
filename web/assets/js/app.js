@@ -76,28 +76,13 @@ async function init() {
         btnSaveMeta.addEventListener('click', saveSessionMeta);
     }
 
-    // Setup track layer toggles
+    // Setup track layer toggle (single button; PPK + decimated-10Hz buttons
+    // retired with firmware .09 — nav.csv is natively 10 Hz now)
     const gpsToggle = document.getElementById('toggle-gps-track');
-    const gps10hzToggle = document.getElementById('toggle-gps10hz-track');
-    const ppkToggle = document.getElementById('toggle-ppk-track');
     if (gpsToggle) {
         gpsToggle.addEventListener('click', () => {
             gpsToggle.classList.toggle('active');
             mapView.toggleGPS(gpsToggle.classList.contains('active'));
-        });
-    }
-    if (gps10hzToggle) {
-        gps10hzToggle.addEventListener('click', () => {
-            if (gps10hzToggle.disabled) return;
-            gps10hzToggle.classList.toggle('active');
-            mapView.toggleGPS10Hz(gps10hzToggle.classList.contains('active'));
-        });
-    }
-    if (ppkToggle) {
-        ppkToggle.addEventListener('click', () => {
-            if (ppkToggle.disabled) return;
-            ppkToggle.classList.toggle('active');
-            mapView.togglePPK(ppkToggle.classList.contains('active'));
         });
     }
 
@@ -237,54 +222,9 @@ async function loadSession(deviceId, date) {
         mapView.setWindData(windData);
         chartPanel.setData(sessionData);
 
-        // Load 10Hz GPS separately (don't merge with 1Hz data — breaks chart timestamps)
-        try {
-            const resp10Hz = await fetch(
-                `${API_BASE}/api/data/${deviceId}/${date}?sensors=gps_10hz`
-            );
-            if (resp10Hz.ok) {
-                const data10Hz = await resp10Hz.json();
-                const gps10HzData = (data10Hz.data || [])
-                    .filter(p => p.gps_10hz)
-                    .map(p => ({
-                        t: p.t,
-                        lat: p.gps_10hz.lat,
-                        lon: p.gps_10hz.lon,
-                        speed_kn: p.gps_10hz.speed_kn,
-                        course: p.gps_10hz.course
-                    }));
-                mapView.setGPS10HzData(gps10HzData);
-            }
-        } catch (e) {
-            console.log('No 10Hz GPS data available');
-        }
-
-        // Load PPK data separately (different timestamps would break chart)
-        try {
-            const respPPK = await fetch(
-                `${API_BASE}/api/data/${deviceId}/${date}?sensors=ppk`
-            );
-            if (respPPK.ok) {
-                const dataPPK = await respPPK.json();
-                const ppkData = (dataPPK.data || [])
-                    .filter(p => p.ppk)
-                    .map(p => ({
-                        t: p.t,
-                        lat: p.ppk.lat,
-                        lon: p.ppk.lon,
-                        quality: p.ppk.quality,
-                        sdn: p.ppk.sdn,
-                        sde: p.ppk.sde,
-                        sdu: p.ppk.sdu,
-                        sats: p.ppk.sats
-                    }));
-                mapView.setPPKData(ppkData);
-                // Also send PPK quality to chart panel
-                chartPanel.setPPKData(ppkData);
-            }
-        } catch (e) {
-            console.log('No PPK data available');
-        }
+        // PPK / 10 Hz dedicated fetches retired with firmware 2026.05.20.09 —
+        // nav.csv is now natively 10 Hz, so a single GPS track is the whole
+        // story. See docs/RTCM_PPK_ARCHIVE.md for the previous PPK pipeline.
 
         // Fetch NOAA buoy data for session time range
         await loadBuoyData(sessionData.start_time, sessionData.end_time);
