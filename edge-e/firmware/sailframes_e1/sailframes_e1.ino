@@ -101,11 +101,11 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.04"
+#define FW_VERSION    "2026.05.20.05"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
-// IMU + GPS fix-rate changes from SF_FIRMWARE_V2_SPEC.md are mechanism-only
-// in this stage — defaults preserve pre-2.0 behavior. Per-boat opt-in via
-// imu_interval_ms= and gps_set_fixrate= in /config.txt.
+// 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
+// per-boat config knobs). config.txt holds per-boat / per-club state
+// only (WiFi creds, boat_id, wind sensor, role, etc.).
 
 // Telnet listener is OFF by default. The 2026.05.03.04 fleet test confirmed
 // (via diag heartbeat) that handleTelnet() blocks Core 1 inside LWIP when
@@ -142,7 +142,7 @@
 #define GPS_FIX_TIMEOUT_MS  300000
 #define DISPLAY_UPDATE_MS   500   // TFT can handle faster updates (no I2C contention)
 #define FLUSH_INTERVAL_MS   10000
-#define IMU_INTERVAL_MS     1000   // Legacy default. Runtime value is config.imu_interval_ms (override in /config.txt).
+#define IMU_INTERVAL_MS     100    // 10 Hz BNO085 reports. Baked-in fleet default.
 #define PRES_INTERVAL_MS    10000  // 0.1 Hz (every 10 sec - weather trends only)
 
 // Wind sensor (Calypso Mini BLE)
@@ -311,7 +311,6 @@ struct Config {
   char s3_bucket[128] = "sailframes-fleet-data-prod";
   char s3_region[32] = "us-east-1";
   char boat_id[16] = "E1";
-  int gps_rate_hz = 10;
   char wind_mac[20] = "";  // Calypso Mini MAC (loaded from /wind_mac.txt if present)
   bool wind_enabled = false;  // Auto-enabled if /wind_mac.txt exists on SD
   int wind_offset = 0;  // Heading offset in degrees (added to raw AWA for sensor mounting correction)
@@ -322,12 +321,9 @@ struct Config {
   int stop_delay_sec = 180;
 
   // v2.0.0 foundation (SF_FIRMWARE_V2_SPEC.md Stage 1)
-  // Defaults preserve pre-2.0 behavior so existing fleet configs stay valid.
   char hardware_platform[8] = "e1";       // "e1" or "b1"
   char unit_role[24]        = "racing_boat";
   int  config_version       = 0;          // bumped by cloud config sync (Stage 3)
-  int  imu_interval_ms      = 1000;       // 1000 = legacy 1 Hz; spec target 100 = 10 Hz
-  bool gps_set_fixrate      = false;      // when true, send PQTMCFGFIXRATE,W,<ms> at boot
 } config;
 
 // ============================================================
@@ -1095,25 +1091,25 @@ void setup() {
     imuOK = true;
     Wire.setClock(400000);  // Switch to fast mode after init
     Serial.println("[IMU] BNO085 detected, enabling reports");
-    if (!bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, config.imu_interval_ms * 1000)) {
+    if (!bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable game rotation vector");
     }
-    if (!bno08x.enableReport(SH2_ROTATION_VECTOR, config.imu_interval_ms * 1000)) {
+    if (!bno08x.enableReport(SH2_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable rotation vector");
     }
-    if (!bno08x.enableReport(SH2_ACCELEROMETER, config.imu_interval_ms * 1000)) {
+    if (!bno08x.enableReport(SH2_ACCELEROMETER, IMU_INTERVAL_MS * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable accelerometer");
     }
-    if (!bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, config.imu_interval_ms * 1000)) {
+    if (!bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, IMU_INTERVAL_MS * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable gyroscope");
     }
-    if (!bno08x.enableReport(SH2_LINEAR_ACCELERATION, config.imu_interval_ms * 1000)) {
+    if (!bno08x.enableReport(SH2_LINEAR_ACCELERATION, IMU_INTERVAL_MS * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable linear acceleration");
     }
     if (!bno08x.enableReport(SH2_STABILITY_CLASSIFIER, 500000)) {
       Serial.println("[IMU] WARNING: Failed to enable stability classifier");
     }
-    if (!bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, config.imu_interval_ms * 1000)) {
+    if (!bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, IMU_INTERVAL_MS * 1000)) {
       Serial.println("[IMU] WARNING: Failed to enable magnetometer");
     }
     Serial.println("[IMU] BNO085 OK");
@@ -1469,21 +1465,16 @@ void configureLG290P() {
   sendPQTM("PQTMCFGMSGRATE,W,RTCM3-1046,1");  // Galileo ephemeris
   delay(200);
 
-  // v2.0.0 Stage 1 — optional fix-rate bump for 10 Hz GNSS.
-  // Off by default (gps_set_fixrate=false). Per LG290P (Quectel) PQTM docs,
-  // PQTMCFGFIXRATE,W,<period_ms> sets the fix interval; 100 = 10 Hz.
-  // Syntax unverified against AANR01A06S; sendPQTM logs [RSP] with any error.
-  // Save to NVM only if the command succeeds — avoids persisting a bad value.
-  if (config.gps_set_fixrate) {
-    int period_ms = (config.gps_rate_hz > 0) ? (1000 / config.gps_rate_hz) : 100;
-    char body[48];
-    snprintf(body, sizeof(body), "PQTMCFGFIXRATE,W,%d", period_ms);
-    Serial.printf("[GPS] Requesting fix rate: %d ms (~%d Hz)\n", period_ms, config.gps_rate_hz);
-    if (sendPQTM(body)) {
-      sendPQTM("PQTMSAVEPAR");
-    } else {
-      Serial.println("[GPS] PQTMCFGFIXRATE failed — leaving fix rate at module default");
-    }
+  // 10 Hz GNSS fix rate. PQTMCFGFIXRATE,W,<period_ms> where 100 ms = 10 Hz.
+  // Persists to LG290P NVM on success so subsequent boots come up at 10 Hz
+  // even before this command runs. Logged with [RSP] line — if firmware
+  // AANR01A06S returns ERROR,1 the command syntax needs revision (fall back
+  // is the module's default rate, typically 1 Hz).
+  Serial.println("[GPS] Setting fix rate to 10 Hz (100 ms)...");
+  if (sendPQTM("PQTMCFGFIXRATE,W,100")) {
+    sendPQTM("PQTMSAVEPAR");
+  } else {
+    Serial.println("[GPS] PQTMCFGFIXRATE failed — fix rate stays at module default");
   }
 
   // Step 10: Verify configuration — read back rates to confirm
@@ -1835,13 +1826,13 @@ void readIMU() {
   // BNO085 using Adafruit library with SHTP protocol
   if (bno08x.wasReset()) {
     Serial.println("[IMU] BNO085 was reset, re-enabling reports");
-    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, config.imu_interval_ms * 1000);
-    bno08x.enableReport(SH2_ROTATION_VECTOR, config.imu_interval_ms * 1000);
-    bno08x.enableReport(SH2_ACCELEROMETER, config.imu_interval_ms * 1000);
-    bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, config.imu_interval_ms * 1000);
-    bno08x.enableReport(SH2_LINEAR_ACCELERATION, config.imu_interval_ms * 1000);
+    bno08x.enableReport(SH2_GAME_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000);
+    bno08x.enableReport(SH2_ROTATION_VECTOR, IMU_INTERVAL_MS * 1000);
+    bno08x.enableReport(SH2_ACCELEROMETER, IMU_INTERVAL_MS * 1000);
+    bno08x.enableReport(SH2_GYROSCOPE_CALIBRATED, IMU_INTERVAL_MS * 1000);
+    bno08x.enableReport(SH2_LINEAR_ACCELERATION, IMU_INTERVAL_MS * 1000);
     bno08x.enableReport(SH2_STABILITY_CLASSIFIER, 500000);
-    bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, config.imu_interval_ms * 1000);
+    bno08x.enableReport(SH2_MAGNETIC_FIELD_CALIBRATED, IMU_INTERVAL_MS * 1000);
   }
 
   // Read sensor events - we have 7 reports enabled so need enough reads
@@ -2071,7 +2062,6 @@ void loadConfig() {
     }
     else if (k == "upload_url") v.toCharArray(config.upload_url, sizeof(config.upload_url));
     else if (k == "boat_id") v.toCharArray(config.boat_id, sizeof(config.boat_id));
-    else if (k == "gps_rate_hz") config.gps_rate_hz = v.toInt();
     else if (k == "wind_enabled") config.wind_enabled = (v == "true" || v == "1");
     else if (k == "wind_mac") v.toCharArray(config.wind_mac, sizeof(config.wind_mac));
     else if (k == "wind_offset") config.wind_offset = v.toInt();
@@ -2084,8 +2074,6 @@ void loadConfig() {
     else if (k == "hardware_platform") v.toCharArray(config.hardware_platform, sizeof(config.hardware_platform));
     else if (k == "unit_role")         v.toCharArray(config.unit_role, sizeof(config.unit_role));
     else if (k == "config_version")    config.config_version = v.toInt();
-    else if (k == "imu_interval_ms")   config.imu_interval_ms = v.toInt();
-    else if (k == "gps_set_fixrate")   config.gps_set_fixrate = (v == "true" || v == "1");
   }
   f.close();
 
@@ -2103,19 +2091,8 @@ void loadConfig() {
   else if (strcasecmp(config.unit_role, "spare")           == 0) g_role = ROLE_SPARE;
   else                                                            g_role = ROLE_RACING_BOAT;
 
-  // Clamp IMU interval to sane range. BNO085 fusion runs at 400 Hz internally
-  // so anything ≥10 ms is fine; cap at 5000 ms to avoid stalled IMU watchdog.
-  if (config.imu_interval_ms < 10)   config.imu_interval_ms = 10;
-  if (config.imu_interval_ms > 5000) config.imu_interval_ms = 5000;
-
-  // gps_rate_hz field has been declared but unused since the field was
-  // introduced. Stage 1 wires it via configureLG290P() when gps_set_fixrate
-  // is true. Clamp to LG290P-supported range.
-  if (config.gps_rate_hz < 1)  config.gps_rate_hz = 1;
-  if (config.gps_rate_hz > 10) config.gps_rate_hz = 10;
-
-  Serial.printf("[CFG] Boat: %s, Rate: %dHz, WiFi networks: %d\n",
-    config.boat_id, config.gps_rate_hz, config.wifi_count);
+  Serial.printf("[CFG] Boat: %s, WiFi networks: %d\n",
+    config.boat_id, config.wifi_count);
   for (int i = 0; i < config.wifi_count; i++) {
     Serial.printf("[CFG]   %d: %s\n", i + 1, config.wifi[i].ssid);
   }
@@ -2129,10 +2106,8 @@ void loadConfig() {
   Serial.println();
   Serial.printf("[CFG] Platform: %s | Role: %s | Config version: %d\n",
                 hwName(g_hw), roleName(g_role), config.config_version);
-  Serial.printf("[CFG] IMU interval: %d ms | GPS fixrate enabled: %s (target %d Hz)\n",
-                config.imu_interval_ms,
-                config.gps_set_fixrate ? "yes" : "no",
-                config.gps_rate_hz);
+  Serial.printf("[CFG] Sample rates (firmware-baked): IMU %d ms | GNSS fix %d ms\n",
+                IMU_INTERVAL_MS, 1000 / 10);  // GNSS via PQTMCFGFIXRATE,W,100
 }
 
 // ============================================================
@@ -5001,9 +4976,8 @@ void processCommand(String cmd, bool fromTelnet) {
             config.config_version, config.boat_id, FW_VERSION);
 
   } else if (cmd == "flags") {
-    tprintf("imu_interval_ms=%d\n", config.imu_interval_ms);
-    tprintf("gps_set_fixrate=%s (target %d Hz)\n",
-            config.gps_set_fixrate ? "on" : "off", config.gps_rate_hz);
+    tprintf("imu_interval_ms=%d (baked)\n", IMU_INTERVAL_MS);
+    tprintf("gnss_fix_rate=10 Hz (baked, PQTMCFGFIXRATE)\n");
     tprintf("wind_enabled=%s\n", config.wind_enabled ? "on" : "off");
     tprintf("telnet=%s\n", telnetEnabled ? "on" : "off");
 
@@ -5665,7 +5639,7 @@ void loop() {
   // Sensor reads are I2C on Core 1, upload runs on Core 0 — no conflict.
   // SD logging (logIMU/logPressure) is guarded by `logging` which is always
   // false during upload (task checks !logging before starting).
-  if (now - lastIMU >= (unsigned long)config.imu_interval_ms) {
+  if (now - lastIMU >= IMU_INTERVAL_MS) {
     g_loopSection = "imu";
     readIMU();
     if (logging) { g_loopSection = "imu.log"; logIMU(); }
