@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.03"
+#define FW_VERSION    "2026.05.20.04"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // IMU + GPS fix-rate changes from SF_FIRMWARE_V2_SPEC.md are mechanism-only
 // in this stage — defaults preserve pre-2.0 behavior. Per-boat opt-in via
@@ -3736,14 +3736,68 @@ bool connectWiFi() {
     Serial.printf("[WIFI]   %d: %s (%d dBm) %s ch%d\n",
       i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i), authStr, WiFi.channel(i));
   }
+
+  // BSSID-aware AP selection. The ESP32 Arduino stack's default
+  // WiFi.begin(ssid, pass) picks "first BSSID that auth-completes",
+  // not "strongest BSSID for that SSID". On a multi-AP mesh that
+  // means a boat can latch onto a far AP at -90 dBm even when an
+  // identical SSID is broadcasting at -50 dBm next to it. Observed
+  // 2026-05-21 with E5: stuck on Family room AP at -90 dBm with
+  // ~2.5 KB/s OTA throughput while Office AP (same room as boat)
+  // was available at -45 dBm.
+  //
+  // Walk the scan once, find the strongest BSSID for each configured
+  // SSID, copy the BSSID + channel into local storage (scan results
+  // get freed below), then pass them to WiFi.begin to pin association.
+  struct BestAp {
+    bool   seen;
+    int    rssi;
+    int32_t channel;
+    uint8_t bssid[6];
+  };
+  BestAp best[MAX_WIFI_NETWORKS];
+  for (int s = 0; s < MAX_WIFI_NETWORKS; s++) {
+    best[s].seen = false;
+    best[s].rssi = -200;
+    best[s].channel = 0;
+  }
+  for (int i = 0; i < n; i++) {
+    String ssid = WiFi.SSID(i);
+    int rssi = WiFi.RSSI(i);
+    for (int s = 0; s < config.wifi_count; s++) {
+      if (strlen(config.wifi[s].ssid) == 0) continue;
+      if (ssid == config.wifi[s].ssid && rssi > best[s].rssi) {
+        best[s].seen = true;
+        best[s].rssi = rssi;
+        best[s].channel = WiFi.channel(i);
+        memcpy(best[s].bssid, WiFi.BSSID(i), 6);
+      }
+    }
+  }
+  for (int s = 0; s < config.wifi_count; s++) {
+    if (strlen(config.wifi[s].ssid) == 0) continue;
+    if (best[s].seen) {
+      Serial.printf("[WIFI] Best AP for %s: %02X:%02X:%02X:%02X:%02X:%02X ch%d %d dBm\n",
+        config.wifi[s].ssid,
+        best[s].bssid[0], best[s].bssid[1], best[s].bssid[2],
+        best[s].bssid[3], best[s].bssid[4], best[s].bssid[5],
+        (int)best[s].channel, best[s].rssi);
+    } else {
+      Serial.printf("[WIFI] %s not visible in scan — will skip\n",
+        config.wifi[s].ssid);
+    }
+  }
   WiFi.scanDelete();
 
-  // Try each configured network
+  // Try each configured network, in config order, but skip ones not
+  // visible in the scan (saves the 20 s per-network timeout when the
+  // iPhone hotspot isn't around).
   for (int i = 0; i < config.wifi_count; i++) {
     if (strlen(config.wifi[i].ssid) == 0) continue;
+    if (!best[i].seen) continue;
 
-    Serial.printf("[WIFI] Trying %s (%d/%d)...\n",
-      config.wifi[i].ssid, i + 1, config.wifi_count);
+    Serial.printf("[WIFI] Trying %s (%d/%d) — pinned to strongest BSSID at %d dBm...\n",
+      config.wifi[i].ssid, i + 1, config.wifi_count, best[i].rssi);
 
     // No display update - WiFi connects silently in background
 
@@ -3763,7 +3817,10 @@ bool connectWiFi() {
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
     WiFi.persistent(false);  // Don't save to flash
     WiFi.setAutoReconnect(false);
-    WiFi.begin(config.wifi[i].ssid, config.wifi[i].pass);
+    // Pin to the strongest-BSSID + channel from the scan above. This
+    // bypasses the ESP32 stack's "first-respond-wins" AP picker.
+    WiFi.begin(config.wifi[i].ssid, config.wifi[i].pass,
+               best[i].channel, best[i].bssid);
 
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts++ < 40) {  // 40 attempts = 20 sec
