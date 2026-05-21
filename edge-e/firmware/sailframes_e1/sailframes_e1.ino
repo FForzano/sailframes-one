@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.05"
+#define FW_VERSION    "2026.05.20.06"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -3958,37 +3958,41 @@ static void drawOTAProgress(int percent, const char* targetVersion, const char* 
     tft.fillScreen(COLOR_WARN);
     tft.setTextColor(TFT_BLACK, COLOR_WARN);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString("OTA UPDATE", SCREEN_WIDTH/2, 60, 4);
+    // Header — font 4 is the largest text font (~26 px tall, full ASCII).
+    tft.drawString("OTA UPDATE", SCREEN_WIDTH/2, 40, 4);
+    // Target version — bumped from font 2 (~16 px) to font 4.
     if (targetVersion && targetVersion[0]) {
-      tft.drawString(targetVersion, SCREEN_WIDTH/2, 110, 2);
+      tft.drawString(targetVersion, SCREEN_WIDTH/2, 90, 4);
     }
-    // Progress bar frame
-    tft.drawRect(20, SCREEN_HEIGHT/2 + 60, SCREEN_WIDTH - 40, 30, TFT_BLACK);
-    tft.drawString("DO NOT POWER OFF", SCREEN_WIDTH/2, SCREEN_HEIGHT - 60, 2);
+    // Progress bar frame — taller (40 px instead of 30).
+    tft.drawRect(20, SCREEN_HEIGHT/2 + 60, SCREEN_WIDTH - 40, 40, TFT_BLACK);
+    // Footer — also bumped to font 4 so it's legible from across the cockpit.
+    tft.drawString("DO NOT POWER OFF", SCREEN_WIDTH/2, SCREEN_HEIGHT - 40, 4);
     g_otaScreenDrawn = true;
     g_otaLastPctDrawn = -1;
   }
 
   // Phase tag (e.g. "downloading", "verifying", "rebooting") shown above %.
+  // Bumped to font 4 — the previous font 2 was unreadable across the cabin.
   if (phase && phase[0]) {
-    tft.fillRect(0, 140, SCREEN_WIDTH, 24, COLOR_WARN);
+    tft.fillRect(0, 125, SCREEN_WIDTH, 34, COLOR_WARN);
     tft.setTextColor(TFT_BLACK, COLOR_WARN);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString(phase, SCREEN_WIDTH/2, 152, 2);
+    tft.drawString(phase, SCREEN_WIDTH/2, 142, 4);
   }
 
   if (percent != g_otaLastPctDrawn) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", percent);
-    tft.fillRect(0, 180, SCREEN_WIDTH, 90, COLOR_WARN);
+    tft.fillRect(0, 175, SCREEN_WIDTH, 95, COLOR_WARN);
     tft.setTextColor(TFT_BLACK, COLOR_WARN);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString(buf, SCREEN_WIDTH/2, 220, 8);  // Font 8 = 75px, very legible
-    // Progress bar fill
+    tft.drawString(buf, SCREEN_WIDTH/2, 220, 8);  // Font 8 = 75 px (digits)
+    // Progress bar fill — matches the taller frame above.
     int barX = 21;
     int barY = SCREEN_HEIGHT/2 + 61;
     int barW = SCREEN_WIDTH - 42;
-    int barH = 28;
+    int barH = 38;
     int fillW = (barW * percent) / 100;
     tft.fillRect(barX, barY, fillW, barH, TFT_BLACK);
     tft.fillRect(barX + fillW, barY, barW - fillW, barH, COLOR_WARN);
