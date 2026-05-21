@@ -499,7 +499,13 @@ volatile unsigned long g_otaDeadlineMs = 0;
 // "OTA after every clean upload" — predictable, less network churn,
 // no surprise reboots mid-day if a new build is published.
 volatile bool g_otaCheckedThisBoot = false;
-static const unsigned long OTA_MAX_MS         = 180UL * 1000UL;  // hard ceiling per OTA cycle
+// 600 s ceiling: at -84 dBm WiFi (E5 in garage, 2026-05-21 OTA fail) the
+// download throughput was ~4.7 KB/s — full 1.5 MB needs ~5.5 min. The
+// original 180 s was tuned for typical signal and aborted weak-signal
+// pulls at ~55%. The stall watchdog (OTA_STALL_MS) still catches real
+// hangs (no bytes for 20 s); the hard deadline is just a backup for
+// "data flowing but not making progress" pathologies.
+static const unsigned long OTA_MAX_MS         = 600UL * 1000UL;  // hard ceiling per OTA cycle
 static const unsigned long OTA_STALL_MS       =  20UL * 1000UL;  // abort if no bytes received for 20 s
 static const unsigned long LOOP_HANG_MS       =  90UL * 1000UL;  // Core 1 must tick at least every 90 s
 
@@ -4024,6 +4030,13 @@ bool performOTAUpdate(bool manual) {
   uploading = prevUploading;
   wifiBusy  = prevWifiBusy;
   appendBootLog(ok ? "ota end ok" : "ota end fail");
+  // After any OTA exit (other than the success path that restarts) we
+  // may have painted the yellow OTA UPDATE screen. Force the next D2/D3
+  // update to redraw fully so the user doesn't see the yellow framebuffer
+  // bleed through with new numbers overlaid.
+  d2LayoutDrawn = false;
+  d3LayoutDrawn = false;
+  g_otaScreenDrawn = false;
   return ok;
 }
 
