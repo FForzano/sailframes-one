@@ -468,18 +468,21 @@ Resources:
       SourceArn: !GetAtt MediaConvertCompleteRule.Arn
 
   # ============================================
-  # PPK PIPELINE - CORS DOWNLOAD SCHEDULE
+  # PPK PIPELINE — RETIRED 2026-05-21 (firmware .09)
   # ============================================
-  # Hourly safety net: scans for sessions stuck at awaiting_cors
-  # Primary trigger is process_upload invoking cors_download directly on RTCM3 upload
+  # The hourly CorsDownload EventBridge rule was retired alongside the
+  # PPK firmware path. The cors_download lambda code is preserved at git
+  # SHA 08cdadfe and in docs/RTCM_PPK_ARCHIVE.md; the rule was set to
+  # State: DISABLED below so re-enable is a one-line change without
+  # losing the Lambda permission attachment.
 
   CorsDownloadScheduleRule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub 'sailframes-cors-download-hourly-${Environment}'
-      Description: Hourly check for sessions needing CORS data for PPK processing
+      Description: Hourly check for sessions needing CORS data for PPK processing (DISABLED — PPK retired)
       ScheduleExpression: 'rate(1 hour)'
-      State: ENABLED
+      State: DISABLED
       Targets:
         - Id: CorsDownloadLambda
           Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:sailframes-cors-download'
