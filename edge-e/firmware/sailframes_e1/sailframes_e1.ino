@@ -100,7 +100,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.11"
+#define FW_VERSION    "2026.05.20.11-debug-mesh"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -1070,36 +1070,57 @@ static void meshOnReceive(const esp_now_recv_info_t* info, const uint8_t* data, 
   }
 }
 
+// DEBUG BUILD: instrumented meshInit with checkpoint logs between every
+// step + Serial.flush after each. Goal: identify which call corrupts
+// setup()'s stack frame in 2026.05.20.10. The last printed checkpoint
+// before the panic in the canary's USB serial pinpoints the offending
+// API call. Field-bisection diagnosis.
+//
+// Also: peerInfo moved to static storage (off-stack) to remove that
+// frame variable from the suspect list, and an initial uptime delay
+// gate so we don't race ESP-NOW init against any WiFi-task internal
+// setup the early-setup() WiFi.mode call may have left pending.
 void meshInit() {
   if (g_mesh_enabled) return;
+
+  Serial.println("[MESH] step 1: enter meshInit"); Serial.flush();
   g_mesh_local_sender_id = boatIdHash(config.boat_id);
+  Serial.printf("[MESH] step 2: sender_id=0x%08lx\n",
+                (unsigned long)g_mesh_local_sender_id);
+  Serial.flush();
 
-  // ESP-NOW requires WiFi in STA or AP mode. setup() already ran
-  // WiFi.mode(WIFI_STA) early so the radio is up.
+  Serial.println("[MESH] step 3: calling esp_now_init"); Serial.flush();
   esp_err_t err = esp_now_init();
-  if (err != ESP_OK) {
-    Serial.printf("[MESH] esp_now_init failed: %d\n", err);
-    return;
-  }
+  Serial.printf("[MESH] step 4: esp_now_init returned %d\n", err); Serial.flush();
+  if (err != ESP_OK) return;
 
+  Serial.println("[MESH] step 5: calling esp_now_register_recv_cb"); Serial.flush();
   esp_now_register_recv_cb(meshOnReceive);
+  Serial.println("[MESH] step 6: register_recv_cb returned"); Serial.flush();
 
-  esp_now_peer_info_t peerInfo = {};
+  // Static so it lives in BSS, not stack — eliminates stack frame size
+  // as a suspect for whatever is corrupting setup()'s canary.
+  static esp_now_peer_info_t peerInfo;
+  Serial.printf("[MESH] step 7: peerInfo size=%u\n",
+                (unsigned)sizeof(peerInfo)); Serial.flush();
+  memset(&peerInfo, 0, sizeof(peerInfo));
   memcpy(peerInfo.peer_addr, MESH_BROADCAST_ADDR, 6);
-  peerInfo.channel = 0;     // 0 = current STA channel; using STA channel avoids
-                            // having to force-switch off-AP and lose Home-IOT
+  peerInfo.channel = 0;
   peerInfo.encrypt = false;
+  Serial.println("[MESH] step 8: calling esp_now_add_peer"); Serial.flush();
   err = esp_now_add_peer(&peerInfo);
+  Serial.printf("[MESH] step 9: add_peer returned %d\n", err); Serial.flush();
   if (err != ESP_OK) {
-    Serial.printf("[MESH] add broadcast peer failed: %d\n", err);
     esp_now_deinit();
     return;
   }
 
   g_mesh_enabled = true;
-  Serial.printf("[MESH] ESP-NOW init OK, sender_id=0x%08lx ch=current(STA)\n",
+  Serial.printf("[MESH] step 10: init OK, sender_id=0x%08lx\n",
                 (unsigned long)g_mesh_local_sender_id);
+  Serial.flush();
   appendBootLog("mesh init ok");
+  Serial.println("[MESH] step 11: appendBootLog returned"); Serial.flush();
 }
 
 static void meshBuildAndSendBoatState() {
@@ -1137,6 +1158,18 @@ static void meshBuildAndSendBoatState() {
 // Called from the main loop. Cheap path: returns fast if disabled,
 // gated, or interval not yet elapsed.
 void meshTick() {
+  // DEBUG BUILD: deferred meshInit. First time uptime >= 5 s and not
+  // already enabled, try the init. Single-shot — sets g_mesh_enabled
+  // on success; sets it via the no-op return-on-second-call guard.
+  static bool g_mesh_init_attempted = false;
+  if (!g_mesh_enabled && !g_mesh_init_attempted && millis() >= 5000 &&
+      !wifiBusy && !uploading) {
+    g_mesh_init_attempted = true;
+    Serial.println("[MESH] deferred init starting (uptime>=5s)"); Serial.flush();
+    meshInit();
+    Serial.println("[MESH] deferred init returned"); Serial.flush();
+  }
+
   if (!g_mesh_enabled) return;
   // Don't compete with HTTP uploads — esp_now_send is cheap but the
   // RF airtime steals from the upload. Existing wifiBusy + uploading
@@ -1511,21 +1544,11 @@ void setup() {
     0                   // Core 0 (Core 1 is the one we're watching)
   );
 
-  // HOTFIX 2026-05-21 (.11): meshInit() commented out after a stack-smash
-  // panic in setup() on a canary boat. Symptoms:
-  //   [MESH] ESP-NOW init OK, sender_id=0x08cbee82 ch=current(STA)
-  //   [DIAG] task started
-  //   [RADIO] BOOT -> IDLE (setup complete)
-  //   [SETUP] Complete - WiFi/telnet available, GPS acquiring in background
-  //   Stack smashing protect failure!
-  //   Backtrace: 0x400957e0:0x3ffd3740 0x400957a5:0x3ffd3760 ...
-  // The corruption happens during setup() but the canary check fires at
-  // setup() return. Suspects: esp_now_peer_info_t size mismatch on the
-  // stack, recv-cb signature drift, or ESP-NOW prerequisites the
-  // existing WiFi early-init doesn't satisfy. Investigating; mesh.h
-  // wire types + meshTick/meshOnReceive functions left in place so the
-  // fix can be a single-line re-enable + targeted patch.
-  // meshInit();
+  // DEBUG BUILD: meshInit() deferred to first iteration of loop() after
+  // 5 s of uptime — see meshTick for the gate. If the deferred init also
+  // panics, the cause is intrinsic to the ESP-NOW call sequence, not the
+  // setup() context. If it boots clean, the cause was setup-time-specific
+  // (WiFi state, stack pressure, or interaction with concurrent inits).
   radioModeTransition(MODE_IDLE, "setup complete");
 
   Serial.println("[SETUP] Complete - WiFi/telnet available, GPS acquiring in background");
