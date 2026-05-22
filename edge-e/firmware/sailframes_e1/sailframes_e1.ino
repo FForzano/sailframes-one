@@ -100,7 +100,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.12"
+#define FW_VERSION    "2026.05.20.13"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -1127,7 +1127,11 @@ static void meshBuildAndSendBoatState() {
   p->fix_quality    = (uint8_t)gps.fix_quality;
   p->sat_count      = (uint8_t)gps.satellites;
   p->unit_role      = (uint8_t)g_role;
-  p->reserved[0] = p->reserved[1] = p->reserved[2] = 0;
+  // reserved is uint8_t[2] in mesh.h (struct sized to 20 bytes per spec).
+  // The earlier version of this line wrote reserved[0..2] which overran
+  // by 1 byte off the end of buf[36] and crashed every meshTick call
+  // via __stack_chk_fail — the .10/.11 fleet-brick bug.
+  p->reserved[0] = p->reserved[1] = 0;
 
   esp_err_t err = esp_now_send(MESH_BROADCAST_ADDR, buf, sizeof(buf));
   if (err == ESP_OK) g_mesh_tx_count++;
@@ -1511,18 +1515,14 @@ void setup() {
     0                   // Core 0 (Core 1 is the one we're watching)
   );
 
-  // HOTFIX 2026-05-21 (.12): both new-in-.10 calls in setup commented out.
-  // .11 disabled meshInit() but kept radioModeTransition(). After multiple
-  // boats panicked the same way across E2/E6, both new calls are equally
-  // suspect — they each end in appendBootLog() (SD write) and the panic
-  // also corrupts SD (next boot's SD init failed). .12 restores the .09
-  // setup tail exactly so the fleet has a safe re-flash target during
-  // race week. Stage 2 code (mesh.h, mesh* functions, mesh telnet, meshTick
-  // call in loop) all stays in place — re-enable via uncommenting both
-  // lines once the root cause is isolated via the
-  // debug/v2-espnow-instrumented branch on a bench unit.
-  // meshInit();
-  // radioModeTransition(MODE_IDLE, "setup complete");
+  // Stage 2 re-enabled in .13 after the root cause of the .10 fleet-brick
+  // was found: a single-byte stack overflow in meshBuildAndSendBoatState
+  // writing to p->reserved[2] when reserved was sized [2]. Fixed at the
+  // source. setup() is now back to the .10 sequence (meshInit + radio
+  // mode transition). __stack_chk_fail was a TRUE positive — exactly
+  // doing its job catching the smash on every meshTick call.
+  meshInit();
+  radioModeTransition(MODE_IDLE, "setup complete");
 
   Serial.println("[SETUP] Complete - WiFi/telnet available, GPS acquiring in background");
 }
