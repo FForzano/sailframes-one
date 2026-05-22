@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.18"
+#define FW_VERSION    "2026.05.20.19"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -1204,6 +1204,156 @@ void meshTick() {
     if (now - g_mesh_peers[i].last_seen_ms > MESH_PEER_EXPIRY_MS) {
       g_mesh_peers[i] = g_mesh_peers[g_mesh_peer_count - 1];
       g_mesh_peer_count--;
+    }
+  }
+}
+
+// ============================================================
+// v2.0.0 Stage 4 — OCS state machine (boat-local MVP)
+// ============================================================
+// Per-boat over-line detection at race start. Computes the boat's
+// bow position from GPS + heading + bow_offset_m, projects it onto
+// the start line PIN→RC, and tracks signed distance. After T+0, if
+// the bow is on the course side of the line (signed distance below
+// the negative threshold), over_line latches true.
+//
+// MVP scope:
+//   - Manual arm via telnet `race arm <pin_lat> <pin_lon>
+//     <rc_lat> <rc_lon> <seconds_from_now>`. No RC mesh reception
+//     yet — that's Stage 5 with MSG_RACE_ARMED.
+//   - Single hardcoded bow_offset_m (2.4 — Sonar 23). Class
+//     registry CSV comes with Stage 5.
+//   - Heading sourced from GPS COG when sog > 2 kt (reliable),
+//     IMU heading otherwise (magnetic / fusion drift acceptable
+//     near start when speeds are low).
+//   - No LED (E1 has none; future B1 has LEDs). State surfaced
+//     via telnet `ocs` command.
+
+#define OCS_BOW_OFFSET_M           2.4f    // Sonar 23 default
+#define OCS_THRESHOLD_M            0.5f    // must be >50cm over to call OCS
+#define OCS_CLEAR_THRESHOLD_M      0.5f    // must be >50cm back to clear
+#define OCS_CLEAR_DWELL_MS         2000    // sustained-clear time before un-latching
+#define OCS_TICK_INTERVAL_MS       100     // 10 Hz — matches GPS fix rate
+
+struct OCSState {
+  bool     armed;
+  uint32_t start_time_ms;        // millis() value at which T+0 fires
+  double   pin_lat, pin_lon;
+  double   rc_lat,  rc_lon;
+  // Live:
+  bool     over_line;
+  bool     was_over_at_start;
+  float    distance_to_line_m;   // signed, positive = pre-start side
+  float    closure_rate_m_s;     // negative = approaching line from pre-start
+  uint32_t over_since_ms;
+  uint32_t cleared_at_ms;
+  // Internal for closure-rate calc:
+  float    _last_d;
+  uint32_t _last_t_ms;
+};
+OCSState g_ocs = {};
+
+unsigned long g_ocs_last_tick_ms = 0;
+
+void ocsDisarm() {
+  g_ocs.armed = false;
+  g_ocs.over_line = false;
+  g_ocs.was_over_at_start = false;
+  g_ocs.distance_to_line_m = 0;
+  g_ocs.closure_rate_m_s = 0;
+  g_ocs.over_since_ms = 0;
+  g_ocs.cleared_at_ms = 0;
+  g_ocs._last_d = 0;
+  g_ocs._last_t_ms = 0;
+}
+
+void ocsArm(double pin_lat, double pin_lon,
+            double rc_lat,  double rc_lon,
+            uint32_t start_time_ms) {
+  ocsDisarm();
+  g_ocs.armed = true;
+  g_ocs.pin_lat = pin_lat;
+  g_ocs.pin_lon = pin_lon;
+  g_ocs.rc_lat = rc_lat;
+  g_ocs.rc_lon = rc_lon;
+  g_ocs.start_time_ms = start_time_ms;
+}
+
+void ocsTick() {
+  if (!g_ocs.armed) return;
+  if (!gps.valid) return;
+
+  unsigned long now = millis();
+  if (now - g_ocs_last_tick_ms < OCS_TICK_INTERVAL_MS) return;
+  g_ocs_last_tick_ms = now;
+
+  // Use GPS COG when boat is moving — reliable above ~2 kt. Below
+  // that, use IMU heading (magnetic / fusion may drift but it's
+  // the best we have when stationary or in low-speed pre-start
+  // tactical maneuvering).
+  float heading_deg = (gps.speed_kts > 2.0f) ? gps.course : imu.heading;
+  float heading_rad = heading_deg * (float)PI / 180.0f;
+
+  double ref_lat_rad = ((g_ocs.pin_lat + g_ocs.rc_lat) / 2.0) * PI / 180.0;
+  double m_per_deg_lat = 111320.0;
+  double m_per_deg_lon = 111320.0 * cos(ref_lat_rad);
+
+  // Bow position = boat position + bow_offset along heading
+  double bow_lat = gps.lat + (OCS_BOW_OFFSET_M * cos(heading_rad)) / m_per_deg_lat;
+  double bow_lon = gps.lon + (OCS_BOW_OFFSET_M * sin(heading_rad)) / m_per_deg_lon;
+
+  // Project bow onto line PIN(A) -> RC(B). Local equirectangular
+  // meters frame anchored at PIN.
+  double Bx = (g_ocs.rc_lon - g_ocs.pin_lon) * m_per_deg_lon;
+  double By = (g_ocs.rc_lat - g_ocs.pin_lat) * m_per_deg_lat;
+  double Px = (bow_lon - g_ocs.pin_lon) * m_per_deg_lon;
+  double Py = (bow_lat - g_ocs.pin_lat) * m_per_deg_lat;
+
+  // 2D cross product gives signed perpendicular distance × |AB|.
+  // Sign convention: positive = "left" of AB walking PIN -> RC.
+  // The user/RC convention (which side is pre-start) is decided
+  // at arm time by how PIN and RC are passed. Standard fleet
+  // convention: PIN on port hand approaching start, RC on stbd;
+  // pre-start side is the side the cross-product convention
+  // picks positive.
+  double cross = Bx * Py - By * Px;
+  double lenAB = sqrt(Bx * Bx + By * By);
+  float d_signed = (lenAB > 0.001) ? (float)(cross / lenAB) : 0.0f;
+
+  // Closure-rate numerical derivative over last tick.
+  if (g_ocs._last_t_ms > 0) {
+    float dt = (now - g_ocs._last_t_ms) / 1000.0f;
+    if (dt > 0.005f) g_ocs.closure_rate_m_s = (d_signed - g_ocs._last_d) / dt;
+  }
+  g_ocs._last_d = d_signed;
+  g_ocs._last_t_ms = now;
+  g_ocs.distance_to_line_m = d_signed;
+
+  // Snapshot whether we were over at T+0 (within ±500 ms window).
+  int32_t time_to_start = (int32_t)(g_ocs.start_time_ms - now);  // positive = pre-start
+  if (time_to_start > -500 && time_to_start < 500) {
+    if (d_signed < -OCS_THRESHOLD_M) g_ocs.was_over_at_start = true;
+  }
+
+  // Over-line latching is only meaningful at/after T+0.
+  if (time_to_start <= 0) {
+    if (d_signed < -OCS_THRESHOLD_M) {
+      if (!g_ocs.over_line) {
+        g_ocs.over_line = true;
+        g_ocs.over_since_ms = now;
+        g_ocs.cleared_at_ms = 0;
+        Serial.printf("[OCS] Bow over line: d=%.2f m\n", d_signed);
+      }
+    } else if (g_ocs.over_line && d_signed > OCS_CLEAR_THRESHOLD_M) {
+      if (g_ocs.cleared_at_ms == 0) {
+        g_ocs.cleared_at_ms = now;
+      } else if (now - g_ocs.cleared_at_ms > OCS_CLEAR_DWELL_MS) {
+        g_ocs.over_line = false;
+        g_ocs.cleared_at_ms = 0;
+        Serial.printf("[OCS] Bow cleared line: d=%.2f m\n", d_signed);
+      }
+    } else {
+      g_ocs.cleared_at_ms = 0;
     }
   }
 }
@@ -5214,6 +5364,51 @@ void processCommand(String cmd, bool fromTelnet) {
       if (ok) g_configSyncCheckedThisBoot = true;
     }
 
+  } else if (cmd == "ocs") {
+    // Stage 4 — boat-local OCS state.
+    if (!g_ocs.armed) {
+      tprintln("ocs: NOT ARMED. Use `race arm <pin_lat> <pin_lon> <rc_lat> <rc_lon> <secs>`");
+    } else {
+      uint32_t now = millis();
+      int32_t to_start = (int32_t)(g_ocs.start_time_ms - now);
+      tprintln("ocs: ARMED");
+      tprintf("  PIN: %.7f, %.7f\n", g_ocs.pin_lat, g_ocs.pin_lon);
+      tprintf("  RC:  %.7f, %.7f\n", g_ocs.rc_lat, g_ocs.rc_lon);
+      if (to_start > 0) {
+        tprintf("  Start in: %d s\n", to_start / 1000);
+      } else {
+        tprintf("  Started: %d s ago\n", -to_start / 1000);
+      }
+      const char* side = g_ocs.distance_to_line_m >= 0 ? "pre-start" : "course";
+      tprintf("  Distance to line: %+.2f m (%s side)\n",
+              g_ocs.distance_to_line_m, side);
+      tprintf("  Closure rate: %+.2f m/s%s\n", g_ocs.closure_rate_m_s,
+              g_ocs.closure_rate_m_s < 0 ? " (approaching line)" : "");
+      tprintf("  Over line: %s\n", g_ocs.over_line ? "YES" : "no");
+      tprintf("  Was over at start: %s\n",
+              g_ocs.was_over_at_start ? "YES" : "no");
+    }
+
+  } else if (cmd.startsWith("race arm ")) {
+    // race arm <pin_lat> <pin_lon> <rc_lat> <rc_lon> <secs_from_now>
+    double pln, plg, rln, rlg;
+    int secs = 0;
+    int n = sscanf(cmd.c_str(), "race arm %lf %lf %lf %lf %d",
+                   &pln, &plg, &rln, &rlg, &secs);
+    if (n != 5) {
+      tprintln("usage: race arm <pin_lat> <pin_lon> <rc_lat> <rc_lon> <secs_from_now>");
+      tprintln("       example: race arm 42.3601 -71.0589 42.3604 -71.0578 300");
+    } else {
+      uint32_t start_ms = millis() + (uint32_t)(secs * 1000);
+      ocsArm(pln, plg, rln, rlg, start_ms);
+      tprintf("race armed: PIN(%.5f,%.5f) RC(%.5f,%.5f) T+0 in %d s\n",
+              pln, plg, rln, rlg, secs);
+    }
+
+  } else if (cmd == "race disarm" || cmd == "race off") {
+    ocsDisarm();
+    tprintln("race: disarmed");
+
   } else if (cmd == "mesh") {
     // ESP-NOW peer mesh status (Stage 2)
     if (!g_mesh_enabled) {
@@ -5284,6 +5479,10 @@ void processCommand(String cmd, bool fromTelnet) {
     tprintln("  mesh       - ESP-NOW peer mesh status + peers seen");
     tprintln("  statusup   - Upload fleet health snapshot to S3 now");
     tprintln("  configsync - Fetch cloud config from S3 (observe-only)");
+    tprintln("  ocs        - Show OCS state (Stage 4)");
+    tprintln("  race arm <pin_lat> <pin_lon> <rc_lat> <rc_lon> <secs>");
+    tprintln("             - Arm OCS state machine for a race start");
+    tprintln("  race disarm - Clear OCS arming");
     tprintln("  help       - Show this help");
     tprintln("================");
 
@@ -5890,6 +6089,9 @@ void loop() {
 
   g_loopSection = "mesh";
   meshTick();
+
+  g_loopSection = "ocs";
+  ocsTick();
 
   g_loopSection = "serial-cmd";
   handleSerialCommand();
