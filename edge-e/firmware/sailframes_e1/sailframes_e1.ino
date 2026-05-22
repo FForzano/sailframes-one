@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.17"
+#define FW_VERSION    "2026.05.20.18"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -4261,6 +4261,87 @@ bool uploadStatusSnapshot() {
   return false;
 }
 
+// ============================================================
+// v2.0.0 Stage 3.5 — cloud config sync (observe-only MVP)
+// ============================================================
+// Fetches config/<boat_id>/latest.json from S3, compares version
+// against locally-stored config.config_version. Reports cloud
+// version + any newer-than-local indication; does NOT modify
+// /sf/config.txt or apply changes yet. That comes in Stage 3.6
+// with atomic write + structural/feature-flag dispatch.
+//
+// This MVP exists so the plumbing is in place and validated on
+// the live fleet before we start mutating SD-side config.
+//
+// Endpoint pattern matches OTA: anonymous HTTP GET.
+static bool g_configSyncCheckedThisBoot = false;
+static int  g_cloud_config_version = -1;   // -1 = unknown / not fetched
+
+bool performConfigSync() {
+  if (!wifiConnected) return false;
+
+  String host = String(config.s3_bucket) + ".s3." + String(config.s3_region) + ".amazonaws.com";
+  String url = "http://" + host + "/config/" + String(config.boat_id) + "/latest.json";
+  Serial.printf("[CFGSYNC] Fetching %s\n", url.c_str());
+
+  WiFiClient client;
+  HTTPClient http;
+  http.setConnectTimeout(8000);
+  http.setTimeout(10000);
+  http.setReuse(false);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(client, url)) {
+    Serial.println("[CFGSYNC] http.begin failed");
+    return false;
+  }
+  int code = http.GET();
+  if (code == 404) {
+    Serial.println("[CFGSYNC] No cloud config (404) — nothing to do");
+    http.end();
+    return true;  // not an error; expected default state
+  }
+  if (code != 200) {
+    Serial.printf("[CFGSYNC] HTTP %d\n", code);
+    http.end();
+    return false;
+  }
+  String body = http.getString();
+  http.end();
+
+  // Reuse the OTA JSON extractors. Cloud version is the only field
+  // we look at for MVP — everything else is logged for visibility.
+  String versionStr = otaExtractJsonString(body, "version");
+  long cloudVersion = otaExtractJsonNumber(body, "version");
+  if (cloudVersion < 0 && versionStr.length() > 0) cloudVersion = versionStr.toInt();
+  if (cloudVersion < 0) {
+    Serial.println("[CFGSYNC] cloud JSON missing 'version' — skipping");
+    return false;
+  }
+
+  g_cloud_config_version = (int)cloudVersion;
+  int localVersion = config.config_version;
+
+  Serial.printf("[CFGSYNC] cloud v%d, local v%d\n", g_cloud_config_version, localVersion);
+  if (g_cloud_config_version > localVersion) {
+    Serial.printf("[CFGSYNC] cloud config NEWER (v%d > v%d) — pending apply\n",
+                  g_cloud_config_version, localVersion);
+    Serial.printf("[CFGSYNC] body: %s\n", body.c_str());
+    char line[64];
+    snprintf(line, sizeof(line), "cfgsync cloud=v%d local=v%d pending",
+             g_cloud_config_version, localVersion);
+    appendBootLog(line);
+    // Stage 3.6: parse + validate + atomic write /sf/config.txt here.
+    // For .18 MVP we just observe — no SD modification, no reboot.
+  } else if (g_cloud_config_version == localVersion) {
+    Serial.printf("[CFGSYNC] up to date (v%d)\n", g_cloud_config_version);
+  } else {
+    // Cloud is older than local — odd state, treat as no-op.
+    Serial.printf("[CFGSYNC] cloud older than local (v%d < v%d) — ignoring\n",
+                  g_cloud_config_version, localVersion);
+  }
+  return true;
+}
+
 static bool performOTAUpdateBody() {
   Serial.printf("[OTA] WiFi RSSI: %d dBm, free heap: %u\n", WiFi.RSSI(), ESP.getFreeHeap());
 
@@ -5119,6 +5200,20 @@ void processCommand(String cmd, bool fromTelnet) {
       if (ok) g_statusCheckedThisBoot = true;
     }
 
+  } else if (cmd == "configsync") {
+    // Stage 3.5 — force a cloud config check. Observe-only MVP.
+    if (!wifiConnected) {
+      tprintln("configsync: WiFi not connected");
+    } else {
+      bool ok = performConfigSync();
+      tprintf("configsync: %s\n", ok ? "OK (see Serial for diff)" : "failed");
+      tprintf("  local config_version = %d\n", config.config_version);
+      tprintf("  cloud config_version = %d%s\n",
+              g_cloud_config_version,
+              g_cloud_config_version < 0 ? " (not fetched)" : "");
+      if (ok) g_configSyncCheckedThisBoot = true;
+    }
+
   } else if (cmd == "mesh") {
     // ESP-NOW peer mesh status (Stage 2)
     if (!g_mesh_enabled) {
@@ -5188,6 +5283,7 @@ void processCommand(String cmd, bool fromTelnet) {
     tprintln("  radiomode  - Show current radio mode");
     tprintln("  mesh       - ESP-NOW peer mesh status + peers seen");
     tprintln("  statusup   - Upload fleet health snapshot to S3 now");
+    tprintln("  configsync - Fetch cloud config from S3 (observe-only)");
     tprintln("  help       - Show this help");
     tprintln("================");
 
@@ -5530,6 +5626,10 @@ void uploadTaskFunc(void* param) {
                 if (!g_statusCheckedThisBoot) {
                   if (uploadStatusSnapshot()) g_statusCheckedThisBoot = true;
                 }
+                // Stage 3.5: cloud config sync (observe-only MVP).
+                if (!g_configSyncCheckedThisBoot) {
+                  if (performConfigSync()) g_configSyncCheckedThisBoot = true;
+                }
                 // Release the radio whether OTA happened or not.
                 wifiTeardownRequested = true;
                 // Clear wifiBusy so (a) the Core 1 teardown block can
@@ -5667,6 +5767,10 @@ void uploadTaskFunc(void* param) {
             // on the same WiFi window used for OTA + session uploads.
             if (!g_statusCheckedThisBoot) {
               if (uploadStatusSnapshot()) g_statusCheckedThisBoot = true;
+            }
+            // Stage 3.5 cloud config sync (observe-only MVP).
+            if (!g_configSyncCheckedThisBoot) {
+              if (performConfigSync()) g_configSyncCheckedThisBoot = true;
             }
 
             // All done — request WiFi teardown. We do NOT tear down here on
