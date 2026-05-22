@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.14"
+#define FW_VERSION    "2026.05.20.15"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -5375,6 +5375,12 @@ void uploadTaskFunc(void* param) {
                 performOTAUpdate(false);   // body's SSID + version gates apply
                 // Release the radio whether OTA happened or not.
                 wifiTeardownRequested = true;
+                // Clear wifiBusy so (a) the Core 1 teardown block can
+                // proceed (it gates on !wifiBusy) and (b) meshTick can
+                // resume broadcasting. Previously left stuck true after
+                // "Already up to date" returns since OTA didn't restart
+                // — observed on .14 as tx=N frozen on the canary boat.
+                wifiBusy = false;
               } else {
                 Serial.println("[OTA] WiFi connect failed for OTA-only check");
                 wifiBusy = false;
