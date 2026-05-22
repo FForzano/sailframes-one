@@ -59,6 +59,7 @@
 #define CONFIG_BT_NIMBLE_SVC_GAP_DEVICE_NAME "SailFrames-E1"
 #include <NimBLEDevice.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include <string>
 #include "v2_types.h"  // v2.0.0 foundation: HardwarePlatform/UnitRole/RadioMode enums
 #include "mesh.h"      // v2.0.0 Stage 2: ESP-NOW peer-mesh wire types
@@ -100,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.20.13"
+#define FW_VERSION    "2026.05.20.14"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -1074,8 +1075,13 @@ void meshInit() {
   if (g_mesh_enabled) return;
   g_mesh_local_sender_id = boatIdHash(config.boat_id);
 
-  // ESP-NOW requires WiFi in STA or AP mode. setup() already ran
-  // WiFi.mode(WIFI_STA) early so the radio is up.
+  // ESP-NOW needs the WiFi radio enabled to transmit, not just the
+  // driver initialised. Early-setup() does WiFi.mode(WIFI_STA) then
+  // WiFi.disconnect(true) which turns the radio OFF (esp_wifi_stop).
+  // Re-enable STA mode here. This is idempotent if WiFi was already
+  // up from a later connectWiFi().
+  WiFi.mode(WIFI_STA);
+
   esp_err_t err = esp_now_init();
   if (err != ESP_OK) {
     Serial.printf("[MESH] esp_now_init failed: %d\n", err);
@@ -1084,10 +1090,18 @@ void meshInit() {
 
   esp_now_register_recv_cb(meshOnReceive);
 
+  // Pin the WiFi channel explicitly so esp_now_send always knows which
+  // channel to transmit on, even when STA is not associated with any
+  // AP. .13 used peerInfo.channel=0 which means "use current STA
+  // channel" — but when STA hasn't connected to anything yet, that
+  // channel is undefined and esp_now_send returns ESP_ERR_ESPNOW_IF
+  // (tx=0 fail=N pattern observed on the fleet's .13 boot).
+  esp_wifi_set_channel(MESH_CHANNEL, WIFI_SECOND_CHAN_NONE);
+
   esp_now_peer_info_t peerInfo = {};
   memcpy(peerInfo.peer_addr, MESH_BROADCAST_ADDR, 6);
-  peerInfo.channel = 0;     // 0 = current STA channel; using STA channel avoids
-                            // having to force-switch off-AP and lose Home-IOT
+  peerInfo.channel = MESH_CHANNEL;     // explicit channel, not 0
+  peerInfo.ifidx   = WIFI_IF_STA;      // be explicit; was zero-init
   peerInfo.encrypt = false;
   err = esp_now_add_peer(&peerInfo);
   if (err != ESP_OK) {
@@ -1097,8 +1111,8 @@ void meshInit() {
   }
 
   g_mesh_enabled = true;
-  Serial.printf("[MESH] ESP-NOW init OK, sender_id=0x%08lx ch=current(STA)\n",
-                (unsigned long)g_mesh_local_sender_id);
+  Serial.printf("[MESH] ESP-NOW init OK, sender_id=0x%08lx ch=%d\n",
+                (unsigned long)g_mesh_local_sender_id, MESH_CHANNEL);
   appendBootLog("mesh init ok");
 }
 
@@ -1134,8 +1148,20 @@ static void meshBuildAndSendBoatState() {
   p->reserved[0] = p->reserved[1] = 0;
 
   esp_err_t err = esp_now_send(MESH_BROADCAST_ADDR, buf, sizeof(buf));
-  if (err == ESP_OK) g_mesh_tx_count++;
-  else               g_mesh_tx_fail_count++;
+  if (err == ESP_OK) {
+    g_mesh_tx_count++;
+  } else {
+    g_mesh_tx_fail_count++;
+    // Log the first 5 distinct error codes — quick diagnosis for any
+    // future regression. ESP_ERR_ESPNOW_IF (0x3000+) = wifi not started
+    // or wrong mode. ESP_ERR_ESPNOW_ARG = bad args. NOT_FOUND = peer
+    // missing. NO_MEM = system memory.
+    static int s_logged = 0;
+    if (s_logged < 5) {
+      Serial.printf("[MESH] esp_now_send failed: 0x%x\n", err);
+      s_logged++;
+    }
+  }
 }
 
 // Called from the main loop. Cheap path: returns fast if disabled,
