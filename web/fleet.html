@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SailFrames Fleet Health</title>
+    <link rel="stylesheet" href="./assets/css/main.css?v=10">
+    <script src="./config.js"></script>
+    <script src="./assets/js/analytics.js"></script>
+    <style>
+        .fleet-container {
+            max-width: 1200px;
+            margin: 80px auto 40px;
+            padding: 0 20px;
+        }
+        .fleet-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .fleet-header h1 {
+            color: var(--text-primary);
+            margin: 0;
+            font-size: 1.8rem;
+        }
+        .fleet-header .meta {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        .fleet-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px;
+        }
+        .boat-card {
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            padding: 18px;
+            border: 1px solid var(--border-color, #2a2a2a);
+            transition: border-color 0.15s ease;
+        }
+        .boat-card.stale { border-color: rgba(239, 68, 68, 0.4); }
+        .boat-card.warn  { border-color: rgba(234, 179, 8, 0.4); }
+        .boat-card.ok    { border-color: rgba(34, 197, 94, 0.3); }
+        .boat-card.missing {
+            border-style: dashed;
+            opacity: 0.55;
+        }
+        .boat-card h2 {
+            font-size: 1.4rem;
+            margin: 0 0 6px;
+            color: var(--text-primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        .boat-card .fw {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: normal;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .boat-card .age {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+        }
+        .stat-row {
+            display: grid;
+            grid-template-columns: 110px 1fr;
+            gap: 8px;
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }
+        .stat-row .lbl {
+            color: var(--text-secondary);
+        }
+        .stat-row .val {
+            color: var(--text-primary);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .stat-row .val.bad  { color: #ef4444; }
+        .stat-row .val.warn { color: #eab308; }
+        .stat-row .val.ok   { color: #22c55e; }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+        .refresh-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .refresh-btn:hover { opacity: 0.9; }
+        .refresh-btn:disabled { opacity: 0.5; cursor: wait; }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <a href="/" class="nav-logo">SailFrames</a>
+        <div class="nav-links">
+            <a href="./races.html" class="nav-link">Races</a>
+            <a href="./fleet.html" class="nav-link primary">Fleet</a>
+        </div>
+    </nav>
+
+    <div class="fleet-container">
+        <div class="fleet-header">
+            <h1>Fleet Health</h1>
+            <div>
+                <span class="meta" id="last-refresh">—</span>
+                <button class="refresh-btn" id="refresh-btn">Refresh</button>
+            </div>
+        </div>
+        <div class="fleet-grid" id="fleet-grid">
+            <div class="loading">Loading fleet snapshots…</div>
+        </div>
+    </div>
+
+    <script>
+    // Fleet health dashboard. Reads raw/<boat_id>/_health.json from S3
+    // (uploaded by firmware Stage 3 MVP, .17+). Pure client-side fetch.
+    const BUCKET_BASE = 'https://sailframes-fleet-data-prod.s3.us-east-1.amazonaws.com';
+    const BOATS = ['E1', 'E2', 'E3', 'E4', 'E5', 'E6'];
+
+    function fmtAge(secondsAgo) {
+        if (secondsAgo < 60) return `${Math.round(secondsAgo)}s ago`;
+        if (secondsAgo < 3600) return `${Math.round(secondsAgo / 60)}m ago`;
+        if (secondsAgo < 86400) return `${(secondsAgo / 3600).toFixed(1)}h ago`;
+        return `${(secondsAgo / 86400).toFixed(1)}d ago`;
+    }
+    function fmtUptime(s) {
+        if (s < 60) return `${s}s`;
+        if (s < 3600) return `${Math.floor(s/60)}m ${s%60}s`;
+        const h = Math.floor(s/3600);
+        const m = Math.floor((s%3600)/60);
+        return `${h}h ${m}m`;
+    }
+    function gpsLabel(fix, sats) {
+        if (fix === 'none' || sats === 0) return ['no fix', 'warn'];
+        if (fix === 'dgps') return [`dgps · ${sats} sats`, 'ok'];
+        return [`${fix} · ${sats} sats`, 'ok'];
+    }
+    function batteryClass(pct) {
+        if (pct < 25) return 'bad';
+        if (pct < 50) return 'warn';
+        return 'ok';
+    }
+
+    async function fetchOne(boat) {
+        const url = `${BUCKET_BASE}/raw/${boat}/_health.json?t=${Date.now()}`;
+        try {
+            const r = await fetch(url);
+            if (!r.ok) return { boat, missing: true };
+            // S3 reports the upload timestamp via the Last-Modified header.
+            const lastModified = r.headers.get('Last-Modified');
+            const data = await r.json();
+            return { boat, data, lastModified };
+        } catch (e) {
+            return { boat, missing: true, error: String(e) };
+        }
+    }
+
+    function renderCard(result) {
+        const card = document.createElement('div');
+        card.className = 'boat-card';
+
+        if (result.missing) {
+            card.classList.add('missing');
+            card.innerHTML = `<h2>${result.boat}</h2>
+                <div class="age">No _health.json on S3 yet</div>
+                <div class="stat-row"><span class="lbl">Status</span><span class="val warn">Hasn't uploaded</span></div>`;
+            return card;
+        }
+
+        const d = result.data;
+        const lastModMs = result.lastModified ? new Date(result.lastModified).getTime() : Date.parse(d.ts_iso);
+        const ageSec = (Date.now() - lastModMs) / 1000;
+
+        // Staleness coloring: >24 h = stale (red), >1 h = warn, else ok
+        if (ageSec > 86400) card.classList.add('stale');
+        else if (ageSec > 3600) card.classList.add('warn');
+        else card.classList.add('ok');
+
+        const [gpsTxt, gpsCls] = gpsLabel(d.gps_fix, d.sats);
+        const batCls = batteryClass(d.battery_pct);
+        const peerCls = d.espnow_peers >= 5 ? 'ok' : d.espnow_peers >= 1 ? 'warn' : 'bad';
+        const heapCls = d.min_heap < 30000 ? 'warn' : 'ok';
+
+        card.innerHTML = `
+            <h2>${d.boat_id} <span class="fw">FW${d.version}</span></h2>
+            <div class="age">${fmtAge(ageSec)} · uptime ${fmtUptime(d.uptime_s)}</div>
+            <div class="stat-row">
+                <span class="lbl">Battery</span><span class="val ${batCls}">${d.battery_pct}% · ${d.battery_v.toFixed(2)}V</span>
+                <span class="lbl">GPS</span><span class="val ${gpsCls}">${gpsTxt}</span>
+                <span class="lbl">Position</span><span class="val">${d.last_position.lat.toFixed(5)}, ${d.last_position.lon.toFixed(5)}</span>
+                <span class="lbl">Mesh peers</span><span class="val ${peerCls}">${d.espnow_peers}/5 · tx ${d.espnow_tx} · rx ${d.espnow_rx}</span>
+                <span class="lbl">WiFi</span><span class="val">${d.wifi_ssid || '—'} · ${d.wifi_rssi} dBm</span>
+                <span class="lbl">Heap</span><span class="val ${heapCls}">free ${Math.round(d.free_heap/1024)} KB · min ${Math.round(d.min_heap/1024)} KB</span>
+                <span class="lbl">Hardware</span><span class="val">${d.hardware_platform} · IMU ${d.imu_ok ? '✓' : '✗'} · SD ${d.sd_ok ? '✓' : '✗'}</span>
+                <span class="lbl">Role</span><span class="val">${d.unit_role}</span>
+            </div>`;
+        return card;
+    }
+
+    async function refresh() {
+        const btn = document.getElementById('refresh-btn');
+        btn.disabled = true;
+        const grid = document.getElementById('fleet-grid');
+        const results = await Promise.all(BOATS.map(fetchOne));
+        grid.innerHTML = '';
+        results.forEach(r => grid.appendChild(renderCard(r)));
+        document.getElementById('last-refresh').textContent =
+            `last refreshed ${new Date().toLocaleTimeString()}`;
+        btn.disabled = false;
+    }
+
+    document.getElementById('refresh-btn').addEventListener('click', refresh);
+    refresh();
+    setInterval(refresh, 60000);  // auto-refresh every minute
+    </script>
+</body>
+</html>
