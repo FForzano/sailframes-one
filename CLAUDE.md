@@ -167,7 +167,14 @@ Freerouting + manual cleanup.
   chopping sessions mid-race. Pending files upload on next boot via the
   stationary-upload path (which fires while `!logging`)
 - Power-button toggle of recording
-- Configuration via SD `config.txt`
+- Configuration via SD `config.txt`, optionally pushed via S3 (Stage 3.6 —
+  see "v2.0.0 race-operations stack")
+- ESP-NOW peer mesh @ 2 Hz boat-state broadcast, always-on after WiFi PHY
+  init (Stage 2). Wire types in `mesh.h`; FNV-1a hash of `boat_id` is the
+  stable cross-boot sender identity
+- Boat-local OCS state machine (Stage 4) + RC-side fleet OCS aggregation
+  with `MSG_INDIVIDUAL_RECALL` broadcast (Stage 5). Per-class bow_offset
+  registry in `/sf/classes.csv` (Stage 5.5)
 
 ### Pinned library / core versions (do NOT auto-update)
 
@@ -203,8 +210,18 @@ with files pending, or `<n>/<total>` during active upload).
 | `cleanup` | Delete already-uploaded files |
 | `status` | GPS/IMU/SD/WiFi/battery snapshot |
 | `gps` / `gpsraw` / `gpscfg` | GPS debug |
-| `config` | Show config |
+| `config` / `configver` | Show config / config version + boat_id + FW |
+| `update` / `ota` | Manual auto-OTA pull from S3 manifest |
 | `telneton` / `telnetoff` | Enable/disable runtime telnet listener |
+| `role` / `hwid` / `flags` / `radiomode` | v2.0.0 foundation introspection |
+| `mesh` | ESP-NOW peer-mesh status + per-peer telemetry |
+| `statusup` | Force `_health.json` snapshot upload |
+| `configsync` | Fetch + apply cloud config from S3 (reboots if newer) |
+| `ocs` | Show boat-local OCS state |
+| `race arm <pin_lat> <pin_lon> <rc_lat> <rc_lon> <secs>` | Arm OCS + broadcast `MSG_RACE_ARMED` to fleet |
+| `race disarm` / `race off` | Disarm local OCS |
+| `fleet` | RC view of per-peer distance + OCS state (role=`rc_signal` only) |
+| `classes` | Show `/sf/classes.csv` bow_offset registry (RC-only) |
 
 Telnet listener defaults **OFF** — its `WiFiServer.hasClient()` calls
 deadlocked Core 1 inside LWIP under upload contention (firmware
@@ -221,6 +238,9 @@ deadlocked Core 1 inside LWIP under upload contention (firmware
 │   └── E1_20260405_225030_pres.csv # DPS310 @ 0.1 Hz
 ├── boot.log                         # Reset reason / heap per boot
 ├── config.txt
+├── config.txt.prev                  # One-deep backup from last cloud config apply
+├── classes.csv                      # Per-class bow_offset registry (RC-only; optional)
+├── ocs_disagree.log                 # RC-vs-boat OCS divergence log (one line per recall)
 └── wind_mac.txt                     # Calypso MAC; presence = wind enabled
 ```
 
@@ -323,6 +343,123 @@ heap corruption.
   When `loopTask` hangs, the diag heartbeat keeps printing — the last
   `sect=` value names the section Core 1 was inside. This pinpointed the
   `handleTelnet` hang in firmware 2026.05.03.04.
+
+---
+
+## v2.0.0 race-operations stack
+
+Race-day functionality layered on top of the base logger. Each stage is
+self-contained; stages can be enabled per-boat via `unit_role` in config.
+
+### Unit roles
+
+`config.txt → unit_role=` one of:
+
+- `racing_boat` (default) — broadcasts boat state, computes its own OCS
+- `rc_signal` — Race Committee signal boat. Also computes fleet-wide OCS
+  for every peer in the mesh and broadcasts `MSG_INDIVIDUAL_RECALL` on
+  over-line. Loads `/sf/classes.csv` at boot.
+- `rc_pin` — pin-end mark boat (not yet behaviorally distinct)
+- `mark` — round-mark boat (not yet behaviorally distinct)
+- `committee_chase` / `spare` — placeholders
+
+### ESP-NOW peer mesh (Stage 2)
+
+Always-on 2 Hz broadcast on channel 1. Wire types live in `mesh.h`:
+
+- `MeshHeader` (16 B): magic `SF`, version, msg_type, seq, ttl,
+  `sender_id` = FNV-1a hash of `boat_id` (stable across boots).
+- `MSG_BOAT_STATE` + `BoatStatePayload` (20 B): lat_e7 / lon_e7 /
+  sog_cm_s / cog_deg10 / heading_deg10 / heel_deg / fix_quality /
+  sat_count / unit_role.
+- `MSG_RACE_ARMED` + `RaceArmedPayload` (24 B): pin/RC line endpoints +
+  `seconds_until_start` (relative to receiver millis, sidesteps GPS-time
+  unavailable at dock); 3× transmission, no ACK.
+- `MSG_INDIVIDUAL_RECALL` + `IndividualRecallPayload` (8 B): target
+  sender_id + distance_cm; 3× transmission; receiver matches its own
+  FNV-1a hash and overrides local OCS via `ocsForceOver()`.
+
+All payloads are `__attribute__((packed))` with `static_assert` on
+sizeof — off-by-one writes have already smashed the stack once (gotcha
+#25); don't trust the compiler to enforce wire-format size.
+
+### OCS state machines (Stages 4, 5, 5.5)
+
+- **Boat-local OCS** (`ocsTick`, every loop): once armed via `race arm`
+  or via inbound `MSG_RACE_ARMED`, projects own bow position onto the
+  start line, latches `over_line=true` post-T+0 when signed distance
+  drops below `-OCS_THRESHOLD_M` (0.5 m). 2 s clear-dwell before
+  un-latching.
+- **RC-side fleet OCS** (`rcComputeFleetOCS`, 5 Hz, role=`rc_signal`
+  only): same math applied to every peer in `g_mesh_peers`, using
+  per-peer bow_offset from `/sf/classes.csv` (falls back to 2.4 m
+  default for unknown peers). On line crossing post-T+0, broadcasts
+  `MSG_INDIVIDUAL_RECALL` 3×.
+- **Disagreement logging**: when a boat receives a recall, it appends
+  `/sf/ocs_disagree.log` with `t=<iso> armed=<0|1> local_over=<0|1>
+  rc_d=<m> local_d=<m> delta=<m>` for post-race RC-vs-boat divergence
+  forensics (bad bow_offset, drifting IMU heading, fix latency).
+
+Bow-position math uses GPS COG when `sog > 2 kt`, IMU heading otherwise
+(magnetometer disabled because of keel/rigging interference — see
+"BNO085 IMU Configuration").
+
+### `/sf/classes.csv` (RC-only)
+
+```
+boat_id,class,bow_offset_m
+E1,Sonar23,2.4
+F1,J80,2.8
+```
+
+Header row optional. `#` comments OK. Missing file → silent fallback to
+`OCS_BOW_OFFSET_M` (2.4 m) for every peer. Loaded only when
+`unit_role=rc_signal`.
+
+### Cloud config sync (Stages 3.5 → 3.6)
+
+OTA-style manifest pointing at a separate text body. Both live at:
+
+```
+s3://sailframes-fleet-data-prod/config/<boat_id>/latest.json
+  → { "version": N, "url": ".../vN.txt", "sha256": "...", "applied_at": "..." }
+s3://sailframes-fleet-data-prod/config/<boat_id>/vN.txt
+  → raw key=value text body (same format as /sf/config.txt)
+```
+
+Bucket policy: `PublicReadCloudConfig` allows anonymous `s3:GetObject`
+on `/config/*`. PUT is via authenticated `aws s3 cp`, not anonymous.
+
+**Apply path** (one-shot per boot, fires after stationary-upload sweep):
+
+1. Fetch manifest, compare `version` against local `config.config_version`.
+2. If cloud is newer, fetch body, verify sha256.
+3. Read existing `/sf/config.txt`, merge **allow-listed** keys only:
+   `wind_enabled`, `wind_offset`, `start_speed_knots`, `stop_speed_knots`,
+   `start_delay_sec`, `stop_delay_sec`, `unit_role`. Identity &
+   connectivity (`boat_id`, `wifi*`, `wind_mac`, `s3_*`, `upload_url`,
+   `hardware_platform`) are deliberately excluded — a bad push must not
+   be able to lock a boat off the network or change its FNV-1a sender_id.
+4. Force `config_version=<manifest version>`.
+5. Atomic rename through `.tmp`, with `/sf/config.txt.prev` as one-deep
+   backup.
+6. Schedule reboot in 3 s (honored by main loop once `!uploading`).
+
+**Safety gates** (manifest fetched, apply skipped, retries on next clean
+boot):
+
+- `g_ocs.armed` — never rewrite config during a race-start window
+- `logging` — never reboot mid-recording session
+- sha256 mismatch — abort + log to `boot.log`
+- Local `/config.txt` empty — bail rather than merge from blank state
+
+### Web fleet health (Stage 3)
+
+Each boat PUTs a `_health.json` snapshot to
+`s3://…/raw/<boat>/_health.json` (public-readable via
+`PublicReadFleetHealth` bucket policy + CORS for `sailframes.com`).
+`web/fleet.html` is a sortable / filterable table fetching all 6 boats'
+snapshots client-side for at-a-glance fleet visibility.
 
 ---
 
@@ -628,6 +765,36 @@ Stations: 44013 / CSIM3 (Castle Island) / 44029 / BUZM3 / NTKM3 / KBOS (Logan).
     `--full` mode is unaffected (writes bootloader + partitions
     + app, which gets the device into a clean state regardless).
 
+25. **ESP-NOW wire-format off-by-one smashes the stack** — Stage 2 .10
+    wrote `p->reserved[2] = 0` on a 36-byte buf when the packed payload
+    structure ended at byte 36; the OOB write corrupted the stack
+    canary and panicked Core 1. `addr2line` returned nonsense
+    backtraces; parsing the linker map directly pinpointed `meshTick`
+    as the culprit. **Always `static_assert(sizeof(X) == N)` every
+    packed wire struct** and never write past the documented payload
+    size. The linker-map technique now lives in the
+    `reference_esp32_debug_techniques.md` memory entry.
+
+26. **`WiFi.disconnect(true)` tears down ESP-NOW** — the second
+    argument to `WiFi.disconnect()` is `wifioff`. Passing `true`
+    powers down the radio entirely, which deinits ESP-NOW state and
+    causes subsequent `esp_now_send` calls to return
+    `ESP_ERR_ESPNOW_NOT_INIT`. The fleet hit this on Stage 2 .14 after
+    every WiFi cycle. Workaround: `meshTick` auto-recovers by
+    re-initing ESP-NOW on that specific error code, but the cleaner
+    fix is `WiFi.disconnect(false)` when you still need the radio for
+    mesh broadcasts.
+
+27. **Cloud config identity allow-list** — `performConfigSync()` will
+    merge **only** the allow-listed keys from a cloud config push (see
+    "Cloud config sync" section above). A push containing
+    `boat_id=ATTACK\nwifi1_pass=hunter2` silently drops both — they're
+    not in `CLOUD_CONFIG_ALLOW_KEYS`. This is deliberate: a malformed
+    cloud push must not be able to change a boat's FNV-1a sender_id
+    hash (would break mesh peer + class registry lookups) or lock it
+    off the network. When adding new cloud-settable keys, ADD them to
+    the allow-list explicitly; never widen it via a regex / category.
+
 ---
 
 ## Weather Data Integration
@@ -659,7 +826,10 @@ Stations: 44013 / CSIM3 (Castle Island) / 44029 / BUZM3 / NTKM3 / KBOS (Logan).
 ## Competitive Landscape (placeholder)
 
 Differentiators worth preserving in product framing:
-- PPK GNSS — only platform doing post-processed kinematic on the fleet
+- 10 Hz GNSS + 10 Hz IMU motion analytics — per-tack motion, real-time
+  OCS at the start, individual-recall broadcast to the boat that's over
+- Fleet-wide ESP-NOW peer mesh — no cellular dependency at the course;
+  RC unit aggregates boat state and broadcasts race events to all 6
 - Multi-sensor hardware (IMU + barometer + wind + camera-future)
 - Fleet-wide simultaneous logging (×6 on the same course)
 - Open source (Apache 2.0)
@@ -707,10 +877,32 @@ lives separately.
   fired — soft hang with `wifiBusy=true` stuck). Root cause: auto-OTA
   recv loop in `.07` had no stall watchdog. Hardened in `2026.05.05.08`
   — see gotcha #22 — with stall + deadline + Core 1 loop watchdogs.
+- **2026-05-19 → 21:** v2.0.0 race-operations stack landed. Stage 1
+  (HW platform / unit role / radio mode skeleton) + Stage 2 (ESP-NOW
+  peer mesh, 99.9% tx success across 6 boats after the .10–.16 bug
+  saga — gotchas #25 and #26) + Stage 3 / 3.5 (`_health.json` snapshot
+  upload + observe-only cloud config sync) + Stage 4 (boat-local OCS
+  state machine) + Stage 4.5 (mesh-distributed race arming via
+  `MSG_RACE_ARMED`).
+- **2026-05-21:** PPK / raw-RTCM3 retired in firmware `.09` — chose
+  10 Hz GNSS + 10 Hz IMU for accurate OCS over post-race PPK. Archive
+  at `docs/RTCM_PPK_ARCHIVE.md` (git SHA 08cdadfe) preserves the
+  revival path. Hourly Miami CORS lambda + EventBridge rule disabled
+  (CFN State:DISABLED, retained for one-line re-enable).
+- **2026-05-22:** Stage 5 (RC fleet OCS aggregation, `rcComputeFleetOCS`
+  + `MSG_INDIVIDUAL_RECALL` broadcast on post-T+0 line crossing) +
+  Stage 5.5 (per-class `/sf/classes.csv` bow_offset registry +
+  `/sf/ocs_disagree.log` for RC-vs-boat divergence forensics) +
+  Stage 3.6 (cloud config apply — atomic SD rewrite with allow-listed
+  keys, sha256 verification, `.prev` backup, gates on
+  `g_ocs.armed`/`logging`). All 6 boats on FW `2026.05.22.02`.
+  Backyard end-to-end test of Stages 3.6 + 5 still pending — see
+  `project_deployment_status` memory entry.
 
 ---
 
-*Last updated: 2026-05-14 — added gotcha #24 (serial reflash boots
-the OLD firmware after an OTA cycle because `otadata` still points
-at the other slot; `flash-e1.sh` now erases the otadata region
-before app-only writes).*
+*Last updated: 2026-05-23 — added v2.0.0 race-operations stack section
+(Stages 2 → 5.5 + 3.6), gotchas #25 (wire-format off-by-one),
+#26 (`WiFi.disconnect(true)` tears down ESP-NOW), and #27 (cloud
+config identity allow-list); refreshed competitive landscape (PPK →
+10 Hz GNSS + IMU + fleet mesh).*
