@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.25.01"
+#define FW_VERSION    "2026.05.25.02"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -3988,36 +3988,6 @@ bool uploadFile(const char* filepath) {
 
   Serial.printf("[UPLOAD] S3 HTTP PUT: %s\n", s3Url.c_str());
 
-  // Use plain HTTP client (no TLS - bucket policy allows unauthenticated PUT)
-  WiFiClient client;
-  // WiFiClient.setTimeout takes SECONDS in ESP32 Arduino Core.
-  // Was 300 s — equal to the task wdt — which caused fleet-wide
-  // synchronized reboots when Home-IOT dropped TCP sockets without
-  // FINs (2026-05-25 event, all 6 boats stuck in zombie PUTs hit
-  // wdt at +300 s simultaneously). 60 s is plenty for any single
-  // socket read on a working link; if the link is wedged, we'd
-  // rather bail and let the next loop iter feed the wdt.
-  client.setTimeout(60);
-
-  HTTPClient http;
-  // HTTPClient.setTimeout takes MILLISECONDS. Hard ceiling on the
-  // PUT — must stay well under the 300 s task wdt. 120 s is enough
-  // for a multi-MB CSV at the worst usable signal we've seen at the
-  // yacht club (gotcha #21 needed >120 s for 660 KB RTCM3, which is
-  // retired; CSVs are smaller).
-  http.setConnectTimeout(8000);
-  http.setTimeout(120000);
-  http.setReuse(false);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);  // Follow S3 redirects
-
-  yield();
-
-  if (!http.begin(client, s3Url)) {
-    Serial.printf("[UPLOAD] Failed to begin HTTP: %s\n", filepath);
-    file.close();
-    return false;
-  }
-
   // Determine content type
   String contentType = "application/octet-stream";
   if (filename.endsWith(".csv")) {
@@ -4026,47 +3996,150 @@ bool uploadFile(const char* filepath) {
     contentType = "application/octet-stream";
   }
 
-  http.addHeader("Content-Type", contentType);
-  http.addHeader("Content-Length", String(fileSize));
+  // Manual chunked PUT (replaces HTTPClient::sendRequest). HTTPClient
+  // blocks the entire body transmission with no esp_task_wdt_reset()
+  // calls inside. For multi-MB files at typical link speeds (50-100
+  // KB/s) a single PUT can take 3+ minutes; the 300 s task wdt fires
+  // mid-upload (2026-05-25 event: 19.8 MB IMU CSV repeatedly tripped
+  // wdt at ~300 s into the PUT, even though bytes were flowing).
+  // setTimeout on HTTPClient is per-read, not total — useless against
+  // genuinely-slow-but-progressing transfers.
+  //
+  // Doing the write loop ourselves lets us:
+  //   - feed the task wdt every chunk (~4 KB)
+  //   - run a no-progress stall watchdog independent of total elapsed
+  //   - enforce a hard ceiling (10 min/file) so a truly stuck PUT
+  //     bails without burning the task wdt
+  String s3Host = String(config.s3_bucket) + ".s3." + String(config.s3_region) + ".amazonaws.com";
+  String s3Path = "/raw/" + String(config.boat_id) + "/" + dateFolder + "/" + filename;
 
-  // Add custom metadata headers (x-amz-meta-* prefix for S3)
-  http.addHeader("x-amz-meta-boat-id", config.boat_id);
-  http.addHeader("x-amz-meta-original-path", filepath);
+  WiFiClient client;
+  if (!client.connect(s3Host.c_str(), 80, 10000)) {
+    Serial.printf("[UPLOAD] TCP connect failed: %s\n", s3Host.c_str());
+    file.close();
+    uploadFailed++;
+    return false;
+  }
+
+  // Headers
+  client.printf("PUT %s HTTP/1.1\r\n", s3Path.c_str());
+  client.printf("Host: %s\r\n", s3Host.c_str());
+  client.printf("Content-Type: %s\r\n", contentType.c_str());
+  client.printf("Content-Length: %u\r\n", (unsigned)fileSize);
+  client.printf("x-amz-meta-boat-id: %s\r\n", config.boat_id);
+  client.printf("x-amz-meta-original-path: %s\r\n", filepath);
+  client.print("Connection: close\r\n\r\n");
 
   yield();
+  esp_task_wdt_reset();
 
+  // Body — chunked send with per-chunk wdt feed.
+  // Static buf keeps 4 KB off the upload task's stack (only ~9 KB).
+  const size_t CHUNK = 4096;
+  static uint8_t buf[CHUNK];
   unsigned long startTime = millis();
-  int httpCode = http.sendRequest("PUT", &file, fileSize);
+  unsigned long lastProgress = startTime;
+  size_t sent = 0;
+  bool aborted = false;
+  const char* abortReason = "";
+
+  while (sent < fileSize) {
+    esp_task_wdt_reset();
+    yield();
+
+    unsigned long now = millis();
+    if (now - lastProgress > 30000) {
+      aborted = true; abortReason = "STALL_30S"; break;
+    }
+    if (now - startTime > 600000) {
+      aborted = true; abortReason = "CEILING_10MIN"; break;
+    }
+    if (!client.connected()) {
+      aborted = true; abortReason = "PEER_CLOSED"; break;
+    }
+
+    size_t want = (fileSize - sent < CHUNK) ? (fileSize - sent) : CHUNK;
+    int r = file.read(buf, want);
+    if (r <= 0) {
+      aborted = true; abortReason = "SD_READ_FAILED"; break;
+    }
+
+    size_t w = client.write(buf, (size_t)r);
+    if (w == 0) {
+      aborted = true; abortReason = "SOCKET_WRITE_0"; break;
+    }
+    sent += w;
+    lastProgress = millis();
+  }
+
   unsigned long elapsed = (millis() - startTime) / 1000;
-
-  String response = http.getString();
   file.close();
-  http.end();
 
+  if (aborted) {
+    Serial.printf("[UPLOAD] Aborted: %s (%s) at %u/%u bytes after %lus\n",
+                  filepath, abortReason, (unsigned)sent, (unsigned)fileSize, elapsed);
+    client.stop();
+    uploadFailed++;
+    return false;
+  }
+
+  esp_task_wdt_reset();
+
+  // Response — wait up to 60 s for S3 to start replying, then parse
+  // status line and drain. 60 s is generous because S3 can take a
+  // few seconds to acknowledge a large PUT.
+  int httpCode = -1;
+  String response;
+  unsigned long respDeadline = millis() + 60000;
+  while (client.connected() && !client.available() && millis() < respDeadline) {
+    esp_task_wdt_reset();
+    yield();
+    delay(10);
+  }
+
+  if (client.available()) {
+    String statusLine = client.readStringUntil('\n');
+    int sp1 = statusLine.indexOf(' ');
+    int sp2 = statusLine.indexOf(' ', sp1 + 1);
+    if (sp1 > 0 && sp2 > sp1) {
+      httpCode = statusLine.substring(sp1 + 1, sp2).toInt();
+    }
+    // Drain remainder so connection closes cleanly + body is logged on errors.
+    unsigned long drainDeadline = millis() + 5000;
+    while (client.connected() && millis() < drainDeadline) {
+      if (client.available()) {
+        char c = client.read();
+        if (response.length() < 500) response += c;
+      } else {
+        esp_task_wdt_reset();
+        yield();
+        delay(1);
+      }
+    }
+  } else {
+    Serial.println("[UPLOAD] No response from S3 within 60 s after upload");
+  }
+
+  client.stop();
   yield();
   delay(50);
 
   if (httpCode == 200 || httpCode == 201 || httpCode == 204) {
-    Serial.printf("[UPLOAD] Success: %s (HTTP %d, %lus)\n", filepath, httpCode, elapsed);
+    Serial.printf("[UPLOAD] Success: %s (HTTP %d, %lus, %u bytes)\n",
+                  filepath, httpCode, elapsed, (unsigned)fileSize);
     uploadSuccess++;
-    // Don't call updateDisplay() - runs on Core 1, main loop handles it
     return true;
   } else {
-    const char* errMsg = "";
-    if (httpCode == -1) errMsg = "CONNECTION_REFUSED/TIMEOUT";
-    else if (httpCode == -2) errMsg = "SEND_HEADER_FAILED";
-    else if (httpCode == -3) errMsg = "SEND_PAYLOAD_FAILED";
-    else if (httpCode == -4) errMsg = "NOT_CONNECTED";
-    else if (httpCode == -5) errMsg = "CONNECTION_LOST";
-    else if (httpCode == -11) errMsg = "READ_TIMEOUT";
-    else if (httpCode == 403) errMsg = "FORBIDDEN (check bucket policy)";
-    else if (httpCode == 400) errMsg = "BAD_REQUEST";
-    Serial.printf("[UPLOAD] Failed: %s (HTTP %d %s)\n", filepath, httpCode, errMsg);
+    const char* errMsg =
+      (httpCode == -1)  ? "NO_RESPONSE" :
+      (httpCode == 403) ? "FORBIDDEN (check bucket policy)" :
+      (httpCode == 400) ? "BAD_REQUEST" : "";
+    Serial.printf("[UPLOAD] Failed: %s (HTTP %d %s, %lus)\n",
+                  filepath, httpCode, errMsg, elapsed);
     if (response.length() > 0 && response.length() < 500) {
       Serial.printf("[UPLOAD] Response: %s\n", response.c_str());
     }
     uploadFailed++;
-    // Don't call updateDisplay() - runs on Core 1, main loop handles it
     return false;
   }
 }
