@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.22.02"
+#define FW_VERSION    "2026.05.25.01"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -3990,12 +3990,23 @@ bool uploadFile(const char* filepath) {
 
   // Use plain HTTP client (no TLS - bucket policy allows unauthenticated PUT)
   WiFiClient client;
-  // WiFiClient.setTimeout takes SECONDS in ESP32 Arduino Core
-  client.setTimeout(300);  // 5 minute timeout for large files
+  // WiFiClient.setTimeout takes SECONDS in ESP32 Arduino Core.
+  // Was 300 s — equal to the task wdt — which caused fleet-wide
+  // synchronized reboots when Home-IOT dropped TCP sockets without
+  // FINs (2026-05-25 event, all 6 boats stuck in zombie PUTs hit
+  // wdt at +300 s simultaneously). 60 s is plenty for any single
+  // socket read on a working link; if the link is wedged, we'd
+  // rather bail and let the next loop iter feed the wdt.
+  client.setTimeout(60);
 
   HTTPClient http;
-  // HTTPClient.setTimeout takes MILLISECONDS
-  http.setTimeout(300000);  // 5 minute timeout
+  // HTTPClient.setTimeout takes MILLISECONDS. Hard ceiling on the
+  // PUT — must stay well under the 300 s task wdt. 120 s is enough
+  // for a multi-MB CSV at the worst usable signal we've seen at the
+  // yacht club (gotcha #21 needed >120 s for 660 KB RTCM3, which is
+  // retired; CSVs are smaller).
+  http.setConnectTimeout(8000);
+  http.setTimeout(120000);
   http.setReuse(false);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);  // Follow S3 redirects
 
