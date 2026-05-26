@@ -151,16 +151,25 @@
 
     // -- Named locations -------------------------------------------
     // Geofence the boat's reported last_position against known places.
-    // EDIT THESE: the latitudes/longitudes below are placeholders.
-    // Fill in your actual yacht club, home dock, and storage spot.
     // Radius in meters; first match wins (order from most-specific to
-    // most-general). Polygon places use {polygon:[[lat,lon],...]} bbox.
+    // most-general). Polygon places use {polygon:[[lat,lon],...]} for
+    // catch-all classifications.
+    //
+    // Dock coordinates are approximate (web-lookup + map estimation);
+    // 200 m radius is generous so slight inaccuracy still captures the
+    // boat-at-the-dock case. Refine if any boat consistently shows as
+    // raw lat/lon when it should be classified.
     const PLACES = [
-        // Examples — replace lat/lon/radius with your own coordinates:
-        // { name: 'Home dock',  lat: 42.3601, lon: -71.0589, radius_m: 50 },
-        // { name: 'Yacht club', lat: 42.3530, lon: -71.0480, radius_m: 100 },
-        // { name: 'Garage',     lat: 42.3700, lon: -71.0700, radius_m: 30 },
-        // Broad Boston Harbor bounding box as fallback "on water":
+        // Home (paul2's residence)
+        { name: "Paul's Home",                 lat: 42.30818, lon: -71.17061, radius_m: 100 },
+        // Boston-area sailing venues
+        { name: 'Courageous Sailing Dock',     lat: 42.3735,  lon: -71.0508,  radius_m: 200 }, // Pier 4 Charlestown Navy Yard
+        { name: 'Piers Park Sailing Center',   lat: 42.36500, lon: -71.03639, radius_m: 200 }, // 95 Marginal St, East Boston
+        { name: 'MIT Sailing Pavilion',        lat: 42.3585,  lon: -71.0907,  radius_m: 200 }, // 134 Memorial Dr, Cambridge (Charles River)
+        { name: 'Savin Hill Yacht Club',       lat: 42.30965, lon: -71.04363, radius_m: 200 }, // 400 Morrissey Blvd, Dorchester
+        // Broad bounding boxes as fallback "on water" classifications
+        { name: 'Charles River basin',
+          polygon: [[42.350, -71.110], [42.350, -71.070], [42.370, -71.070], [42.370, -71.110]] },
         { name: 'Boston Harbor',
           polygon: [[42.300, -71.080], [42.300, -70.880], [42.420, -70.880], [42.420, -71.080]] },
     ];
