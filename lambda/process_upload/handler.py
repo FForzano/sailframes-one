@@ -433,9 +433,10 @@ def process_file(bucket: str, key: str):
 
     # Parse and downsample (pass date and start_time for E1 timestamp generation)
     data_10hz = None  # Only populated for GPS
+    gps_drops = None  # Populated only for GPS
     if sensor_type == 'gps':
-        # process_gps returns (data_1hz, data_10hz, actual_gps_date) tuple
-        data, data_10hz, actual_date = process_gps(csv_content, date, start_time)
+        # process_gps returns (data_1hz, data_10hz, actual_gps_date, drops_dict)
+        data, data_10hz, actual_date, gps_drops = process_gps(csv_content, date, start_time)
         if actual_date != date:
             logger.info(f"Using GPS date {actual_date} instead of path date {date}")
     elif sensor_type == 'imu':
@@ -547,6 +548,78 @@ def process_file(bucket: str, key: str):
     source_session_id = session_id if merge_folder and session_id else None
     update_manifest(bucket, device_id, output_folder, sensor_type, merged, source_session_id)
 
+    # SD card health snapshot — only updated when we process a GPS
+    # (nav.csv) upload, since that's the high-rate write path where
+    # corruption manifests. Other sensors (imu/pres/wind) don't stress
+    # the card in the same way (per the 2026-05-26 fleet-wide analysis:
+    # boot.log writes from all 6 boats showed 0 corruption events,
+    # but E1's nav.csv had 99 events in 8.4 MB while the other 4
+    # boats' nav.csvs had 0 — clear card-specific failure).
+    if sensor_type == 'gps' and gps_drops is not None:
+        write_sd_health_snapshot(bucket, device_id, output_folder, key, gps_drops)
+
+
+def write_sd_health_snapshot(bucket: str, device_id: str, folder: str,
+                              source_key: str, drops: dict):
+    """Write/overwrite raw/<boat>/_sd_health.json with the most recent
+    nav.csv's corruption counts. Fleet dashboard reads this for the
+    SD Health column.
+
+    Schema is small + flat so the dashboard can render it directly:
+    {
+      "boat_id": "E1",
+      "updated_at": "...",
+      "last_session_folder": "2026-05-25-211627",
+      "last_nav_key": "raw/E1/2026-05-25/E1_20260525_211627_nav.csv",
+      "last_nav_bytes": 8408478,
+      "total_input_rows": 100515,
+      "kept_10hz_rows": 99804,
+      "total_dropped": 711,
+      "drops": {
+        "bad_gps_date": 60,
+        "pre_session_anchor": 1,
+        "row_convert_error": 0,
+        "latlon_outlier": 6
+      },
+      "drops_per_mb": 0.13
+    }
+    """
+    try:
+        head = s3.head_object(Bucket=bucket, Key=source_key)
+        nav_bytes = head['ContentLength']
+    except Exception:
+        nav_bytes = 0
+
+    total_dropped = sum(v for k, v in drops.items()
+                        if k not in ('total_input_rows', 'kept_10hz_rows'))
+    per_mb = (total_dropped * 1048576.0 / nav_bytes) if nav_bytes > 0 else 0.0
+
+    snapshot = {
+        'boat_id': device_id,
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+        'last_session_folder': folder,
+        'last_nav_key': source_key,
+        'last_nav_bytes': nav_bytes,
+        'total_input_rows': drops.get('total_input_rows', 0),
+        'kept_10hz_rows': drops.get('kept_10hz_rows', 0),
+        'total_dropped': total_dropped,
+        'drops': {k: v for k, v in drops.items()
+                  if k not in ('total_input_rows', 'kept_10hz_rows')},
+        'drops_per_mb': round(per_mb, 2),
+    }
+
+    key = f"raw/{device_id}/_sd_health.json"
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(snapshot, indent=2),
+        ContentType='application/json',
+    )
+    logger.info(
+        f"[SD-HEALTH] {device_id}: {total_dropped} dropped of "
+        f"{drops.get('total_input_rows', 0)} rows ({per_mb:.2f}/MB) → {key}"
+    )
+
 
 def extract_gps_date_from_csv(csv_content: str) -> str:
     """Extract the actual UTC date from GPS CSV data.
@@ -637,6 +710,17 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
     all_valid_records = []  # Full 10Hz data
     by_second = defaultdict(list)  # Grouped for 1Hz downsampling
 
+    # SD card health: per-category corruption counters. Each tracks one
+    # specific bit-flip / write-corruption signature. Surfaced via the
+    # fleet dashboard's SD Health column so an aging card shows up
+    # before it costs a race day.
+    drops = {
+        'bad_gps_date': 0,        # length != 6 or non-digit (NUL/space/etc.)
+        'pre_session_anchor': 0,  # timestamp >5 min before filename start
+        'row_convert_error': 0,   # int/float ValueError on fix/lat/lon/hdop
+        'latlon_outlier': 0,      # post-pass median filter (>1° from session center)
+    }
+
     for row in rows:
         if is_e1_format:
             # E1 format: utc is HHMMSS.mmm (e.g., "123756.100")
@@ -668,15 +752,18 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             # valid date and poison the timestamp.
             row_gps_date = (row.get('gps_date') or '').strip()
             if len(row_gps_date) != 6 or not row_gps_date.isdigit():
+                drops['bad_gps_date'] += 1
                 continue
             try:
                 d = int(row_gps_date[:2])
                 m = int(row_gps_date[2:4])
                 y = 2000 + int(row_gps_date[4:6])
                 if not (1 <= d <= 31 and 1 <= m <= 12):
+                    drops['bad_gps_date'] += 1
                     continue
                 row_date = f"{y}-{m:02d}-{d:02d}"
             except ValueError:
+                drops['bad_gps_date'] += 1
                 continue
 
             try:
@@ -697,6 +784,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             # filename-derived session start (with 5-min buffer).
             # ISO 8601 strings sort correctly so string compare is safe.
             if session_start_anchor and full_ts < session_start_anchor:
+                drops['pre_session_anchor'] += 1
                 continue
 
             # Filter out invalid GPS records. Per-row try/except so a
@@ -723,6 +811,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                     all_valid_records.append(record)
                     by_second[second].append(row)
             except (ValueError, TypeError):
+                drops['row_convert_error'] += 1
                 continue
         else:
             # S1 format: utc_time is ISO timestamp
@@ -785,6 +874,7 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             and abs(r['lon'] - median_lon) <= LATLON_OUTLIER_DEG
         ]
         dropped = pre - len(all_valid_records)
+        drops['latlon_outlier'] = dropped
         if dropped > 0:
             logger.info(
                 f"Filtered {dropped} GPS outlier rows (>{LATLON_OUTLIER_DEG}° "
@@ -835,7 +925,9 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 'hdop': round(float(best.get('hdop', 99) or 99), 1)
             })
 
-    return result_1hz, all_valid_records, actual_date
+    drops['total_input_rows'] = len(rows)
+    drops['kept_10hz_rows'] = len(all_valid_records)
+    return result_1hz, all_valid_records, actual_date, drops
 
 
 def process_imu(csv_content: str, date: str = None, start_time: str = None) -> list:
