@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.25.02"
+#define FW_VERSION    "2026.05.26.01"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -481,6 +481,17 @@ TaskHandle_t diagTaskHandle = NULL;
 // task. When Core 1 hangs, the last value here pinpoints the stuck section.
 volatile const char* g_loopSection = "boot";
 volatile uint32_t    g_loopIter = 0;
+
+// Where Core 0's upload task currently is. Complements g_loopSection so
+// the [DIAG] heartbeat names the stuck section on either core when a task
+// wdt fires. Added 2026-05-26 after the .25 wdt-during-upload saga where
+// the wdt panicked with "uploadTask hung" but the boot-log + DIAG couldn't
+// tell us WHERE inside the upload pipeline it was — connect, scan,
+// sendRequest body, response drain? Set at every major checkpoint in
+// uploadTaskFunc, uploadFile, connectWiFi, performOTAUpdate, performConfigSync,
+// uploadStatusSnapshot. Value "idle" means uploadTask is sleeping between
+// iterations (vTaskDelay 5 s) — not stuck.
+volatile const char* g_uploadSection = "idle";
 
 // --- Hang watchdogs (added in 2026.05.05.08) ---
 //
@@ -3922,6 +3933,7 @@ String extractDateFromPath(const char* filepath) {
 // Upload a single file directly to S3 via HTTP (no TLS)
 // Bypasses API Gateway entirely - bucket policy allows unauthenticated PUT to raw/E1/*
 bool uploadFile(const char* filepath) {
+  g_uploadSection = "uploadFile.open";
   uploadCount++;
 
   // Extract short filename for display (main loop will update display)
@@ -4014,6 +4026,7 @@ bool uploadFile(const char* filepath) {
   String s3Path = "/raw/" + String(config.boat_id) + "/" + dateFolder + "/" + filename;
 
   WiFiClient client;
+  g_uploadSection = "uploadFile.connect";
   if (!client.connect(s3Host.c_str(), 80, 10000)) {
     Serial.printf("[UPLOAD] TCP connect failed: %s\n", s3Host.c_str());
     file.close();
@@ -4022,6 +4035,7 @@ bool uploadFile(const char* filepath) {
   }
 
   // Headers
+  g_uploadSection = "uploadFile.headers";
   client.printf("PUT %s HTTP/1.1\r\n", s3Path.c_str());
   client.printf("Host: %s\r\n", s3Host.c_str());
   client.printf("Content-Type: %s\r\n", contentType.c_str());
@@ -4035,6 +4049,7 @@ bool uploadFile(const char* filepath) {
 
   // Body — chunked send with per-chunk wdt feed.
   // Static buf keeps 4 KB off the upload task's stack (only ~9 KB).
+  g_uploadSection = "uploadFile.body";
   const size_t CHUNK = 4096;
   static uint8_t buf[CHUNK];
   unsigned long startTime = millis();
@@ -4088,6 +4103,7 @@ bool uploadFile(const char* filepath) {
   // Response — wait up to 60 s for S3 to start replying, then parse
   // status line and drain. 60 s is generous because S3 can take a
   // few seconds to acknowledge a large PUT.
+  g_uploadSection = "uploadFile.response";
   int httpCode = -1;
   String response;
   unsigned long respDeadline = millis() + 60000;
@@ -4334,6 +4350,7 @@ bool connectWiFi() {
 
   // Scan for networks first
   Serial.println("[WIFI] Scanning...");
+  g_uploadSection = "wifi.scan";
   int n = WiFi.scanNetworks();
   Serial.printf("[WIFI] Found %d networks:\n", n);
   for (int i = 0; i < n && i < 10; i++) {
@@ -4411,6 +4428,7 @@ bool connectWiFi() {
 
     Serial.printf("[WIFI] Trying %s (%d/%d) — pinned to strongest BSSID at %d dBm...\n",
       config.wifi[i].ssid, i + 1, config.wifi_count, best[i].rssi);
+    g_uploadSection = "wifi.associate";
 
     // No display update - WiFi connects silently in background
 
@@ -6402,9 +6420,10 @@ void diagnosticsTask(void* param) {
     unsigned long now = millis();
     uint32_t iter = g_loopIter;
     long delta = (long)(iter - lastIter);
-    Serial.printf("[DIAG] uptime=%lus heap=%u sect=%s iter=%lu (+%ld)\n",
+    Serial.printf("[DIAG] uptime=%lus heap=%u sect=%s up=%s iter=%lu (+%ld)\n",
                   now / 1000, ESP.getFreeHeap(),
                   (const char*)g_loopSection,
+                  (const char*)g_uploadSection,
                   (unsigned long)iter, delta);
     lastIter = iter;
 
@@ -6483,16 +6502,19 @@ void uploadTaskFunc(void* param) {
   unsigned long lastPendingCount = 0;  // Last time we counted pending uploads
 
   // Count pending uploads immediately on boot (don't wait 30 seconds)
+  g_uploadSection = "count-pending-initial";
   countPendingUploads();
   Serial.printf("[UPLOAD] Initial pending: N=%d\n", pendingUploads);
 
   while (true) {
+    g_uploadSection = "idle";
     esp_task_wdt_reset();
     unsigned long now = millis();
     bool shouldUpload = false;
 
     // Count pending uploads every 30 seconds (for display)
     if (now - lastPendingCount >= 30000) {
+      g_uploadSection = "count-pending-periodic";
       lastPendingCount = now;
       countPendingUploads();
     }
@@ -6544,17 +6566,20 @@ void uploadTaskFunc(void* param) {
               lastUploadCheck = now;
               Serial.println("[OTA] No pending uploads — running OTA-only check");
               wifiBusy = true;
-              if (!wifiConnected) connectWiFi();
+              if (!wifiConnected) { g_uploadSection = "wifi-connect.ota-only"; connectWiFi(); }
               if (wifiConnected) {
+                g_uploadSection = "ota-only";
                 performOTAUpdate(false);   // body's SSID + version gates apply
                 // Stage 3: piggyback fleet health snapshot on the same
                 // WiFi window. Once per boot — boats that idle on
                 // Home-IOT for hours don't need to spam status PUTs.
                 if (!g_statusCheckedThisBoot) {
+                  g_uploadSection = "status-upload.ota-only";
                   if (uploadStatusSnapshot()) g_statusCheckedThisBoot = true;
                 }
                 // Stage 3.5: cloud config sync (observe-only MVP).
                 if (!g_configSyncCheckedThisBoot) {
+                  g_uploadSection = "cfgsync.ota-only";
                   if (performConfigSync()) g_configSyncCheckedThisBoot = true;
                 }
                 // Release the radio whether OTA happened or not.
@@ -6619,6 +6644,7 @@ void uploadTaskFunc(void* param) {
 
       // Try to connect to WiFi if not connected
       if (!wifiConnected) {
+        g_uploadSection = "wifi-connect";
         connectWiFi();
       }
 
@@ -6638,6 +6664,7 @@ void uploadTaskFunc(void* param) {
         // Test connectivity before starting uploads (skip after repeated failures)
         bool connOK = true;
         if (uploadRetryCount < 2) {
+          g_uploadSection = "s3-conn-test";
           connOK = testS3Connection();
           if (!connOK) {
             Serial.println("[UPLOAD] Connectivity test failed");
@@ -6652,10 +6679,12 @@ void uploadTaskFunc(void* param) {
         } else {
           if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(5000))) {
             // Count files for progress display
+            g_uploadSection = "count-files";
             uploadTotal = countFilesToUpload("/sf");
             Serial.printf("[UPLOAD] Found %d files to upload\n", uploadTotal);
 
             if (uploadTotal > 0) {
+              g_uploadSection = "upload-dir";
               uploadDirectory("/sf");
             }
             xSemaphoreGive(sdMutex);
@@ -6670,6 +6699,7 @@ void uploadTaskFunc(void* param) {
           // with Core 1's logging/recording start otherwise.
           int remaining = -1;
           if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(2000))) {
+            g_uploadSection = "count-files.post";
             remaining = countFilesToUpload("/sf");
             xSemaphoreGive(sdMutex);
           } else {
@@ -6688,15 +6718,18 @@ void uploadTaskFunc(void* param) {
             // mid-day reboots if a new build gets published. Operator
             // can force a re-check via the serial 'update' command.
             Serial.println("[UPLOAD] Cycle clean — checking OTA manifest (one-shot per boot)");
+            g_uploadSection = "ota-check";
             performOTAUpdate(false);
 
             // Stage 3 status snapshot upload — once per boot. Piggybacks
             // on the same WiFi window used for OTA + session uploads.
             if (!g_statusCheckedThisBoot) {
+              g_uploadSection = "status-upload";
               if (uploadStatusSnapshot()) g_statusCheckedThisBoot = true;
             }
             // Stage 3.5 cloud config sync (observe-only MVP).
             if (!g_configSyncCheckedThisBoot) {
+              g_uploadSection = "cfgsync";
               if (performConfigSync()) g_configSyncCheckedThisBoot = true;
             }
 
