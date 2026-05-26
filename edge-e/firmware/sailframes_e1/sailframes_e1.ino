@@ -86,7 +86,10 @@
 // preference: 80% gives plenty of daylight readability while
 // shaving 20% off the recording-mode backlight current; 50% is
 // still legible in shade and saves half the idle backlight current.
-#define TFT_BL_PWM_CHANNEL  0
+//
+// Uses the ESP32 Arduino Core 3.x ledcAttach API (pin-addressed),
+// NOT the legacy 2.x ledcSetup/ledcAttachPin channel-addressed API
+// which doesn't exist in Core 3.3.7 (built failed on 2026.05.26.04).
 #define TFT_BL_PWM_FREQ     5000   // 5 kHz — well above flicker perception
 #define TFT_BL_PWM_RES      8      // 8-bit duty (0-255)
 #define TFT_BL_DUTY_RECORDING 204  // ~80%
@@ -115,7 +118,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.26.04"
+#define FW_VERSION    "2026.05.26.05"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -1829,9 +1832,10 @@ void setup() {
   Serial.println("[TFT] Initializing ST7796U...");
   // Backlight via PWM so we can dim during idle. Init at IDLE level —
   // updateBacklight() in the loop pushes to RECORDING when logging starts.
-  ledcSetup(TFT_BL_PWM_CHANNEL, TFT_BL_PWM_FREQ, TFT_BL_PWM_RES);
-  ledcAttachPin(TFT_BL_PIN, TFT_BL_PWM_CHANNEL);
-  ledcWrite(TFT_BL_PWM_CHANNEL, TFT_BL_DUTY_IDLE);
+  // Core 3.x ledcAttach: one call attaches a pin with freq + resolution,
+  // and ledcWrite addresses the PIN (not a channel) thereafter.
+  ledcAttach(TFT_BL_PIN, TFT_BL_PWM_FREQ, TFT_BL_PWM_RES);
+  ledcWrite(TFT_BL_PIN, TFT_BL_DUTY_IDLE);
   tft.init();
   tft.setRotation(2);  // Portrait orientation (180° from rotation 0)
   tft.invertDisplay(true);  // Required for correct colors on this ST7796 panel
@@ -7149,7 +7153,7 @@ void loop() {
     static uint8_t bl_current = TFT_BL_DUTY_IDLE;
     uint8_t bl_target = logging ? TFT_BL_DUTY_RECORDING : TFT_BL_DUTY_IDLE;
     if (bl_target != bl_current) {
-      ledcWrite(TFT_BL_PWM_CHANNEL, bl_target);
+      ledcWrite(TFT_BL_PIN, bl_target);
       bl_current = bl_target;
     }
     lastDisp = now;
