@@ -101,7 +101,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.05.26.01"
+#define FW_VERSION    "2026.05.26.02"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -4846,6 +4846,132 @@ bool uploadStatusSnapshot() {
 }
 
 // ============================================================
+// /boot.log → S3 upload (post-status, once per boot)
+// ============================================================
+// The diag/wdt boot log lives at /boot.log (SD root), so the
+// recursive /sf walker in uploadDirectory never picks it up.
+// This function PUTs the entire current /boot.log to
+//   raw/<boat>/_boot.log
+// once per boot, after the status snapshot. The file is
+// append-only on the boat side — every upload contains the
+// complete history, so post-flash boats give us their whole
+// life history (back to 2026-05-05 when the file was first
+// written) on first upload, then incremental tails as new
+// alive/boot lines accrue. Used by the web battery dashboard.
+static bool g_bootLogUploadedThisBoot = false;
+
+bool uploadBootLogSnapshot() {
+  if (!wifiConnected) return false;
+  g_uploadSection = "bootlog.open";
+
+  File file = SD.open("/boot.log", FILE_READ);
+  if (!file) {
+    Serial.println("[BOOTLOG] /boot.log not on SD — nothing to upload");
+    return true;  // not an error per se
+  }
+  size_t fileSize = file.size();
+  if (fileSize == 0) {
+    Serial.println("[BOOTLOG] /boot.log empty");
+    file.close();
+    return true;
+  }
+
+  Serial.printf("[BOOTLOG] Uploading /boot.log (%u bytes, heap %u, rssi %d)\n",
+                (unsigned)fileSize, ESP.getFreeHeap(), WiFi.RSSI());
+
+  String s3Host = String(config.s3_bucket) + ".s3." + String(config.s3_region) + ".amazonaws.com";
+  String s3Path = "/raw/" + String(config.boat_id) + "/_boot.log";
+
+  WiFiClient client;
+  g_uploadSection = "bootlog.connect";
+  if (!client.connect(s3Host.c_str(), 80, 10000)) {
+    Serial.printf("[BOOTLOG] TCP connect failed: %s\n", s3Host.c_str());
+    file.close();
+    return false;
+  }
+
+  g_uploadSection = "bootlog.headers";
+  client.printf("PUT %s HTTP/1.1\r\n", s3Path.c_str());
+  client.printf("Host: %s\r\n", s3Host.c_str());
+  client.print("Content-Type: text/plain\r\n");
+  client.printf("Content-Length: %u\r\n", (unsigned)fileSize);
+  client.print("Connection: close\r\n\r\n");
+
+  yield();
+  esp_task_wdt_reset();
+
+  // Body — same chunked-PUT pattern as uploadFile (per-chunk wdt feed,
+  // stall watchdog, hard ceiling). boot.log is small (~100 KB after
+  // ~3 weeks) so the 2-min ceiling is plenty even on weak signal.
+  g_uploadSection = "bootlog.body";
+  const size_t CHUNK = 4096;
+  static uint8_t buf[CHUNK];
+  unsigned long startTime = millis();
+  unsigned long lastProgress = startTime;
+  size_t sent = 0;
+  bool aborted = false;
+  const char* abortReason = "";
+
+  while (sent < fileSize) {
+    esp_task_wdt_reset();
+    yield();
+    unsigned long now = millis();
+    if (now - lastProgress > 30000) { aborted = true; abortReason = "STALL_30S"; break; }
+    if (now - startTime > 120000)   { aborted = true; abortReason = "CEILING_2MIN"; break; }
+    if (!client.connected())        { aborted = true; abortReason = "PEER_CLOSED"; break; }
+
+    size_t want = (fileSize - sent < CHUNK) ? (fileSize - sent) : CHUNK;
+    int r = file.read(buf, want);
+    if (r <= 0) { aborted = true; abortReason = "SD_READ_FAILED"; break; }
+    size_t w = client.write(buf, (size_t)r);
+    if (w == 0) { aborted = true; abortReason = "SOCKET_WRITE_0"; break; }
+    sent += w;
+    lastProgress = millis();
+  }
+
+  unsigned long elapsed = (millis() - startTime) / 1000;
+  file.close();
+
+  if (aborted) {
+    Serial.printf("[BOOTLOG] Aborted: %s at %u/%u bytes after %lus\n",
+                  abortReason, (unsigned)sent, (unsigned)fileSize, elapsed);
+    client.stop();
+    return false;
+  }
+
+  g_uploadSection = "bootlog.response";
+  int httpCode = -1;
+  unsigned long respDeadline = millis() + 30000;
+  while (client.connected() && !client.available() && millis() < respDeadline) {
+    esp_task_wdt_reset();
+    yield();
+    delay(10);
+  }
+  if (client.available()) {
+    String statusLine = client.readStringUntil('\n');
+    int sp1 = statusLine.indexOf(' ');
+    int sp2 = statusLine.indexOf(' ', sp1 + 1);
+    if (sp1 > 0 && sp2 > sp1) {
+      httpCode = statusLine.substring(sp1 + 1, sp2).toInt();
+    }
+    unsigned long drainDeadline = millis() + 3000;
+    while (client.connected() && millis() < drainDeadline) {
+      if (client.available()) client.read();
+      else { esp_task_wdt_reset(); yield(); delay(1); }
+    }
+  }
+  client.stop();
+
+  if (httpCode >= 200 && httpCode < 300) {
+    Serial.printf("[BOOTLOG] Uploaded OK (%u bytes, %lus, HTTP %d)\n",
+                  (unsigned)fileSize, elapsed, httpCode);
+    return true;
+  }
+  Serial.printf("[BOOTLOG] Failed: HTTP %d (%lus)\n", httpCode, elapsed);
+  return false;
+}
+
+// ============================================================
 // v2.0.0 Stage 3.6 — cloud config sync + apply
 // ============================================================
 // Cloud-config flow mirrors firmware OTA:
@@ -6577,6 +6703,10 @@ void uploadTaskFunc(void* param) {
                   g_uploadSection = "status-upload.ota-only";
                   if (uploadStatusSnapshot()) g_statusCheckedThisBoot = true;
                 }
+                if (!g_bootLogUploadedThisBoot) {
+                  g_uploadSection = "bootlog-upload.ota-only";
+                  if (uploadBootLogSnapshot()) g_bootLogUploadedThisBoot = true;
+                }
                 // Stage 3.5: cloud config sync (observe-only MVP).
                 if (!g_configSyncCheckedThisBoot) {
                   g_uploadSection = "cfgsync.ota-only";
@@ -6726,6 +6856,12 @@ void uploadTaskFunc(void* param) {
             if (!g_statusCheckedThisBoot) {
               g_uploadSection = "status-upload";
               if (uploadStatusSnapshot()) g_statusCheckedThisBoot = true;
+            }
+            // /boot.log upload — once per boot, after status. Surfaces
+            // alive-heartbeat history to the web battery dashboard.
+            if (!g_bootLogUploadedThisBoot) {
+              g_uploadSection = "bootlog-upload";
+              if (uploadBootLogSnapshot()) g_bootLogUploadedThisBoot = true;
             }
             // Stage 3.5 cloud config sync (observe-only MVP).
             if (!g_configSyncCheckedThisBoot) {
