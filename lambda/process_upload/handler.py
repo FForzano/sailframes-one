@@ -758,6 +758,39 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
     # Sort 10Hz data by timestamp
     all_valid_records.sort(key=lambda x: x['t'])
 
+    # Lat/lon outlier filter — catches rows where date+time+gps_date
+    # are all valid but lat or lon has a single-bit corruption that
+    # makes the value numerically plausible but geographically far
+    # from the rest of the session (e.g. leading "4" of 42.x dropped
+    # to "2.x", or sign of -71.x lost to 71.x).
+    # Threshold of 1° is generous: ~111 km lat / ~85 km lon at this
+    # latitude. A real sailing session typically covers <30 km; the
+    # observed corruption produces values >5° from median. 1° is well
+    # inside the corruption gap and well outside any legitimate sail.
+    # Anchor is the median of records that passed all earlier filters,
+    # so it's robust to up to ~50% corrupted rows (which we'll never
+    # see — observed corruption rate is <0.1%).
+    LATLON_OUTLIER_DEG = 1.0
+    median_lat = None
+    median_lon = None
+    if is_e1_format and len(all_valid_records) >= 10:
+        lats_sorted = sorted(r['lat'] for r in all_valid_records)
+        lons_sorted = sorted(r['lon'] for r in all_valid_records)
+        median_lat = lats_sorted[len(lats_sorted) // 2]
+        median_lon = lons_sorted[len(lons_sorted) // 2]
+        pre = len(all_valid_records)
+        all_valid_records = [
+            r for r in all_valid_records
+            if abs(r['lat'] - median_lat) <= LATLON_OUTLIER_DEG
+            and abs(r['lon'] - median_lon) <= LATLON_OUTLIER_DEG
+        ]
+        dropped = pre - len(all_valid_records)
+        if dropped > 0:
+            logger.info(
+                f"Filtered {dropped} GPS outlier rows (>{LATLON_OUTLIER_DEG}° "
+                f"from median {median_lat:.4f},{median_lon:.4f})"
+            )
+
     # Take sample with max speed per second for 1Hz output
     result_1hz = []
     for second, samples in sorted(by_second.items()):
@@ -765,10 +798,16 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             valid_samples = []
             for s in samples:
                 fix = int(s.get('fix', 0) or 0)
-                lat = abs(float(s.get('lat', 0) or 0))
-                lon = abs(float(s.get('lon', 0) or 0))
+                lat_raw = float(s.get('lat', 0) or 0)
+                lon_raw = float(s.get('lon', 0) or 0)
                 hdop = float(s.get('hdop', 99) or 99)
-                if fix >= 1 and lat > 1.0 and lon > 1.0 and hdop < 10:
+                if fix >= 1 and abs(lat_raw) > 1.0 and abs(lon_raw) > 1.0 and hdop < 10:
+                    # Apply same outlier filter as 10Hz path
+                    if median_lat is not None and (
+                        abs(lat_raw - median_lat) > LATLON_OUTLIER_DEG
+                        or abs(lon_raw - median_lon) > LATLON_OUTLIER_DEG
+                    ):
+                        continue
                     valid_samples.append(s)
             if not valid_samples:
                 continue
