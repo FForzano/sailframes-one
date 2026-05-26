@@ -610,6 +610,26 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 logger.info(f"GPS date {gps_date} differs from path date {date}, using GPS date")
             actual_date = gps_date
 
+    # Compute the session start anchor from the filename. ANY row
+    # that parses to a timestamp >5 min BEFORE this anchor is
+    # bit-flip corruption (the only way for gps_date+utc to combine
+    # into a pre-session timestamp is if one of them got flipped).
+    # 5-min buffer absorbs GPS-warmup clock jitter.
+    # E1's 2026-05-25 race: filename says session started 21:16:27,
+    # but a row with gps_date corrupted "260526"→"250526" (single
+    # bit-flip on byte 0x36→0x35) combined with real utc "000235"
+    # parsed as 2026-05-25T00:02:35Z, ~21 hours before session
+    # start, poisoning manifest start_time and shifting the session
+    # into the wrong day on the dashboard.
+    session_start_anchor = None
+    if is_e1_format and start_time and len(start_time) == 6 and start_time.isdigit():
+        try:
+            anchor_dt = datetime.strptime(f"{date} {start_time}", "%Y-%m-%d %H%M%S")
+            anchor_dt = anchor_dt - timedelta(minutes=5)
+            session_start_anchor = anchor_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            pass
+
     # Time correction only for S1 (Pi5 clock was ~41 minutes ahead)
     TIME_CORRECTION_SECONDS = 0 if is_e1_format else -2460
 
@@ -630,17 +650,34 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
             # 2026-05-12 235632 session with start=00:00:00 /
             # end=23:59:59, which then silently swallowed every later
             # upload via the session-merge overlap path.
-            row_gps_date = row.get('gps_date', '')
-            row_date = actual_date
-            if row_gps_date and len(row_gps_date) == 6:
-                try:
-                    d = int(row_gps_date[:2])
-                    m = int(row_gps_date[2:4])
-                    y = 2000 + int(row_gps_date[4:6])
-                    if 1 <= d <= 31 and 1 <= m <= 12:
-                        row_date = f"{y}-{m:02d}-{d:02d}"
-                except ValueError:
-                    pass
+            #
+            # If the gps_date column is corrupted (length != 6 or
+            # unparseable), DROP THE ROW rather than falling back to
+            # actual_date — for a row past UTC midnight the fallback
+            # produces a timestamp 24 hours BEFORE the row's real time
+            # and poisons the session start_time. E1's 2026-05-25 race
+            # had 55 such rows; one survivor stamped at
+            # 2026-05-25T00:02:10Z (real time ~2026-05-26T00:02:10Z)
+            # made the session group under May 24 on the dashboard.
+            # Strict: gps_date must be exactly 6 ASCII digits. Strip
+            # before checking (some corrupted rows have trailing
+            # whitespace), then isdigit() rejects anything with
+            # embedded space/punctuation/NUL — necessary because
+            # Python's int(" 5") silently strips whitespace and would
+            # otherwise let "25 526" (NUL-corrupted) parse as a
+            # valid date and poison the timestamp.
+            row_gps_date = (row.get('gps_date') or '').strip()
+            if len(row_gps_date) != 6 or not row_gps_date.isdigit():
+                continue
+            try:
+                d = int(row_gps_date[:2])
+                m = int(row_gps_date[2:4])
+                y = 2000 + int(row_gps_date[4:6])
+                if not (1 <= d <= 31 and 1 <= m <= 12):
+                    continue
+                row_date = f"{y}-{m:02d}-{d:02d}"
+            except ValueError:
+                continue
 
             try:
                 # Parse HHMMSS.mmm format
@@ -654,6 +691,12 @@ def process_gps(csv_content: str, date: str = None, start_time: str = None) -> t
                 # Second-only timestamp for grouping
                 second = f"{row_date}T{hours:02d}:{minutes:02d}:{seconds:02d}"
             except ValueError:
+                continue
+
+            # Cross-check: row timestamps must be at or after the
+            # filename-derived session start (with 5-min buffer).
+            # ISO 8601 strings sort correctly so string compare is safe.
+            if session_start_anchor and full_ts < session_start_anchor:
                 continue
 
             # Filter out invalid GPS records. Per-row try/except so a
