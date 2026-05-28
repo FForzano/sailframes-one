@@ -1141,29 +1141,79 @@ def upload_boat_gpx(race_id, device_id, event):
     })
 
 
-# --- VKX (Vakaros Atlas) parser ---
+# --- VKX (Vakaros Atlas) parser + boat-owner report ---
 #
-# Minimal scan parser for Vakaros .vkx binary logs. Extracts only the
-# telemetry (0x02) records — same shape as GPX-derived GPS points so
-# we can drop it through the existing gpx_path → race-data plumbing
-# unchanged. Reference: github.com/vakaros/vkx/wiki/Vakaros-VXK-Format
-# (msg type lives at byte 7 of an 8-byte key, payload follows; see
-# wmcb8367/vkx-parser for the canonical implementation we ported).
+# Scan parser for Vakaros .vkx binary logs. Extracts every record type
+# the spec documents (telemetry, race timer, line positions, wind,
+# depth, temperature, speed-through-water, declination, shift angles,
+# load cells, config) and produces a structured summary + an HTML
+# report intended to be shared with the boat owner — so they can see
+# what was recorded and act on firmware / config / sensor gaps.
+#
+# Spec reference: github.com/vakaros/vkx/wiki/Vakaros-VXK-Format
+# Msg type is at byte 7 of the 8-byte key; the page-header type is
+# 0xFD (newer firmware) or 0xFF (older firmware — observed at the
+# head of the user's RockIt 2.0 file).
 _VKX_MESSAGE_SIZES = {
     0x01: 32, 0x02: 44, 0x03: 20, 0x04: 17, 0x05: 13, 0x06: 18,
     0x07: 12, 0x08: 16, 0x09: 16, 0x0A: 12, 0x0E: 16, 0x10: 12,
-    0x11: 16, 0x20: 13, 0xFD: 7, 0xFE: 2,
+    0x11: 16, 0x20: 13, 0xFD: 7, 0xFE: 2, 0xFF: 7,
 }
 
+_VKX_TIMER_EVENTS = {0: 'reset', 1: 'start', 2: 'sync',
+                     3: 'race_start', 4: 'race_end'}
 
-def _parse_vkx_to_gps_points(data):
-    """Scan a VKX byte blob, return [{t, lat, lon, speed_kn, course}]
-    sorted by timestamp ascending. Same shape as _parse_gpx output so
-    the downstream gpx_path read path doesn't need to know about VKX."""
-    out = []
+
+def _vkx_quat_roll(qw, qx, qy, qz):
+    """Heel angle (deg, signed) from a Vakaros quaternion."""
+    return math.degrees(math.atan2(2 * (qw * qx + qy * qz),
+                                    1 - 2 * (qx * qx + qy * qy)))
+
+
+def _vkx_iso(ts_ms):
+    return datetime.utcfromtimestamp(ts_ms / 1000.0).isoformat() + 'Z'
+
+
+def _vkx_local_hms(ts_ms, tz_offset_h=-4):
+    """ts_ms → 'HH:MM:SS' in EDT (UTC-4). The fleet only races in
+    Boston Harbor and the report is for one boat at a time, so a
+    fixed offset is enough for now."""
+    dt = datetime.utcfromtimestamp(ts_ms / 1000.0)
+    from datetime import timedelta
+    local = dt + timedelta(hours=tz_offset_h)
+    return local.strftime('%H:%M:%S')
+
+
+def parse_vkx_full(data):
+    """Full VKX scan. Returns a dict of every record type extracted +
+    the GPS-points list (in the GPX-compatible shape) + a `summary`
+    block with stats and data-quality flags."""
     n = len(data)
     pos = 0
-    while pos + 52 <= n:
+
+    telem = []
+    timer = []
+    lines = []
+    declination = []
+    wind = []
+    stw = []
+    depth = []
+    temp = []
+    load = []
+    shifts = []
+    config = []
+    page_headers = []
+    page_terminators = 0
+    internal_counts = {}    # type → count for 0x01/0x07/0x0E
+
+    # Special case: if the file starts with 0xFF, treat it as a page
+    # header at byte 0 (the wiki spec shows page-header type byte at
+    # offset 0, payload directly after — different from the message-
+    # type-at-byte-7 convention for telemetry records).
+    if n >= 8 and data[0] == 0xFF:
+        page_headers.append({'pos': 0, 'format_version': data[1]})
+
+    while pos + 8 <= n:
         msg_type = data[pos + 7]
         size = _VKX_MESSAGE_SIZES.get(msg_type)
         if size is None:
@@ -1172,43 +1222,432 @@ def _parse_vkx_to_gps_points(data):
         if pos + 8 + size > n:
             break
         payload = data[pos + 8: pos + 8 + size]
-        if msg_type == 0x02:
-            try:
-                (ts_ms, lat_i, lon_i, sog_mps, cog_rad, _alt,
-                 _qw, _qx, _qy, _qz) = struct.unpack('<Qiifffffff', payload)
-            except struct.error:
-                pos += 1
-                continue
-            # Sanity bounds: any 2020–2030 UTC millisecond timestamp
-            # is a valid telemetry hit; everything else is a false
-            # match from the scan stepping over non-record bytes.
-            if not (1577836800000 < ts_ms < 1893456000000):
-                pos += 1
-                continue
-            lat = lat_i / 10_000_000.0
-            lon = lon_i / 10_000_000.0
-            cog_deg = math.degrees(cog_rad) % 360
-            t_iso = datetime.utcfromtimestamp(ts_ms / 1000.0) \
-                .isoformat() + 'Z'
-            out.append({
-                't': t_iso,
-                'lat': round(lat, 7),
-                'lon': round(lon, 7),
-                'speed_kn': round(sog_mps * 1.94384, 2),
-                'course': round(cog_deg, 1),
-            })
-            pos += 8 + size
-        else:
-            pos += 1
-    out.sort(key=lambda r: r['t'])
+        # `consumed` = did this position yield a real record? If not we
+        # slide one byte instead of advancing the full key+payload — a
+        # false positive (e.g. a 0x02 byte at offset 7 by coincidence)
+        # would otherwise skip past real telemetry that starts a few
+        # bytes later.
+        consumed = False
+        try:
+            if msg_type == 0x02:
+                (ts_ms, lat_i, lon_i, sog, cog, alt,
+                 qw, qx, qy, qz) = struct.unpack('<Qiifffffff', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    telem.append({
+                        't_ms': ts_ms,
+                        'lat': lat_i / 1e7, 'lon': lon_i / 1e7,
+                        'sog_mps': sog, 'cog_rad': cog, 'alt_m': alt,
+                        'qw': qw, 'qx': qx, 'qy': qy, 'qz': qz,
+                    })
+                    consumed = True
+            elif msg_type == 0x03:
+                ts_ms, d, lat_i, lon_i = struct.unpack('<Qfii', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    declination.append({'t_ms': ts_ms, 'decl_deg': math.degrees(d)})
+                    consumed = True
+            elif msg_type == 0x04:
+                ts_ms, end, lat, lon = struct.unpack('<QBff', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    lines.append({'t_ms': ts_ms,
+                                  'end': 'pin' if end == 0 else 'boat',
+                                  'lat': lat, 'lon': lon})
+                    consumed = True
+            elif msg_type == 0x05:
+                ts_ms, ev, val = struct.unpack('<QBi', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    timer.append({'t_ms': ts_ms, 'event': ev,
+                                  'event_name': _VKX_TIMER_EVENTS.get(ev, f'unk{ev}'),
+                                  'value_sec': val})
+                    consumed = True
+            elif msg_type == 0x06:
+                ts_ms, tack, manual, hdg, sog = struct.unpack('<QBBff', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    shifts.append({'t_ms': ts_ms,
+                                   'tack': 'port' if tack else 'starboard',
+                                   'manual': bool(manual),
+                                   'heading_deg': hdg, 'sog_kts': sog})
+                    consumed = True
+            elif msg_type == 0x08:
+                ts_ms, wd, ws = struct.unpack('<Qff', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    wind.append({'t_ms': ts_ms, 'dir_deg': wd, 'spd_mps': ws})
+                    consumed = True
+            elif msg_type == 0x09:
+                ts_ms, fwd, lat = struct.unpack('<Qff', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    stw.append({'t_ms': ts_ms, 'fwd_mps': fwd, 'lat_mps': lat})
+                    consumed = True
+            elif msg_type == 0x0A:
+                ts_ms, d = struct.unpack('<Qf', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    depth.append({'t_ms': ts_ms, 'm': d})
+                    consumed = True
+            elif msg_type == 0x10:
+                ts_ms, c = struct.unpack('<Qf', payload)
+                if 1577836800000 < ts_ms < 1893456000000:
+                    temp.append({'t_ms': ts_ms, 'c': c})
+                    consumed = True
+            elif msg_type == 0x11:
+                ts_ms = struct.unpack('<Q', payload[:8])[0]
+                if 1577836800000 < ts_ms < 1893456000000:
+                    name = payload[8:12].decode('ascii', 'replace').rstrip('\x00')
+                    val = struct.unpack('<f', payload[12:16])[0]
+                    load.append({'t_ms': ts_ms, 'sensor': name, 'load': val})
+                    consumed = True
+            elif msg_type == 0x20:
+                flags, rate = struct.unpack('<IB', payload[8:13])
+                config.append({'flags': flags, 'rate_hz': rate,
+                               'fixed_to_body': bool(flags & 1)})
+                consumed = True
+            elif msg_type in (0xFD, 0xFF):
+                page_headers.append({'pos': pos, 'format_version': payload[0]})
+                consumed = True
+            elif msg_type == 0xFE:
+                page_terminators += 1
+                consumed = True
+            else:
+                internal_counts[msg_type] = internal_counts.get(msg_type, 0) + 1
+                consumed = True
+        except struct.error:
+            consumed = False
+        pos += (8 + size) if consumed else 1
+
+    telem.sort(key=lambda r: r['t_ms'])
+    summary = _vkx_summary(data, telem, timer, lines, declination, wind, stw,
+                           depth, temp, load, shifts, config, page_headers,
+                           page_terminators, internal_counts)
+    return {
+        'telem': telem, 'timer': timer, 'lines': lines,
+        'declination': declination, 'wind': wind,
+        'stw': stw, 'depth': depth, 'temp': temp, 'load': load,
+        'shifts': shifts, 'config': config, 'page_headers': page_headers,
+        'summary': summary,
+    }
+
+
+def _vkx_summary(data, telem, timer, lines, declination, wind, stw, depth,
+                 temp, load, shifts, config, page_headers,
+                 page_terminators, internal_counts):
+    """Distill the parsed records into stats + data-quality flags
+    the report generator and the boat owner actually care about."""
+    n = len(data)
+    s = {
+        'file_size_bytes': n,
+        'record_counts': {
+            'Telemetry (GPS + IMU)':   len(telem),
+            'Page Headers':            len(page_headers),
+            'Page Terminators':        page_terminators,
+            'Configuration':           len(config),
+            'Declination':             len(declination),
+            'Race Timer Events':       len(timer),
+            'Line Positions':          len(lines),
+            'Tack Shifts':             len(shifts),
+            'Calypso Wind':            len(wind),
+            'Speed Through Water':     len(stw),
+            'Depth':                   len(depth),
+            'Temperature':             len(temp),
+            'Load Cells':              len(load),
+        },
+        'internal_record_counts': {f'0x{k:02X}': v for k, v in internal_counts.items()},
+        'format_version': page_headers[0]['format_version'] if page_headers else None,
+    }
+
+    # Telemetry stats
+    if telem:
+        t0_ms, t1_ms = telem[0]['t_ms'], telem[-1]['t_ms']
+        duration_s = (t1_ms - t0_ms) / 1000.0
+        sog_kts = [t['sog_mps'] * 1.94384 for t in telem]
+        heels = [_vkx_quat_roll(t['qw'], t['qx'], t['qy'], t['qz']) for t in telem]
+        absh = sorted(abs(h) for h in heels)
+        gaps = sorted((telem[i+1]['t_ms'] - telem[i]['t_ms']) for i in range(len(telem)-1)) if len(telem) > 1 else [0]
+        median_gap_ms = gaps[len(gaps)//2] if gaps else 0
+        p95_gap_ms = gaps[int(len(gaps)*0.95)] if gaps else 0
+        sample_hz = (1000.0 / median_gap_ms) if median_gap_ms > 0 else 0
+        # Coverage: telemetry seconds / wall-clock seconds. <0.9 means
+        # gaps; <0.5 means significant dropouts.
+        coverage = len(telem) / max(1, duration_s) / max(sample_hz, 0.1) if sample_hz else 0
+        s['telemetry'] = {
+            'start_iso': _vkx_iso(t0_ms),
+            'end_iso': _vkx_iso(t1_ms),
+            'start_local_hms': _vkx_local_hms(t0_ms),
+            'end_local_hms': _vkx_local_hms(t1_ms),
+            'duration_s': round(duration_s, 1),
+            'duration_min': round(duration_s / 60.0, 1),
+            'point_count': len(telem),
+            'sample_rate_hz': round(sample_hz, 2),
+            'median_gap_ms': median_gap_ms,
+            'p95_gap_ms': p95_gap_ms,
+            'coverage_pct': round(min(1.0, coverage) * 100, 1),
+            'max_speed_kts': round(max(sog_kts), 2),
+            'avg_speed_kts': round(sum(sog_kts) / len(sog_kts), 2),
+            'max_heel_deg': round(max(absh), 1),
+            'p95_heel_deg': round(absh[int(len(absh) * 0.95)], 1),
+            'avg_heel_deg': round(sum(absh) / len(absh), 1),
+            'lat_min': round(min(t['lat'] for t in telem), 6),
+            'lat_max': round(max(t['lat'] for t in telem), 6),
+            'lon_min': round(min(t['lon'] for t in telem), 6),
+            'lon_max': round(max(t['lon'] for t in telem), 6),
+        }
+
+    # Race-event quality flags
+    s['line_positions_valid'] = sum(1 for l in lines
+                                     if abs(l['lat']) > 0.01 and abs(l['lon']) > 0.01)
+    s['line_positions_invalid'] = len(lines) - s['line_positions_valid']
+    s['has_gun_event'] = any(t['event'] == 3 for t in timer)
+
+    # Recommendations
+    recs = []
+    tele = s.get('telemetry', {})
+    rate = tele.get('sample_rate_hz', 0)
+    if rate and rate < 4.5:
+        recs.append({
+            'level': 'high',
+            'title': f'Telemetry sample rate is {rate:.1f} Hz — too low for tack-by-tack analysis',
+            'body': "For modern motion analysis (tack timing, OCS detection, "
+                    "leg-by-leg speed) you want at least 5 Hz and preferably "
+                    "10 Hz. Open the Vakaros app, go to Device → Settings, and "
+                    "raise the telemetry rate. If the option isn't there, you "
+                    "may be on an older firmware — update via the app's "
+                    "Firmware tab."
+        })
+    if not s['has_gun_event']:
+        recs.append({
+            'level': 'medium',
+            'title': 'No race start gun was recorded',
+            'body': "The race-timer feature on the Atlas writes a 'race_start' "
+                    "event when the timer hits zero. None was found in this "
+                    "file, which means the timer wasn't started before the "
+                    "race. Use Race Mode in the Vakaros app to start the timer "
+                    "and unlock OCS, elapsed-time, and start-line bias analysis."
+        })
+    if s['line_positions_invalid'] > 0 and s['line_positions_valid'] == 0:
+        recs.append({
+            'level': 'medium',
+            'title': 'Start line was not set (default 0,0 coordinate found)',
+            'body': "A line-position record exists but its coordinates are 0,0 — "
+                    "the default placeholder. To get start-line-bias analytics "
+                    "next week, use the Vakaros app to ping the pin and "
+                    "committee-boat ends before the start sequence."
+        })
+    if not wind and not stw and not depth and not temp and not load:
+        recs.append({
+            'level': 'low',
+            'title': 'No external sensors connected',
+            'body': "No wind, depth, temperature, speed-through-water, or load "
+                    "cell data was found. The Atlas integrates with Calypso "
+                    "Ultrasonic wind sensors via Bluetooth and Cyclops load "
+                    "cells via the Atlas Hub — adding these expands what's "
+                    "recoverable from each race."
+        })
+    if tele.get('coverage_pct', 100) < 90:
+        recs.append({
+            'level': 'medium',
+            'title': f"Telemetry coverage is {tele['coverage_pct']:.0f}% — gaps detected",
+            'body': f"The p95 gap between telemetry samples is "
+                    f"{tele.get('p95_gap_ms', 0)} ms — a healthy file at "
+                    f"{rate:.0f} Hz should be ≤200% of the median. Gaps usually "
+                    "mean GPS-fix loss (try mounting the Atlas higher and away "
+                    "from rigging) or a corrupt page (often resolved by a "
+                    "firmware update + factory format of the device SD card "
+                    "if applicable)."
+        })
+    fv = s['format_version']
+    if fv is not None and fv < 0x05:
+        recs.append({
+            'level': 'medium',
+            'title': f'VKX format version 0x{fv:02X} is older than what Vakaros currently ships',
+            'body': "The Atlas writes the format version into every page "
+                    "header. Yours is below 0x05 — newer firmware writes "
+                    "more sensor types and improves IMU calibration. Check "
+                    "vakaros.com/support for the latest firmware."
+        })
+    s['recommendations'] = recs
+    return s
+
+
+def parse_vkx_to_gps_points(parsed):
+    """Convert the telemetry list from parse_vkx_full into the
+    {t, lat, lon, speed_kn, course} shape the GPX path expects."""
+    out = []
+    for t in parsed.get('telem', []):
+        cog_deg = math.degrees(t['cog_rad']) % 360
+        out.append({
+            't': _vkx_iso(t['t_ms']),
+            'lat': round(t['lat'], 7),
+            'lon': round(t['lon'], 7),
+            'speed_kn': round(t['sog_mps'] * 1.94384, 2),
+            'course': round(cog_deg, 1),
+        })
     return out
+
+
+def _vkx_report_html(boat, race, summary, report_url):
+    """Self-contained HTML report. Inline CSS, no JS dependencies — opens
+    cleanly in any browser, sharable by URL."""
+    tele = summary.get('telemetry', {})
+    fv = summary.get('format_version')
+    fv_str = f'0x{fv:02X}' if fv is not None else '—'
+    boat_name = boat.get('boat_name') or boat.get('team_name') or 'Boat'
+    sail = boat.get('sail_number') or ''
+    boat_type = boat.get('boat_type') or ''
+    skipper = boat.get('skipper') or boat.get('team_name') or ''
+    race_name = race.get('name', 'Race')
+    race_date = race.get('date', '')
+
+    def row(label, value, sub=''):
+        sub_html = f' <span class="sub">{_h(sub)}</span>' if sub else ''
+        return f'<div class="stat"><div class="lbl">{_h(label)}</div>' \
+               f'<div class="val">{_h(value)}{sub_html}</div></div>'
+
+    # Record counts table
+    rc_rows = []
+    for name, count in summary['record_counts'].items():
+        if count == 0:
+            cls = 'rc-zero'
+        elif count < 5:
+            cls = 'rc-low'
+        else:
+            cls = 'rc-ok'
+        rc_rows.append(f'<tr class="{cls}"><td>{_h(name)}</td>'
+                       f'<td class="num">{count:,}</td></tr>')
+    if summary.get('internal_record_counts'):
+        for t, c in summary['internal_record_counts'].items():
+            rc_rows.append(f'<tr class="rc-internal"><td>Internal {t}</td>'
+                           f'<td class="num">{c:,}</td></tr>')
+
+    # Recommendations
+    rec_html = ''
+    for r in summary.get('recommendations', []):
+        rec_html += (f'<div class="rec rec-{_h(r["level"])}">'
+                     f'<div class="rec-title">{_h(r["title"])}</div>'
+                     f'<div class="rec-body">{_h(r["body"])}</div></div>')
+    if not rec_html:
+        rec_html = ('<div class="rec rec-low">'
+                    '<div class="rec-title">Everything looks good</div>'
+                    '<div class="rec-body">No firmware or configuration '
+                    'changes are required based on this file. Keep doing '
+                    'what you\'re doing.</div></div>')
+
+    # Telemetry stats card grid
+    if tele:
+        stats_html = '\n'.join([
+            row('Duration', f'{tele["duration_min"]:.1f} min'),
+            row('Sample rate', f'{tele["sample_rate_hz"]:.2f} Hz',
+                f'(median gap {tele["median_gap_ms"]} ms)'),
+            row('Telemetry points', f'{tele["point_count"]:,}'),
+            row('Coverage', f'{tele["coverage_pct"]:.0f}%'),
+            row('Max speed', f'{tele["max_speed_kts"]:.1f} kn'),
+            row('Avg speed', f'{tele["avg_speed_kts"]:.1f} kn'),
+            row('Max heel', f'{tele["max_heel_deg"]:.0f}°',
+                f'(p95 {tele["p95_heel_deg"]:.0f}°)'),
+            row('Avg heel', f'{tele["avg_heel_deg"]:.0f}°'),
+            row('Start (local)', tele['start_local_hms']),
+            row('End (local)', tele['end_local_hms']),
+            row('File size', f'{summary["file_size_bytes"]:,} bytes'),
+            row('VKX format', fv_str),
+        ])
+    else:
+        stats_html = ('<div class="empty">No telemetry records were found '
+                      'in this file — it may be corrupt or empty.</div>')
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VKX Report · {_h(boat_name)} · {_h(race_name)}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: #0a0a0a; color: #e8e8e8; margin: 0; padding: 0;
+         line-height: 1.5; }}
+  .wrap {{ max-width: 880px; margin: 0 auto; padding: 40px 24px 80px; }}
+  header {{ border-bottom: 1px solid #2a2a2a; padding-bottom: 18px;
+           margin-bottom: 28px; }}
+  .brand {{ color: #22d3ee; font-weight: 700; letter-spacing: 0.05em;
+           font-size: 0.85rem; text-transform: uppercase; }}
+  h1 {{ margin: 6px 0 4px; font-size: 1.75rem; }}
+  .subtitle {{ color: #888; font-size: 0.95rem; }}
+  h2 {{ margin: 32px 0 12px; font-size: 1.1rem; color: #22d3ee;
+       text-transform: uppercase; letter-spacing: 0.04em;
+       border-bottom: 1px solid #2a2a2a; padding-bottom: 6px; }}
+  .stats {{ display: grid; grid-template-columns: repeat(auto-fill,
+            minmax(180px, 1fr)); gap: 10px; }}
+  .stat {{ background: #131313; padding: 12px 14px; border-radius: 6px;
+          border: 1px solid #1f1f1f; }}
+  .lbl {{ font-size: 0.7rem; color: #888; text-transform: uppercase;
+         letter-spacing: 0.05em; margin-bottom: 4px; }}
+  .val {{ font-size: 1.15rem; font-weight: 600; color: #fff;
+         font-variant-numeric: tabular-nums; }}
+  .val .sub {{ font-size: 0.72rem; color: #888; font-weight: 400; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.9rem; }}
+  th, td {{ text-align: left; padding: 7px 10px; border-bottom: 1px solid #1f1f1f; }}
+  td.num {{ text-align: right; font-variant-numeric: tabular-nums;
+           color: #ccc; }}
+  tr.rc-zero td {{ color: #555; }}
+  tr.rc-low td {{ color: #eab308; }}
+  tr.rc-internal td {{ color: #555; font-style: italic; }}
+  .rec {{ background: #131313; border-left: 4px solid #22d3ee;
+         padding: 12px 16px; margin-bottom: 12px; border-radius: 0 6px 6px 0; }}
+  .rec-high {{ border-left-color: #f4212e; }}
+  .rec-medium {{ border-left-color: #f59e0b; }}
+  .rec-low {{ border-left-color: #22d3ee; }}
+  .rec-title {{ font-weight: 700; margin-bottom: 6px; color: #fff; }}
+  .rec-body {{ color: #ccc; font-size: 0.92rem; }}
+  .empty {{ color: #888; padding: 16px; font-style: italic; }}
+  footer {{ margin-top: 50px; padding-top: 18px; border-top: 1px solid #2a2a2a;
+           color: #666; font-size: 0.8rem; }}
+  a {{ color: #22d3ee; }}
+</style></head><body>
+<div class="wrap">
+  <header>
+    <div class="brand">SailFrames · Vakaros Atlas Report</div>
+    <h1>{_h(boat_name)}{f' · #{_h(sail)}' if sail else ''}</h1>
+    <div class="subtitle">
+      {_h(race_name)} · {_h(race_date)}
+      {f' · {_h(boat_type)}' if boat_type else ''}
+      {f' · {_h(skipper)}' if skipper else ''}
+    </div>
+  </header>
+
+  <h2>Overview</h2>
+  <div class="stats">
+    {stats_html}
+  </div>
+
+  <h2>Recommendations</h2>
+  {rec_html}
+
+  <h2>Record counts</h2>
+  <table>
+    <thead><tr><th>Type</th><th class="num">Count</th></tr></thead>
+    <tbody>{''.join(rc_rows)}</tbody>
+  </table>
+
+  <footer>
+    Auto-generated by sailframes.com from the uploaded Vakaros .vkx
+    binary log. Format spec:
+    <a href="https://github.com/vakaros/vkx/wiki/Vakaros-VXK-Format-Specification">vakaros/vkx wiki</a>.
+    Share this report: <a href="{report_url}">{report_url}</a>
+  </footer>
+</div></body></html>
+"""
+
+
+def _h(s):
+    """HTML-escape (lightweight)."""
+    if s is None:
+        return ''
+    s = str(s)
+    return (s.replace('&', '&amp;').replace('<', '&lt;')
+             .replace('>', '&gt;').replace('"', '&quot;'))
 
 
 def upload_boat_vkx_by_id(race_id, boat_id, event):
     """Vakaros .vkx upload for a boat without a fleet device.
-    Parses the binary, writes parsed GPS points to the same
-    by-boat-id GPX path so the rest of the dashboard can read it
-    via the unchanged gpx_path plumbing."""
+    Parses every record type, writes GPS points to the by-boat-id
+    GPX path (so the dashboard reads them through the unchanged
+    gpx_path plumbing), AND generates an HTML report intended for
+    the boat owner — saved at races/{id}/vkx-reports/{boat_id}.html
+    (public-readable) and linked from the boat drawer."""
     race_data = load_json(f'races/{race_id}/race.json')
     if not race_data:
         return response(404, {'error': f'Race not found: {race_id}'})
@@ -1222,23 +1661,40 @@ def upload_boat_vkx_by_id(race_id, boat_id, event):
         return response(400, {'error': 'No file received — send as multipart/form-data with field name "file"'})
 
     try:
-        track_points = _parse_vkx_to_gps_points(vkx_bytes)
+        parsed = parse_vkx_full(vkx_bytes)
     except Exception as e:
         logger.error(f"VKX parse error: {e}", exc_info=True)
         return response(400, {'error': f'Failed to parse VKX: {e}'})
 
+    track_points = parse_vkx_to_gps_points(parsed)
     if not track_points:
         return response(400, {'error': 'VKX file contains no telemetry records'})
 
+    # GPS track for the dashboard
     gpx_key = f'races/{race_id}/gpx/by-boat-id/{boat_id}.json'
     save_json(gpx_key, track_points)
-
     boat['gpx_path'] = gpx_key
     boat['session_path'] = None
+
+    # Report HTML for the boat owner. Stored at a deterministic path
+    # so re-uploads overwrite cleanly. Public-readable via the bucket
+    # policy entry for vkx-reports/*.
+    report_key = f'races/{race_id}/vkx-reports/{boat_id}.html'
+    report_url = f'https://{DATA_BUCKET}.s3.us-east-1.amazonaws.com/{report_key}'
+    html = _vkx_report_html(boat, race_data, parsed['summary'], report_url)
+    s3.put_object(
+        Bucket=DATA_BUCKET, Key=report_key,
+        Body=html.encode('utf-8'),
+        ContentType='text/html; charset=utf-8',
+        CacheControl='public, max-age=120',
+    )
+    boat['vkx_report_url'] = report_url
+
     race_data['updated_at'] = now_iso()
     save_json(f'races/{race_id}/race.json', race_data)
 
-    logger.info(f"VKX uploaded for boat_id={boat_id} in race {race_id}: {len(track_points)} points")
+    logger.info(f"VKX uploaded for boat_id={boat_id}: {len(track_points)} pts, "
+                f"report → {report_url}")
 
     return response(200, {
         'boat_id': boat_id,
@@ -1247,6 +1703,8 @@ def upload_boat_vkx_by_id(race_id, boat_id, event):
         'source': 'vkx',
         'start_time': track_points[0]['t'],
         'end_time': track_points[-1]['t'],
+        'report_url': report_url,
+        'summary': parsed['summary'],
     })
 
 

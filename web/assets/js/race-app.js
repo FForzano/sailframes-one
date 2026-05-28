@@ -4360,15 +4360,18 @@ function _drawerProfileBlock(raceBoat) {
           }</strong></div>`
         : '';
 
-    // Links list — combine the structured fields (cert, MBSA) with
-    // any user-defined links[]. Structured ones come first as pills
-    // so they're visually anchored.
+    // Links list — combine the structured fields (cert, MBSA, VKX
+    // report) with any user-defined links[]. Structured ones come
+    // first as pills so they're visually anchored.
     const linkItems = [];
     if (raceBoat.cert_url) {
         linkItems.push(`<a href="${_attrEsc(raceBoat.cert_url)}" target="_blank" rel="noopener" class="cert-link">🏷 ORR-EZ Cert ↗</a>`);
     }
     if (raceBoat.mbsa_url) {
         linkItems.push(`<a href="${_attrEsc(raceBoat.mbsa_url)}" target="_blank" rel="noopener" class="cert-link">⚓ MBSA ↗</a>`);
+    }
+    if (raceBoat.vkx_report_url) {
+        linkItems.push(`<a href="${_attrEsc(raceBoat.vkx_report_url)}" target="_blank" rel="noopener" class="cert-link vkx-report-link">📊 VKX report ↗</a>`);
     }
     for (const l of links) {
         if (l.url) linkItems.push(`<a href="${_attrEsc(l.url)}" target="_blank" rel="noopener">${_attrEsc(l.label || l.url)}</a>`);
@@ -7051,6 +7054,9 @@ async function uploadPendingGpxFiles(raceId) {
     // Boat-id-keyed VKX uploads (Vakaros Atlas binary). Server parses
     // and writes to the same by-boat-id path as GPX, so the rest of
     // the dashboard reads it via the unchanged gpx_path plumbing.
+    // Returned `report_url` opens in a new tab once the upload
+    // finishes — the boat owner gets a sharable diagnostic report.
+    const reportUrls = [];
     for (const [boatId, file] of Object.entries(pendingVkxFilesByBoatId)) {
         const formData = new FormData();
         formData.append('file', file);
@@ -7061,7 +7067,8 @@ async function uploadPendingGpxFiles(raceId) {
             });
             if (resp.ok) {
                 const result = await resp.json();
-                console.log(`[Race] VKX uploaded for boat_id=${boatId}: ${result.points} points`);
+                console.log(`[Race] VKX uploaded for boat_id=${boatId}: ${result.points} points · report ${result.report_url}`);
+                if (result.report_url) reportUrls.push(result.report_url);
             } else {
                 console.error(`[Race] VKX upload failed for boat_id=${boatId}:`, await resp.text());
             }
@@ -7070,6 +7077,14 @@ async function uploadPendingGpxFiles(raceId) {
         }
     }
     pendingVkxFilesByBoatId = {};
+    // Pop each VKX report in its own tab once saves are done. Most
+    // browsers block window.open after an async chain unless the
+    // user-gesture chain is intact — but the save button click that
+    // triggered uploadPendingGpxFiles IS such a gesture, so this
+    // succeeds. Multiple reports just open multiple tabs.
+    for (const url of reportUrls) {
+        try { window.open(url, '_blank', 'noopener'); } catch {}
+    }
 }
 
 function clearRaceForm() {
