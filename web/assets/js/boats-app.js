@@ -289,18 +289,23 @@ function renderDetail() {
         });
     });
 
-    // Photo upload listeners
+    // Photo upload listeners. Files don't go straight to S3 anymore —
+    // they open the crop/zoom modal first, then the cropped Blob is
+    // sent to the photo endpoint. Cancelling the modal aborts the
+    // upload entirely.
     pane.querySelectorAll('input[type=file][data-slot]').forEach(inp => {
-        inp.addEventListener('change', async (e) => {
+        inp.addEventListener('change', (e) => {
             const file = e.target.files?.[0];
             const slot = inp.dataset.slot;
+            // Reset the file input so picking the same file twice in
+            // a row still fires `change`.
+            inp.value = '';
             if (!file) return;
             if (state.isNew || !state.selected.boat_id) {
                 toast('Save the boat first, then add photos.', true);
-                inp.value = '';
                 return;
             }
-            await uploadPhoto(state.selected.boat_id, slot, file);
+            openCropModal(state.selected.boat_id, slot, file);
         });
     });
 
@@ -452,9 +457,9 @@ async function deleteBoat() {
     }
 }
 
-async function uploadPhoto(boatId, slot, file) {
+async function uploadPhoto(boatId, slot, blob, filename) {
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', blob, filename || `${slot}.jpg`);
     try {
         const resp = await fetch(`${API_BASE}/api/boats/${boatId}/photo/${slot}`, {
             method: 'POST',
@@ -464,6 +469,16 @@ async function uploadPhoto(boatId, slot, file) {
         const data = await resp.json();
         if (!state.selected.photos) state.selected.photos = {};
         state.selected.photos[slot] = data.url;
+        // Keep the skippers array in sync — uploads to skipper1 /
+        // skipper2 should reflect immediately in the form preview
+        // without waiting for the next save round-trip.
+        if (slot === 'skipper1' || slot === 'skipper2') {
+            const i = slot === 'skipper1' ? 0 : 1;
+            const skippers = state.selected.skippers || [];
+            while (skippers.length <= i) skippers.push({ name: '', photo: null });
+            skippers[i].photo = data.url;
+            state.selected.skippers = skippers;
+        }
         // Refresh the catalog index so the thumbnail appears in the list immediately
         await loadBoats();
         renderDetail();
@@ -472,6 +487,109 @@ async function uploadPhoto(boatId, slot, file) {
         toast(`Photo upload failed: ${e.message}`, true);
     }
 }
+
+// --- Crop / zoom modal ---
+//
+// Cropper.js powers the actual interaction. We just manage the
+// lifecycle: load a file as a data URL, mount the cropper on the
+// modal's <img>, wire button events, and on "Upload" pull a square
+// canvas → Blob → uploadPhoto.
+
+let _cropper = null;
+let _cropContext = { boatId: null, slot: null, filename: null };
+
+function openCropModal(boatId, slot, file) {
+    _cropContext = { boatId, slot, filename: file.name || `${slot}.jpg` };
+    const modal = el('crop-modal');
+    const img = el('crop-image');
+    const title = el('crop-modal-title');
+    title.textContent = `Crop photo · ${
+        slot === 'boat' ? 'Boat' :
+        slot === 'skipper1' ? 'Skipper 1' :
+        slot === 'skipper2' ? 'Skipper 2' : slot
+    }`;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        img.src = e.target.result;
+        modal.hidden = false;
+        // Tear down any previous instance before mounting a new one
+        // (re-opening would otherwise stack cropper state on top of
+        // the existing canvas).
+        if (_cropper) { _cropper.destroy(); _cropper = null; }
+        _cropper = new Cropper(img, {
+            aspectRatio: 1,           // square — matches every photo tile
+            viewMode: 1,              // crop box stays inside the image
+            autoCropArea: 0.85,
+            background: false,
+            zoomable: true,
+            scalable: true,
+            cropBoxResizable: true,
+            dragMode: 'move',         // drag = pan the image; corner drag still resizes the box
+            responsive: true,
+        });
+    };
+    reader.onerror = () => {
+        toast('Could not read file.', true);
+    };
+    reader.readAsDataURL(file);
+}
+
+function closeCropModal() {
+    if (_cropper) { _cropper.destroy(); _cropper = null; }
+    const modal = el('crop-modal');
+    modal.hidden = true;
+    el('crop-image').src = '';
+}
+
+async function confirmCropUpload() {
+    if (!_cropper) return;
+    const uploadBtn = el('crop-upload');
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Uploading…';
+    // Render at 800×800 — high enough for retina display in tiles and
+    // the race-page drawer, low enough to keep uploads under a few
+    // hundred KB at JPEG 0.9.
+    const canvas = _cropper.getCroppedCanvas({
+        width: 800, height: 800,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high',
+    });
+    if (!canvas) {
+        toast('Could not crop image.', true);
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Upload';
+        return;
+    }
+    canvas.toBlob(async (blob) => {
+        if (!blob) {
+            toast('Could not encode image.', true);
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = 'Upload';
+            return;
+        }
+        const { boatId, slot, filename } = _cropContext;
+        // Force .jpg extension since we always encode as JPEG.
+        const fn = (filename || `${slot}.jpg`).replace(/\.[^.]+$/, '') + '.jpg';
+        closeCropModal();
+        await uploadPhoto(boatId, slot, blob, fn);
+        // Reset button label for next open.
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Upload';
+    }, 'image/jpeg', 0.9);
+}
+
+// Bind crop-modal buttons once at module load.
+el('crop-cancel')?.addEventListener('click', closeCropModal);
+el('crop-modal-backdrop')?.addEventListener('click', closeCropModal);
+el('crop-upload')?.addEventListener('click', confirmCropUpload);
+el('crop-zoom-in')?.addEventListener('click', () => _cropper?.zoom(0.15));
+el('crop-zoom-out')?.addEventListener('click', () => _cropper?.zoom(-0.15));
+el('crop-rotate')?.addEventListener('click', () => _cropper?.rotate(90));
+el('crop-reset')?.addEventListener('click', () => _cropper?.reset());
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !el('crop-modal').hidden) closeCropModal();
+});
 
 // --- init ---
 

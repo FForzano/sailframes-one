@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SailFrames · Boats Catalog</title>
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.css">
     <script src="./config.js"></script>
     <script src="./assets/js/analytics.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js"></script>
     <style>
         html, body { overflow: auto; height: auto; }
         body { padding-bottom: 60px; background: var(--bg-primary, #0a0a0a); }
@@ -320,6 +322,60 @@
         }
         .toast.show { opacity: 1; }
         .toast.error { background: rgba(244,33,46,0.95); color: white; }
+
+        /* Crop modal */
+        .crop-modal {
+            position: fixed; inset: 0;
+            z-index: 1100;
+            display: flex; align-items: center; justify-content: center;
+            padding: 16px;
+        }
+        .crop-modal[hidden] { display: none; }
+        .crop-modal-backdrop {
+            position: absolute; inset: 0;
+            background: rgba(0,0,0,0.72);
+            backdrop-filter: blur(2px);
+        }
+        .crop-modal-content {
+            position: relative;
+            background: var(--bg-secondary, #131313);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 16px;
+            width: min(640px, 92vw);
+            max-height: 92vh;
+            display: flex; flex-direction: column;
+        }
+        .crop-modal-head { margin-bottom: 10px; }
+        .crop-modal-head h2 {
+            margin: 0; font-size: 1.05rem; color: var(--text-primary);
+        }
+        .crop-modal-hint {
+            font-size: 0.74rem;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+        .crop-stage {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            max-height: 65vh;
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 12px;
+        }
+        .crop-stage img {
+            display: block;
+            max-width: 100%;
+            max-height: 65vh;
+        }
+        .crop-modal-actions {
+            display: flex; gap: 6px; align-items: center;
+            flex-wrap: wrap;
+        }
+        .crop-modal-actions .spacer { flex: 1; }
+        .crop-modal-actions .btn-primary:disabled {
+            opacity: 0.6; cursor: wait;
+        }
     </style>
 </head>
 <body>
@@ -361,6 +417,32 @@
 
     <div class="toast" id="toast"></div>
 
-    <script type="module" src="./assets/js/boats-app.js?v=3"></script>
+    <!-- Crop / zoom modal — opens after a file is picked from any
+         photo tile. Cropper.js handles pan/zoom/rotate; the cropped
+         square is sent to the existing /api/boats/{id}/photo/{slot}
+         endpoint on confirm. -->
+    <div class="crop-modal" id="crop-modal" hidden>
+        <div class="crop-modal-backdrop" id="crop-modal-backdrop"></div>
+        <div class="crop-modal-content">
+            <div class="crop-modal-head">
+                <h2 id="crop-modal-title">Crop photo</h2>
+                <div class="crop-modal-hint">Pinch / scroll to zoom · drag to pan · drag corners to resize</div>
+            </div>
+            <div class="crop-stage">
+                <img id="crop-image" alt="">
+            </div>
+            <div class="crop-modal-actions">
+                <button type="button" class="btn-secondary" id="crop-cancel">Cancel</button>
+                <button type="button" class="btn-secondary" id="crop-zoom-out" title="Zoom out">−</button>
+                <button type="button" class="btn-secondary" id="crop-zoom-in" title="Zoom in">+</button>
+                <button type="button" class="btn-secondary" id="crop-rotate" title="Rotate 90°">↻</button>
+                <button type="button" class="btn-secondary" id="crop-reset" title="Reset">⤺</button>
+                <div class="spacer"></div>
+                <button type="button" class="btn-primary" id="crop-upload">Upload</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./assets/js/boats-app.js?v=4"></script>
 </body>
 </html>
