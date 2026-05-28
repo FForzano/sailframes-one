@@ -196,6 +196,13 @@ function renderDetail() {
                         </div>
                     </div>
                     <div class="form-field full">
+                        <label>MBSA Boat Finder URL <span class="form-field-sub">— <a href="https://members.massbaysailing.org/members/finder?tab=boats" target="_blank" rel="noopener">directory ↗</a></span></label>
+                        <div class="field-with-button">
+                            <input type="url" data-field="mbsa_url" value="${escapeHtml(b.mbsa_url || '')}" placeholder="https://members.massbaysailing.org/members/boatfinder/…">
+                            <button type="button" class="btn-secondary btn-launch-cert" id="btn-mbsa-open" ${b.mbsa_url ? '' : 'disabled'} title="Open MBSA boat finder page">↗</button>
+                        </div>
+                    </div>
+                    <div class="form-field full">
                         <button type="button" class="btn-secondary btn-google-search" id="btn-google-search" ${(b.name || b.sail_number) ? '' : 'disabled'}>🔍 Search Google: ${escapeHtml(b.name || '(name)')} ${escapeHtml(b.sail_number ? '#' + b.sail_number : '')}</button>
                     </div>
                 </div>
@@ -344,6 +351,13 @@ function renderDetail() {
     el('btn-cert-open')?.addEventListener('click', () => {
         if (state.selected.cert_url) {
             window.open(state.selected.cert_url, '_blank', 'noopener');
+        }
+    });
+
+    // MBSA Boat Finder launch (same pattern).
+    el('btn-mbsa-open')?.addEventListener('click', () => {
+        if (state.selected.mbsa_url) {
+            window.open(state.selected.mbsa_url, '_blank', 'noopener');
         }
     });
 

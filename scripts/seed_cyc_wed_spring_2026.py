@@ -46,6 +46,17 @@ RATING_TYPE = "W50/L50 - Medium"
 RACE_LEN_NM = 3.50
 
 
+# MBSA Boat Finder URLs by sail number. The MBSA members directory
+# is login-walled, so we can't scrape it automatically — only the
+# boats the user has hand-supplied are baked in here. The catalog UI
+# accepts manual paste of the rest via the MBSA URL field.
+MBSA_URLS = {
+    '220':       'https://members.massbaysailing.org/members/boatfinder/5627c286-cb14-467b-9035-daf6f5b8126c',   # Badger
+    '51613':     'https://members.massbaysailing.org/members/boatfinder/e5a099ce-ad88-4e0a-8428-715a8c96f458',   # VANISH
+    '470':       'https://members.massbaysailing.org/members/boatfinder/57454d2f-95ae-4d57-b249-e9858df1ae3b',   # Special Sauce
+}
+
+
 # ORR-EZ certificate URLs by sail number. Sourced from
 # https://www.regattaman.com/cert_list.php on 2026-05-28. Boats not in
 # this map have no published cert in the 2026 EZ list yet — the user
@@ -267,6 +278,7 @@ def find_or_create_boat(boat_entry):
             "club": boat_entry.get("club") or matches[0].get("club", ""),
             "skippers": _split_skippers(boat_entry.get("team_name", "")),
             "cert_url": CERT_URLS.get(sail) or matches[0].get("cert_url", ""),
+            "mbsa_url": MBSA_URLS.get(sail) or matches[0].get("mbsa_url", ""),
         }
         _request("PATCH", f"/api/boats/{boat_id}", patch)
         return boat_id
@@ -285,6 +297,7 @@ def _create_boat_doc(boat_entry):
         "skippers": _split_skippers(boat_entry.get("team_name", "")),
         "photos": {"boat": None, "skipper1": None, "skipper2": None},
         "cert_url": CERT_URLS.get(sail, ""),
+        "mbsa_url": MBSA_URLS.get(sail, ""),
         "links": [],
         "notes": "",
     }

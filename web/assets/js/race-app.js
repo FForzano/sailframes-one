@@ -3006,6 +3006,7 @@ async function hydrateBoatsFromCatalog(race) {
         if (!b.skipper) b.skipper = cat.skipper;
         if (!b.team_name && cat.skipper) b.team_name = cat.skipper;
         if (!b.cert_url) b.cert_url = cat.cert_url;
+        if (!b.mbsa_url) b.mbsa_url = cat.mbsa_url;
         b.photos = b.photos || cat.photos || {};
         b.links = b.links || cat.links || [];
         b.notes = b.notes || cat.notes || '';
@@ -4173,12 +4174,15 @@ function _drawerProfileBlock(raceBoat) {
           }</strong></div>`
         : '';
 
-    // Links list — combine cert URL (always first if set) with the
-    // user-defined links[]. The cert link is the most important
-    // external link for this fleet so it gets the prime spot.
+    // Links list — combine the structured fields (cert, MBSA) with
+    // any user-defined links[]. Structured ones come first as pills
+    // so they're visually anchored.
     const linkItems = [];
     if (raceBoat.cert_url) {
         linkItems.push(`<a href="${_attrEsc(raceBoat.cert_url)}" target="_blank" rel="noopener" class="cert-link">🏷 ORR-EZ Cert ↗</a>`);
+    }
+    if (raceBoat.mbsa_url) {
+        linkItems.push(`<a href="${_attrEsc(raceBoat.mbsa_url)}" target="_blank" rel="noopener" class="cert-link">⚓ MBSA ↗</a>`);
     }
     for (const l of links) {
         if (l.url) linkItems.push(`<a href="${_attrEsc(l.url)}" target="_blank" rel="noopener">${_attrEsc(l.label || l.url)}</a>`);

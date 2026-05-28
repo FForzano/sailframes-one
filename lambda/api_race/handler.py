@@ -335,6 +335,11 @@ _BOAT_FIELDS = [
     # one per boat. Dedicated field so the UI can render a single
     # "🏷 Cert" button rather than digging through links[].
     'cert_url',
+    # MBSA Boat Finder page
+    # (members.massbaysailing.org/members/boatfinder/UUID) — the MBSA
+    # club directory page for this boat. Same dedicated-field pattern
+    # as cert_url.
+    'mbsa_url',
 ]
 
 
@@ -425,6 +430,7 @@ def create_boat(body):
         # (plus a legacy `skipper` alias = skipper1).
         'photos': body.get('photos') or {'boat': None, 'skipper1': None, 'skipper2': None},
         'cert_url': body.get('cert_url', ''),
+        'mbsa_url': body.get('mbsa_url', ''),
         'links': body.get('links') or [],
         'notes': body.get('notes', ''),
         'created_at': now,
@@ -483,6 +489,7 @@ def _upsert_boat_index(boat):
         'skipper': boat.get('skipper', ''),
         'skippers': boat.get('skippers') or [],
         'cert_url': boat.get('cert_url') or '',
+        'mbsa_url': boat.get('mbsa_url') or '',
         'photos': boat.get('photos') or {},
     }
     boats = data.get('boats', [])
