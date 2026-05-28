@@ -89,7 +89,7 @@ export function populateBoatClassDropdown(prefix = '') {
             if (hint) hint.textContent = 'Zone radius = 3 × LOA · bow offset projects antenna fix forward for OCS / zone-entry';
         } else if (sel.value === '') {
             if (customGroup) customGroup.style.display = 'none';
-            if (hint) hint.textContent = 'Per-boat LOA from the catalog drives hull rendering · mark zone = 3 × largest boat\'s LOA';
+            if (hint) hint.textContent = 'Per-boat LOA from the catalog drives hull rendering · RRS 18 zone = 3 × LOA of the first boat to enter — the circle on the map is a reference using the largest boat\'s LOA';
         } else {
             if (customGroup) customGroup.style.display = 'none';
             const cls = boatClassById(sel.value);

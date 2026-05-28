@@ -7885,12 +7885,18 @@ function applyRaceBoatClass() {
     // Rhodes 19, and 420 within ±0.02 m.
     HULL_BEAM_M = (beam && beam > 0) ? beam : HULL_LOA_M * 0.32;
     BOW_OFFSET_M = (bow != null && bow >= 0) ? bow : DEFAULT_BOW_OFFSET_M;
-    // Mark zone (RRS 18) is 3 × LOA — for handicap fleets every boat
-    // has its own LOA, so we use the LARGEST boat's LOA × 3 as a
-    // single race-level zone. That's conservative (any smaller boat
-    // also gets the zone for free) and avoids per-mark complexity
-    // for now. Per-boat zones around each approaching boat is later
-    // work; today the zone is a static circle on each mark.
+    // Mark zone (RRS 18 definition): "The area around a mark within
+    // a distance of three hull lengths of the boat nearer to it." —
+    // so the *actual* zone for any specific rounding is sized by
+    // 3 × LOA of the first boat to enter it, NOT a fleet-wide value.
+    //
+    // The static circle we render here is a visual reference only —
+    // it shows the LARGEST POSSIBLE zone size for this fleet so a
+    // viewer can eyeball "is anyone near the zone of anyone?". The
+    // real per-rounding zone is always ≤ this circle (and usually
+    // smaller for the smaller boats in the fleet). Drawing
+    // per-boat-dynamic zones around the boats approaching the mark
+    // is the correct long-term render; this circle is a stopgap.
     const handicapMaxLoa = _maxBoatLOA();
     MARK_ZONE_RADIUS_M = (handicapMaxLoa || HULL_LOA_M) * 3;
     for (const entry of markZoneCircles) {
@@ -7942,9 +7948,11 @@ function _offsetLatLng(refLat, refLon, forwardM, starboardM, cogDeg) {
     return [refLat + dLat, refLon + dLon];
 }
 
-// Largest LOA in the loaded race — drives the race-level mark zone
-// radius (3 × LOA per RRS 18) for handicap races. Returns null if
-// the race has no per-boat LOAs (legacy fleet races handled by the
+// Largest LOA in the loaded race. The static mark-zone circle uses
+// this as a visual upper bound (any per-rounding RRS 18 zone is
+// ≤ 3 × the entering boat's LOA, so 3 × largest is always at least
+// as big as any real zone for this fleet). Returns null if the
+// race has no per-boat LOAs (legacy fleet races handled by the
 // race-level boat_class instead).
 function _maxBoatLOA() {
     if (!Array.isArray(currentRace?.boats)) return null;
