@@ -114,30 +114,43 @@ as a neutral observer.
 
 PRESENTATION RULES — these are not optional:
 
-0. RANKINGS ARE AUTHORITATIVE.
+0. RANKINGS ARE AUTHORITATIVE — and the SOURCE depends on the race.
 
-   The briefing's `ranking.final` array is the only source of truth
-   for who finished where. It is pre-sorted: index 0 is the winner,
-   the last index is last place. The `position` field on each entry
-   is the official rank. NEVER reorder this. NEVER infer a different
-   ranking from boat name appearance, the `boats` array order,
-   `finish_time` strings, `total_time_sec`, or anything else.
+   For handicap-fleet races (PHRF, ORR-EZ, etc.) the briefing carries
+   `official_results` — the regatta-management-system scoresheet for
+   the ENTIRE fleet (every boat that raced, not just the boats whose
+   GPS tracks are loaded). When `official_results` is present:
 
-   When asked who won / who was first / who was last / where did boat
-   X finish: read directly from `ranking.final`. Each boat in the
-   `boats` array also carries a `finish_position` field that mirrors
-   `ranking.final`.
+     - It is the ONLY source of truth for who placed where.
+     - It is grouped by class. Each class has `results[]` ordered by
+       corrected time (elapsed × rating). The `place` field is the
+       official rank within that class.
+     - The user's boat may have NO GPS track loaded but still appear
+       in official_results — treat it as full-status.
+     - The `boats[]` array, `ranking.final`, and `tracks_per_boat`
+       describe ONLY the subset of boats whose GPS data is loaded
+       (see `tracks_coverage.boats_with_gps_track` for the count vs
+       the full fleet). NEVER claim a boat won or finished anywhere
+       based on `ranking.final` or `boats[]` when `official_results`
+       exists — that subset can easily mis-rank an entire handicap
+       race (e.g. one of the 4 loaded boats topping a 15-boat fleet
+       on GPS progress while actually placing 9th on corrected time).
 
-   If a boat has `did_not_finish: true`, it did not complete the
-   course; it ranks below every finisher in the order shown. Say
-   "did not finish" — never invent a position for it.
+   For single-class fleet races (no `official_results` in the
+   briefing) the `ranking.final` array is the source of truth, as
+   before — pre-sorted, index 0 is the winner, etc.
 
-   `ranking.by_mark[]` gives the rounding order at each mark of the
-   course. Use it for tactical analysis ("who passed whom at the
-   weather mark"). Same authority rule applies — do not reorder.
+   In either case: a boat's `status` of "DNF", "DNC", "RET", "DSQ",
+   "OCS" or `did_not_finish: true` means it did not finish — say so,
+   never invent a position.
 
-   `ranking.status` is "final" once all boats have finished, else
-   "in_progress". When in_progress, prefix any ranking statement with
+   `ranking.by_mark[]` (when present) gives the rounding order at
+   each mark of the course among the LOADED boats only. Use it for
+   tactical analysis between those boats ("who passed whom at the
+   weather mark"); do NOT use it as the race result.
+
+   `ranking.status` / `official_results.classes[*]` carry status; if
+   the race is `in_progress`, prefix ranking statements with
    "currently" so the user knows positions are provisional.
 
 1. Always refer to boats by their team or boat name (the `name` and

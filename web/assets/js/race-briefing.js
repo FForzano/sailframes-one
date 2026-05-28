@@ -752,6 +752,91 @@
     const _loaM = (c.boat_class && Number.isFinite(c.boat_class.loa_m))
       ? c.boat_class.loa_m : null;
 
+    // --- Official results (handicap races) ---
+    //
+    // currentRace.boats carries the FULL fleet (including boats with
+    // no GPS track), each with class + rating + finish_time. For
+    // multi-class PHRF races the model must rank by corrected time
+    // (elapsed × rating) within class — same math the leaderboard
+    // uses — otherwise GPS-only ranking.final misleads (e.g. one of
+    // five GPS-equipped boats winning the GPS-derived ranking while
+    // actually placing mid-fleet).
+    let officialResults = null;
+    let tracksCoverage = null;
+    const raceClasses = Array.isArray(c.classes) ? c.classes : [];
+    if (raceClasses.length && Array.isArray(c.boats)) {
+        const classStartMs = {};
+        for (const cls of raceClasses) {
+            const t = cls.start_time ? new Date(cls.start_time).getTime() : null;
+            classStartMs[cls.id] = t;
+        }
+        officialResults = {
+            scoring_system: raceClasses[0]?.rating_system || 'ORR-EZ',
+            note: 'Ranking is by CORRECTED TIME within class (elapsed × rating). '
+                + 'This is authoritative for who placed where — it includes EVERY '
+                + 'boat that raced, not just the subset with GPS tracks.',
+            classes: raceClasses.map((cls) => {
+                const startMs = classStartMs[cls.id];
+                const rows = [];
+                for (const b of c.boats) {
+                    if (b.class !== cls.id) continue;
+                    const finishMs = b.finish_time
+                        ? new Date(b.finish_time).getTime() : null;
+                    const status = (b.finish_status
+                        || (finishMs ? 'FIN' : 'DNS')).toUpperCase();
+                    let elapsedSec = null, correctedSec = null;
+                    if (status === 'FIN' && startMs != null && finishMs != null) {
+                        elapsedSec = (finishMs - startMs) / 1000;
+                        const r = Number(b.rating);
+                        if (Number.isFinite(r) && r > 0) {
+                            correctedSec = elapsedSec * r;
+                        }
+                    }
+                    rows.push({
+                        name: b.boat_name || b.team_name || `#${b.sail_number || '?'}`,
+                        skipper: b.team_name || b.skipper || null,
+                        sail_number: b.sail_number || null,
+                        boat_type: b.boat_type || null,
+                        rating: b.rating != null ? round(Number(b.rating), 4) : null,
+                        elapsed_sec: elapsedSec != null ? Math.round(elapsedSec) : null,
+                        corrected_sec: correctedSec != null ? Math.round(correctedSec) : null,
+                        finish_time_local: finishMs != null ? fmtLocal(finishMs) : null,
+                        status,
+                        has_gps_track: !!(b.device_id || b.gpx_path),
+                    });
+                }
+                const fin = rows.filter(r => r.status === 'FIN' && r.corrected_sec != null);
+                const dnf = rows.filter(r => !(r.status === 'FIN' && r.corrected_sec != null));
+                fin.sort((a, b) => a.corrected_sec - b.corrected_sec);
+                const ranked = [...fin, ...dnf].map((r, i) => ({
+                    place: r.status === 'FIN' && r.corrected_sec != null ? (i + 1) : null,
+                    ...r,
+                }));
+                return {
+                    id: cls.id,
+                    name: cls.name || cls.id,
+                    rating_type: cls.rating_type || null,
+                    start_local: startMs != null ? fmtLocal(startMs) : null,
+                    finishers: ranked.filter(r => r.place != null).length,
+                    entries: ranked.length,
+                    results: ranked,
+                };
+            }),
+        };
+        const totalBoats = c.boats.length;
+        const boatsWithGps = c.boats.filter(b => b.device_id || b.gpx_path).length;
+        tracksCoverage = {
+            total_fleet: totalBoats,
+            boats_with_gps_track: boatsWithGps,
+            boats_without_gps_track: totalBoats - boatsWithGps,
+            warning: boatsWithGps < totalBoats
+                ? `GPS tracks are loaded for only ${boatsWithGps} of ${totalBoats} boats. `
+                  + `The boats[] / ranking sections below describe ONLY those ${boatsWithGps}. `
+                  + `For who placed where in the actual race, use official_results — it is the regatta-management-system authoritative scoresheet for every boat.`
+                : 'All boats have GPS tracks loaded.',
+        };
+    }
+
     return {
       race: {
         id: c.race_id,
@@ -813,11 +898,30 @@
           bow_offset_m: c.boat_class.bow_offset_m != null ? round(c.boat_class.bow_offset_m, 2) : null,
         } : null,
       },
-      // AUTHORITATIVE — see system prompt rule on rankings.
+      // OFFICIAL RESULTS (handicap-fleet races) — the regatta-
+      // management scoresheet. When present, this OVERRIDES `ranking`
+      // below for any "who placed where" question. `ranking` covers
+      // ONLY GPS-equipped boats (a subset of the full fleet) and is
+      // computed from GPS course progress; official_results covers
+      // every entrant and ranks by PHRF / ORR-EZ corrected time.
+      // See the system prompt's "RANKINGS ARE AUTHORITATIVE" rule.
+      official_results: officialResults,
+      // Coverage warning — explicitly tells the model how many boats
+      // it has GPS data for vs how many actually raced. Without this
+      // the model invariably mis-ranks handicap races by assuming
+      // the loaded subset IS the fleet.
+      tracks_coverage: tracksCoverage,
+      // GPS-only ranking — limited to boats whose tracks are loaded.
+      // Use for tactical comparisons ("who passed whom at the
+      // weather mark") between THESE boats only. NEVER use as the
+      // race-result source when official_results is present.
       ranking: {
         status: allFinished ? 'final' : 'in_progress',
         final: finalRanking,
         by_mark: byMarkRanking,
+        scope: tracksCoverage
+            ? `${(tracksCoverage.boats_with_gps_track || 0)} of ${(tracksCoverage.total_fleet || 0)} fleet boats — GPS-derived, not the official scoresheet`
+            : 'all loaded boats',
       },
       fleet: boatIds.map((id) => {
         const m = boatsMap[id]?.boat || {};
