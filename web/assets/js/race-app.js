@@ -6751,6 +6751,13 @@ async function loadRaceData(raceId) {
         // circles are resized in place.
         applyRaceBoatClass();
 
+        // RRS 18 zone sizing per mark: replace the static
+        // "largest-boat × 3" fallback with the actual rule —
+        // 3 × LOA of the first boat to enter the mark. Runs after
+        // applyRaceBoatClass so its values are an upper-bound
+        // fallback for marks no boat ever entered.
+        computeMarkZonesFirstToEnter();
+
         // Pre-compute course progress (mark roundings + leg lengths) per
         // boat. Cheap to do once, drives the leaderboard ranking and VMG.
         precomputeAllRoundings();
@@ -8475,6 +8482,7 @@ function updateMarkZoneCircles() {
     if (!markZoneCircles.length) return;
     for (const entry of markZoneCircles) {
         const { mark, circle } = entry;
+        const radius = entry.radius_m || MARK_ZONE_RADIUS_M;
         let inZone = false;
         for (const layer of Object.values(boatLayers)) {
             if (!layer.visible || !layer.current) continue;
@@ -8485,7 +8493,7 @@ function updateMarkZoneCircles() {
             // the mark; the antenna is bow_offset_m aft of the bow,
             // so we project the antenna fix forward along COG first.
             const bow = projectBowPosition(c.lat, c.lon, c.course);
-            if (haversineMeters(bow.lat, bow.lon, mark.lat, mark.lon) <= MARK_ZONE_RADIUS_M) {
+            if (haversineMeters(bow.lat, bow.lon, mark.lat, mark.lon) <= radius) {
                 inZone = true;
                 break;
             }
@@ -8496,6 +8504,77 @@ function updateMarkZoneCircles() {
                 opacity: inZone ? 0.75 : 0,
                 fillOpacity: inZone ? 0.08 : 0,
             });
+        }
+    }
+}
+
+// RRS 18 zone sizing — done right.
+//
+// "The area around a mark within a distance of three hull lengths
+//  of the boat nearer to it. A boat is in the zone when any part of
+//  her hull is in the zone."
+//
+// For each mark, we walk every boat's GPS track chronologically and
+// find which boat's bow first came within 3 × its own LOA of the mark.
+// That boat's LOA defines the zone radius for THIS mark for the
+// remainder of the playback. Marks no boat ever entered fall back to
+// MARK_ZONE_RADIUS_M (the static upper-bound) so the circle is still
+// visible.
+//
+// Called once after raceData arrives and per-boat LOAs are hydrated.
+function computeMarkZonesFirstToEnter() {
+    if (!markZoneCircles.length || !raceData?.boats) return;
+    // Pre-build a trackKey → loa_m lookup so the inner loop is O(1).
+    const loaByKey = {};
+    for (const b of (currentRace?.boats || [])) {
+        const loa = (typeof b.loa_m === 'number' && b.loa_m > 0) ? b.loa_m : null;
+        if (!loa) continue;
+        if (b.device_id) loaByKey[b.device_id] = loa;
+        if (b.boat_id)   loaByKey[b.boat_id]   = loa;
+    }
+    for (const entry of markZoneCircles) {
+        const { mark } = entry;
+        if (mark.lat == null || mark.lon == null) continue;
+        let bestMs = Infinity;
+        let bestLoa = null;
+        let bestKey = null;
+        for (const [trackKey, boatData] of Object.entries(raceData.boats)) {
+            const loa = loaByKey[trackKey];
+            if (!loa) continue;
+            const gps = boatData?.sensors?.gps;
+            if (!Array.isArray(gps) || !gps.length) continue;
+            const threshold = 3 * loa;
+            // Walk forward until we find this boat's first zone entry.
+            // Could be sped up with a spatial pre-filter but at our
+            // scale (3000–6000 points × 6 boats × few marks) the
+            // straight linear scan finishes in a few ms.
+            for (const p of gps) {
+                if (p.lat == null || p.lon == null) continue;
+                const bow = projectBowPosition(p.lat, p.lon, p.course);
+                if (haversineMeters(bow.lat, bow.lon, mark.lat, mark.lon) <= threshold) {
+                    const t = new Date(p.t).getTime();
+                    if (Number.isFinite(t) && t < bestMs) {
+                        bestMs = t;
+                        bestLoa = loa;
+                        bestKey = trackKey;
+                    }
+                    break;
+                }
+            }
+        }
+        if (bestLoa) {
+            entry.radius_m = bestLoa * 3;
+            entry.first_boat_key = bestKey;
+            entry.first_entry_ms = bestMs;
+            entry.circle.setRadius(entry.radius_m);
+            entry.circle.bindTooltip(
+                `RRS 18 zone · ${entry.radius_m.toFixed(0)} m (3 × ${bestLoa.toFixed(2)} m LOA of the first boat to enter)`,
+                { sticky: true });
+        } else {
+            // Nobody ever entered — leave the static fallback visible
+            // as a reference so the mark is still spatially anchored.
+            entry.radius_m = MARK_ZONE_RADIUS_M;
+            entry.circle.setRadius(MARK_ZONE_RADIUS_M);
         }
     }
 }
