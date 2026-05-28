@@ -640,7 +640,7 @@ body.course-editing .boat-legend {
 
 .phrf-row {
     display: grid;
-    grid-template-columns: 38px 1fr 56px 70px 96px 105px;
+    grid-template-columns: 38px 1fr 56px 70px 96px 150px;
     align-items: center;
     gap: 8px;
     padding: 7px 8px;
@@ -654,6 +654,7 @@ body.course-editing .boat-legend {
     gap: 4px;
     justify-content: flex-end;
     min-width: 0;
+    flex-wrap: wrap;
 }
 .phrf-gpx-btn {
     display: inline-block;

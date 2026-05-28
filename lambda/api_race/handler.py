@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import re
+import struct
 import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -134,6 +135,19 @@ def lambda_handler(event, context):
                 if not boat_id:
                     return response(400, {'error': 'boat_id required'})
                 return upload_boat_gpx_by_id(race_id, boat_id, event)
+
+            # VKX (Vakaros Atlas binary) upload by boat_id:
+            # POST /api/races/{race_id}/boats-by-id/{boat_id}/vkx
+            # Parser converts telemetry records to the same shape as
+            # the GPX upload path and stores at the same by-boat-id
+            # location, so the rest of the dashboard treats it
+            # identically.
+            if race_id and '/boats-by-id/' in path and '/vkx' in path and http_method == 'POST':
+                m = re.search(r'/boats-by-id/([^/]+)/vkx', path)
+                boat_id = path_params.get('boat_id') or (m.group(1) if m else None)
+                if not boat_id:
+                    return response(400, {'error': 'boat_id required'})
+                return upload_boat_vkx_by_id(race_id, boat_id, event)
 
             # GPX upload: POST /api/races/{race_id}/boats/{device_id}/gpx
             if race_id and '/gpx' in path and http_method == 'POST':
@@ -1122,6 +1136,115 @@ def upload_boat_gpx(race_id, device_id, event):
         'device_id': device_id,
         'gpx_path': gpx_key,
         'points': len(track_points),
+        'start_time': track_points[0]['t'],
+        'end_time': track_points[-1]['t'],
+    })
+
+
+# --- VKX (Vakaros Atlas) parser ---
+#
+# Minimal scan parser for Vakaros .vkx binary logs. Extracts only the
+# telemetry (0x02) records — same shape as GPX-derived GPS points so
+# we can drop it through the existing gpx_path → race-data plumbing
+# unchanged. Reference: github.com/vakaros/vkx/wiki/Vakaros-VXK-Format
+# (msg type lives at byte 7 of an 8-byte key, payload follows; see
+# wmcb8367/vkx-parser for the canonical implementation we ported).
+_VKX_MESSAGE_SIZES = {
+    0x01: 32, 0x02: 44, 0x03: 20, 0x04: 17, 0x05: 13, 0x06: 18,
+    0x07: 12, 0x08: 16, 0x09: 16, 0x0A: 12, 0x0E: 16, 0x10: 12,
+    0x11: 16, 0x20: 13, 0xFD: 7, 0xFE: 2,
+}
+
+
+def _parse_vkx_to_gps_points(data):
+    """Scan a VKX byte blob, return [{t, lat, lon, speed_kn, course}]
+    sorted by timestamp ascending. Same shape as _parse_gpx output so
+    the downstream gpx_path read path doesn't need to know about VKX."""
+    out = []
+    n = len(data)
+    pos = 0
+    while pos + 52 <= n:
+        msg_type = data[pos + 7]
+        size = _VKX_MESSAGE_SIZES.get(msg_type)
+        if size is None:
+            pos += 1
+            continue
+        if pos + 8 + size > n:
+            break
+        payload = data[pos + 8: pos + 8 + size]
+        if msg_type == 0x02:
+            try:
+                (ts_ms, lat_i, lon_i, sog_mps, cog_rad, _alt,
+                 _qw, _qx, _qy, _qz) = struct.unpack('<Qiifffffff', payload)
+            except struct.error:
+                pos += 1
+                continue
+            # Sanity bounds: any 2020–2030 UTC millisecond timestamp
+            # is a valid telemetry hit; everything else is a false
+            # match from the scan stepping over non-record bytes.
+            if not (1577836800000 < ts_ms < 1893456000000):
+                pos += 1
+                continue
+            lat = lat_i / 10_000_000.0
+            lon = lon_i / 10_000_000.0
+            cog_deg = math.degrees(cog_rad) % 360
+            t_iso = datetime.utcfromtimestamp(ts_ms / 1000.0) \
+                .isoformat() + 'Z'
+            out.append({
+                't': t_iso,
+                'lat': round(lat, 7),
+                'lon': round(lon, 7),
+                'speed_kn': round(sog_mps * 1.94384, 2),
+                'course': round(cog_deg, 1),
+            })
+            pos += 8 + size
+        else:
+            pos += 1
+    out.sort(key=lambda r: r['t'])
+    return out
+
+
+def upload_boat_vkx_by_id(race_id, boat_id, event):
+    """Vakaros .vkx upload for a boat without a fleet device.
+    Parses the binary, writes parsed GPS points to the same
+    by-boat-id GPX path so the rest of the dashboard can read it
+    via the unchanged gpx_path plumbing."""
+    race_data = load_json(f'races/{race_id}/race.json')
+    if not race_data:
+        return response(404, {'error': f'Race not found: {race_id}'})
+
+    boat = next((b for b in race_data.get('boats', []) if b.get('boat_id') == boat_id), None)
+    if boat is None:
+        return response(404, {'error': f'Boat {boat_id} not found in race {race_id}'})
+
+    vkx_bytes = _extract_multipart_file(event)
+    if not vkx_bytes:
+        return response(400, {'error': 'No file received — send as multipart/form-data with field name "file"'})
+
+    try:
+        track_points = _parse_vkx_to_gps_points(vkx_bytes)
+    except Exception as e:
+        logger.error(f"VKX parse error: {e}", exc_info=True)
+        return response(400, {'error': f'Failed to parse VKX: {e}'})
+
+    if not track_points:
+        return response(400, {'error': 'VKX file contains no telemetry records'})
+
+    gpx_key = f'races/{race_id}/gpx/by-boat-id/{boat_id}.json'
+    save_json(gpx_key, track_points)
+
+    boat['gpx_path'] = gpx_key
+    boat['session_path'] = None
+    race_data['updated_at'] = now_iso()
+    save_json(f'races/{race_id}/race.json', race_data)
+
+    logger.info(f"VKX uploaded for boat_id={boat_id} in race {race_id}: {len(track_points)} points")
+
+    return response(200, {
+        'boat_id': boat_id,
+        'gpx_path': gpx_key,
+        'points': len(track_points),
+        'source': 'vkx',
         'start_time': track_points[0]['t'],
         'end_time': track_points[-1]['t'],
     })

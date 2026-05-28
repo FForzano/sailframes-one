@@ -357,6 +357,10 @@ let pendingGpxFiles = {};   // device_id -> File (staged GPX uploads)
 // Parallel store for boats with NO fleet device — staged GPX files
 // keyed by boat_id. Uploaded via the by-boat-id endpoint on save.
 let pendingGpxFilesByBoatId = {};
+// Vakaros .vkx binary uploads keyed by boat_id. Server-side parser
+// converts to the same GPS-points shape as GPX, stored under the
+// same by-boat-id path — so the dashboard treats both identically.
+let pendingVkxFilesByBoatId = {};
 
 // Pre-race display: show 3 minutes before start
 const PRE_RACE_SECONDS = 180;
@@ -6917,6 +6921,7 @@ async function openRaceModal(race = null, opts = {}) {
     // Reset staged GPX files whenever modal opens
     pendingGpxFiles = {};
     pendingGpxFilesByBoatId = {};
+    pendingVkxFilesByBoatId = {};
 
     // Load available sessions for dropdown
     await loadAvailableSessions();
@@ -7042,6 +7047,29 @@ async function uploadPendingGpxFiles(raceId) {
         }
     }
     pendingGpxFilesByBoatId = {};
+
+    // Boat-id-keyed VKX uploads (Vakaros Atlas binary). Server parses
+    // and writes to the same by-boat-id path as GPX, so the rest of
+    // the dashboard reads it via the unchanged gpx_path plumbing.
+    for (const [boatId, file] of Object.entries(pendingVkxFilesByBoatId)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const resp = await fetch(`${API_BASE}/api/races/${raceId}/boats-by-id/${boatId}/vkx`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (resp.ok) {
+                const result = await resp.json();
+                console.log(`[Race] VKX uploaded for boat_id=${boatId}: ${result.points} points`);
+            } else {
+                console.error(`[Race] VKX upload failed for boat_id=${boatId}:`, await resp.text());
+            }
+        } catch (err) {
+            console.error(`[Race] VKX upload error for boat_id=${boatId}:`, err);
+        }
+    }
+    pendingVkxFilesByBoatId = {};
 }
 
 function clearRaceForm() {
@@ -7160,23 +7188,31 @@ function renderPHRFRoster(boats) {
             .concat(ALL_DEVICES.map(d => `<option value="${d}"${d === currentDevice ? ' selected' : ''}>${d}</option>`))
             .join('');
 
-        // Per-row GPX upload — separate from the device dropdown so
+        // Per-row track upload — separate from the device dropdown so
         // boats without a fleet tracker can still attach an external
-        // GPS track (phone app, Sailmon, Garmin, RaceQs, etc.). The
-        // GPX file is staged keyed by boat_id and uploaded on save.
+        // GPS track. Two formats accepted:
+        //   • .gpx   — generic GPX (phone app, Garmin, RaceQs, etc.)
+        //   • .vkx   — Vakaros Atlas binary (parsed server-side)
+        // Both stage keyed by boat_id and upload on save to their
+        // own endpoints; the server writes both into the same
+        // by-boat-id gpx_path so the dashboard reads them identically.
         const bid = boat.boat_id || '';
         const hasPendingBoatGpx = bid && !!pendingGpxFilesByBoatId[bid];
+        const hasPendingBoatVkx = bid && !!pendingVkxFilesByBoatId[bid];
         const hasUploadedGpx = !!boat.gpx_path;
-        // Only show the "already uploaded" badge when the gpx_path is
-        // the by-boat-id variant — for device-keyed GPX uploads the
-        // GPS-attach strip below owns the display.
         const isOwnGpx = hasUploadedGpx && /\/by-boat-id\//.test(boat.gpx_path || '');
-        const gpxBadge = (hasPendingBoatGpx || isOwnGpx)
-            ? `<span class="phrf-gpx-badge" title="${hasPendingBoatGpx ? 'staged: ' + _attrEsc(pendingGpxFilesByBoatId[bid].name) : 'GPX uploaded — overrides any device session'}">📍 GPX${hasPendingBoatGpx ? ' (staged)' : ''}</span>`
-            : '';
-        const gpxBtn = bid
-            ? `<label class="phrf-gpx-btn" title="Upload GPX track for this boat — works without a fleet device assignment">+ GPX<input type="file" accept=".gpx" data-phrf-gpx data-boat-id="${_attrEsc(bid)}" style="display:none"></label>`
-            : '';
+        let gpxBadge = '';
+        if (hasPendingBoatVkx) {
+            gpxBadge = `<span class="phrf-gpx-badge" title="staged: ${_attrEsc(pendingVkxFilesByBoatId[bid].name)}">📍 VKX (staged)</span>`;
+        } else if (hasPendingBoatGpx) {
+            gpxBadge = `<span class="phrf-gpx-badge" title="staged: ${_attrEsc(pendingGpxFilesByBoatId[bid].name)}">📍 GPX (staged)</span>`;
+        } else if (isOwnGpx) {
+            gpxBadge = `<span class="phrf-gpx-badge" title="track uploaded — overrides any device session">📍 Track</span>`;
+        }
+        const trackBtns = bid ? `
+            <label class="phrf-gpx-btn" title="Upload GPX track — works without a fleet device">+ GPX<input type="file" accept=".gpx" data-phrf-gpx data-boat-id="${_attrEsc(bid)}" style="display:none"></label>
+            <label class="phrf-gpx-btn" title="Upload Vakaros Atlas .vkx binary log">+ VKX<input type="file" accept=".vkx" data-phrf-vkx data-boat-id="${_attrEsc(bid)}" style="display:none"></label>
+        ` : '';
 
         return `
             <div class="phrf-row" data-idx="${idx}" data-boat-id="${_attrEsc(bid)}">
@@ -7190,7 +7226,7 @@ function renderPHRFRoster(boats) {
                 <select class="phrf-device" data-field="device_id" title="GPS tracker assignment">
                     ${opts}
                 </select>
-                <div class="phrf-gpx-cell">${gpxBadge}${gpxBtn}</div>
+                <div class="phrf-gpx-cell">${gpxBadge}${trackBtns}</div>
             </div>
         `;
     }).join('');
@@ -7206,11 +7242,24 @@ function renderPHRFRoster(boats) {
             const inp = e.target;
             const bid = inp.dataset.boatId;
             const file = inp.files?.[0];
-            inp.value = '';   // allow re-picking same file later
+            inp.value = '';
             if (!bid || !file) return;
             pendingGpxFilesByBoatId[bid] = file;
-            // Re-render this row to show the staged badge. Since the
-            // entire roster is one innerHTML blob, re-render all.
+            // Staging GPX clears any staged VKX for the same boat —
+            // a boat ends up with one track source per race, not both.
+            delete pendingVkxFilesByBoatId[bid];
+            renderPHRFRoster(currentRace?.boats || []);
+            return;
+        }
+        // Per-row VKX (Vakaros Atlas binary) file picker.
+        if (e.target?.matches?.('input[type=file][data-phrf-vkx]')) {
+            const inp = e.target;
+            const bid = inp.dataset.boatId;
+            const file = inp.files?.[0];
+            inp.value = '';
+            if (!bid || !file) return;
+            pendingVkxFilesByBoatId[bid] = file;
+            delete pendingGpxFilesByBoatId[bid];
             renderPHRFRoster(currentRace?.boats || []);
             return;
         }
