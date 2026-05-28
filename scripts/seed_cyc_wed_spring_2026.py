@@ -37,8 +37,34 @@ RACE_DATE = "2026-05-27"
 #   Start/Finish line, leave mark 13 to starboard, round D/M, leave 13
 #   to port, back to S/F. Windward-leeward style course, hence the
 #   "W50/L50 - Medium" rating type.
+#
+# Rating system is ORR-EZ (Offshore Racing Rule – EZ) operated by
+# regattaman.com. Per-boat certificate URLs are baked in via
+# CERT_URLS below — captured on 2026-05-28 from the published list.
+RATING_SYSTEM = "ORR-EZ"
 RATING_TYPE = "W50/L50 - Medium"
 RACE_LEN_NM = 3.50
+
+
+# ORR-EZ certificate URLs by sail number. Sourced from
+# https://www.regattaman.com/cert_list.php on 2026-05-28. Boats not in
+# this map have no published cert in the 2026 EZ list yet — the user
+# can paste a URL into the boat's catalog page manually.
+CERT_URLS = {
+    'USA 14':    'https://www.regattaman.com/cert_form.php?sku=h-2-2026-10665-15632-0-579',
+    '61430':     'https://www.regattaman.com/cert_form.php?sku=h-2-2026-1-3758-0-579',
+    'USA 78':    'https://www.regattaman.com/cert_form.php?sku=h-2-2026-7173-15690-0-579',
+    '51613':     'https://www.regattaman.com/cert_form.php?sku=h-2-2026-526-530-0-579',
+    '52475':     'https://www.regattaman.com/cert_form.php?sku=h-2-2026-178-275-0-579',
+    '52816':     'https://www.regattaman.com/cert_form.php?sku=h-2-2026-194-2487-0-579',
+    'USA 40':    'https://www.regattaman.com/cert_form.php?sku=h-1-2026-15431-19173-0-579',
+    'USA 1111':  'https://www.regattaman.com/cert_form.php?sku=h-2-2026-1655-18035-0-579',
+    '7':         'https://www.regattaman.com/cert_form.php?sku=h-2-2026-4265-7801-0-579',
+    '470':       'https://www.regattaman.com/cert_form.php?sku=h-22-2026-17418-14372-0-579',
+    '110':       'https://www.regattaman.com/cert_form.php?sku=h-2-2026-16372-12961-0-579',
+    '4396':      'https://www.regattaman.com/cert_form.php?sku=h-2-2026-222-15935-0-579',
+    '220':       'https://www.regattaman.com/cert_form.php?sku=h-41-2026-18229-15922-0-579',
+}
 
 
 def local_iso(hms: str) -> str:
@@ -62,6 +88,7 @@ CLASSES = [
         "id": "A",
         "name": "Class A",
         "start_time": local_iso("18:41:00"),
+        "rating_system": RATING_SYSTEM,
         "rating_type": RATING_TYPE,
         "race_len_nm": RACE_LEN_NM,
     },
@@ -69,10 +96,22 @@ CLASSES = [
         "id": "B",
         "name": "Class B",
         "start_time": local_iso("18:35:00"),
+        "rating_system": RATING_SYSTEM,
         "rating_type": RATING_TYPE,
         "race_len_nm": RACE_LEN_NM,
     },
 ]
+
+
+def _split_skippers(team_name):
+    """'Paul Avillach & Kathryn Commons' → ['Paul Avillach', 'Kathryn Commons'].
+    Trims to 2; longer combos drop the tail (rare for sailing fleets)."""
+    if not team_name:
+        return []
+    # Split on '&' or ' and '. Each part trimmed.
+    import re
+    parts = [p.strip() for p in re.split(r'\s*&\s*|\s+and\s+', team_name) if p.strip()]
+    return [{"name": p, "photo": None} for p in parts[:2]]
 
 
 def _boat(cls, team, yacht, club, sail_no, boat_type, rating,
@@ -209,8 +248,8 @@ def find_existing_race(regatta_id):
 
 def find_or_create_boat(boat_entry):
     """Find a catalog boat by sail_number, else create one. Returns
-    boat_id. Updates the catalog's loa_m / type / skipper if they
-    differ (idempotent re-sync)."""
+    boat_id. Updates the catalog's loa_m / type / skippers / cert
+    fields to the latest seed values (idempotent re-sync)."""
     sail = (boat_entry.get("sail_number") or "").strip()
     if not sail:
         # No sail number → don't try to dedupe; just create. The
@@ -221,13 +260,13 @@ def find_or_create_boat(boat_entry):
     matches = data.get("boats", [])
     if matches:
         boat_id = matches[0]["boat_id"]
-        # Refresh LOA / type / club / skipper to the latest seed values.
         patch = {
+            "name": boat_entry.get("boat_name") or matches[0].get("name", ""),
             "type": boat_entry.get("boat_type") or matches[0].get("type", ""),
             "loa_m": BOAT_TYPE_LOA.get(boat_entry.get("boat_type")) or matches[0].get("loa_m"),
             "club": boat_entry.get("club") or matches[0].get("club", ""),
-            "skipper": boat_entry.get("team_name") or matches[0].get("skipper", ""),
-            "name": boat_entry.get("boat_name") or matches[0].get("name", ""),
+            "skippers": _split_skippers(boat_entry.get("team_name", "")),
+            "cert_url": CERT_URLS.get(sail) or matches[0].get("cert_url", ""),
         }
         _request("PATCH", f"/api/boats/{boat_id}", patch)
         return boat_id
@@ -236,14 +275,16 @@ def find_or_create_boat(boat_entry):
 
 
 def _create_boat_doc(boat_entry):
+    sail = (boat_entry.get("sail_number") or "").strip()
     body = {
         "name": boat_entry.get("boat_name", ""),
         "type": boat_entry.get("boat_type", ""),
         "sail_number": boat_entry.get("sail_number", ""),
         "club": boat_entry.get("club", ""),
         "loa_m": BOAT_TYPE_LOA.get(boat_entry.get("boat_type")),
-        "skipper": boat_entry.get("team_name", ""),
-        "photos": {"boat": None, "skipper": None},
+        "skippers": _split_skippers(boat_entry.get("team_name", "")),
+        "photos": {"boat": None, "skipper1": None, "skipper2": None},
+        "cert_url": CERT_URLS.get(sail, ""),
         "links": [],
         "notes": "",
     }

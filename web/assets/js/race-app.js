@@ -2998,8 +2998,14 @@ async function hydrateBoatsFromCatalog(race) {
         // Catalog-only fields — always pulled (no per-race override
         // path today; if we add one later, gate the assignment).
         if (b.loa_m == null) b.loa_m = cat.loa_m;
+        // Skippers — prefer the array form. Legacy `skipper` string
+        // remains in sync via the lambda's normalizer.
+        if (!Array.isArray(b.skippers) || !b.skippers.length) {
+            b.skippers = Array.isArray(cat.skippers) ? cat.skippers : [];
+        }
         if (!b.skipper) b.skipper = cat.skipper;
         if (!b.team_name && cat.skipper) b.team_name = cat.skipper;
+        if (!b.cert_url) b.cert_url = cat.cert_url;
         b.photos = b.photos || cat.photos || {};
         b.links = b.links || cat.links || [];
         b.notes = b.notes || cat.notes || '';
@@ -3133,6 +3139,27 @@ function renderLegacyLeaderboard() {
 
 const PHRF_STATUSES = new Set(['FIN', 'DNF', 'DNC', 'DSQ', 'RET', 'OCS', 'NSC']);
 
+// Display label for the class header. Prefers an explicit
+// rating_system on the class (e.g. "ORR-EZ"), falls back to a generic
+// label if only rating_type is set. Result: "ORR-EZ · W50/L50 - Medium"
+// (or just "W50/L50 - Medium" if rating_system isn't set yet on a
+// legacy race).
+function _ratingLabel(cls) {
+    if (!cls) return 'ORR-EZ';
+    const sys = cls.rating_system || '';
+    const t = cls.rating_type || '';
+    if (sys && t) return `${sys} · ${t}`;
+    return sys || t || 'ORR-EZ';
+}
+
+// LOA conversion helper for the race dashboard — same as boats-app.js
+// but kept local because race-app is a separate module and there's
+// no shared util layer yet.
+function _loaFeet(loaM, decimals = 1) {
+    if (loaM == null || !Number.isFinite(Number(loaM))) return null;
+    return (Number(loaM) * 3.28084).toFixed(decimals);
+}
+
 function _parseTimeToMs(t) {
     if (!t) return null;
     const d = new Date(t);
@@ -3255,7 +3282,7 @@ function renderPHRFLeaderboard() {
         const header = `
             <div class="lb-class-header">
                 <span class="lb-class-name">${_attrEsc(cls.name || cls.id)}</span>
-                <span class="lb-class-meta">Start ${startLocal} · ${_attrEsc(cls.rating_type || 'PHRF')}</span>
+                <span class="lb-class-meta">Start ${startLocal} · ${_attrEsc(_ratingLabel(cls))}</span>
             </div>
         `;
         if (!rows.length) {
@@ -3326,7 +3353,7 @@ function _renderPHRFRow(r, idx, drawerActive) {
     if (r.status === 'FIN' && r.correctedSec != null) {
         bigCell = `<div class="leaderboard-speed lb-corr" title="Corrected time = elapsed × rating">${_fmtElapsedHMS(r.correctedSec)}</div>`;
         smallParts = [];
-        if (r.rating != null) smallParts.push(`<span title="PHRF rating (multiplier)">${r.rating.toFixed(3)}</span>`);
+        if (r.rating != null) smallParts.push(`<span title="ORR-EZ rating (multiplier)">${r.rating.toFixed(3)}</span>`);
         if (r.elapsedSec != null) smallParts.push(`<span title="Elapsed">e ${_fmtElapsedHMS(r.elapsedSec)}</span>`);
         if (r.finishMs != null) smallParts.push(`<span title="Finish wall-clock">${_fmtLocalHMS(boat.finish_time)}</span>`);
     } else if (r.status === 'FIN' && r.elapsedSec != null) {
@@ -4104,42 +4131,59 @@ function updateBoatDrawer() {
     `;
 }
 
-// Drawer profile block: photos + identity + skipper + LOA + links.
-// Renders only when there's at least one catalog-sourced field; for
-// legacy races (no boat_id) this returns '' so the drawer keeps its
-// original live-data-only layout.
+// Drawer profile block: photos + identity + skippers + LOA + links +
+// ORR-EZ cert. Renders only when there's at least one catalog-sourced
+// field; for legacy races (no boat_id) this returns '' so the drawer
+// keeps its original live-data-only layout.
 function _drawerProfileBlock(raceBoat) {
     if (!raceBoat) return '';
     const photos = raceBoat.photos || {};
     const links = raceBoat.links || [];
-    const hasCatalog = raceBoat.boat_id || photos.boat || photos.skipper
-        || raceBoat.skipper || raceBoat.loa_m != null || links.length;
+    // Use the new skippers[] array when present, falling back to the
+    // legacy single string for older catalog docs.
+    let skippers = Array.isArray(raceBoat.skippers) ? raceBoat.skippers : [];
+    if (!skippers.length && raceBoat.skipper) {
+        skippers = [{ name: raceBoat.skipper, photo: photos.skipper || photos.skipper1 || null }];
+    }
+
+    const hasCatalog = raceBoat.boat_id || photos.boat || skippers.length
+        || raceBoat.loa_m != null || links.length || raceBoat.cert_url;
     if (!hasCatalog) return '';
 
-    const photoStrip = (photos.boat || photos.skipper) ? `
-        <div class="drawer-photos">
-            ${photos.boat ? `<img class="drawer-photo" src="${_attrEsc(photos.boat)}" alt="Boat" title="Boat">` : ''}
-            ${photos.skipper ? `<img class="drawer-photo" src="${_attrEsc(photos.skipper)}" alt="Skipper" title="Skipper">` : ''}
-        </div>
-    ` : '';
+    // Photo strip: boat first, then up to two skipper photos.
+    const photoEls = [];
+    if (photos.boat) photoEls.push(`<img class="drawer-photo" src="${_attrEsc(photos.boat)}" alt="Boat" title="Boat">`);
+    for (const s of skippers) {
+        if (s.photo) photoEls.push(`<img class="drawer-photo" src="${_attrEsc(s.photo)}" alt="${_attrEsc(s.name || 'Skipper')}" title="${_attrEsc(s.name || 'Skipper')}">`);
+    }
+    const photoStrip = photoEls.length ? `<div class="drawer-photos">${photoEls.join('')}</div>` : '';
 
     const meta = [];
     if (raceBoat.boat_type) meta.push(`<span class="drawer-meta-item">${_attrEsc(raceBoat.boat_type)}</span>`);
-    if (raceBoat.loa_m) meta.push(`<span class="drawer-meta-item">${raceBoat.loa_m.toFixed(2)} m LOA</span>`);
+    if (raceBoat.loa_m) {
+        const ft = _loaFeet(raceBoat.loa_m, 1);
+        meta.push(`<span class="drawer-meta-item" title="${raceBoat.loa_m.toFixed(2)} m">${ft} ft LOA</span>`);
+    }
     if (raceBoat.club) meta.push(`<span class="drawer-meta-item">${_attrEsc(raceBoat.club)}</span>`);
     const metaRow = meta.length ? `<div class="drawer-meta-row">${meta.join('')}</div>` : '';
 
-    const skipper = raceBoat.skipper
-        ? `<div class="drawer-skipper">Skipper: <strong>${_attrEsc(raceBoat.skipper)}</strong></div>`
+    const skipperRow = skippers.length
+        ? `<div class="drawer-skipper">${skippers.length > 1 ? 'Skippers' : 'Skipper'}: <strong>${
+            skippers.map(s => _attrEsc(s.name || '—')).join(' &amp; ')
+          }</strong></div>`
         : '';
 
-    const linksRow = links.length ? `
-        <div class="drawer-links">
-            ${links.map(l => l.url
-                ? `<a href="${_attrEsc(l.url)}" target="_blank" rel="noopener">${_attrEsc(l.label || l.url)}</a>`
-                : '').join(' · ')}
-        </div>
-    ` : '';
+    // Links list — combine cert URL (always first if set) with the
+    // user-defined links[]. The cert link is the most important
+    // external link for this fleet so it gets the prime spot.
+    const linkItems = [];
+    if (raceBoat.cert_url) {
+        linkItems.push(`<a href="${_attrEsc(raceBoat.cert_url)}" target="_blank" rel="noopener" class="cert-link">🏷 ORR-EZ Cert ↗</a>`);
+    }
+    for (const l of links) {
+        if (l.url) linkItems.push(`<a href="${_attrEsc(l.url)}" target="_blank" rel="noopener">${_attrEsc(l.label || l.url)}</a>`);
+    }
+    const linksRow = linkItems.length ? `<div class="drawer-links">${linkItems.join(' · ')}</div>` : '';
 
     const editLink = raceBoat.boat_id
         ? `<a class="drawer-edit-boat" href="/boats.html?boat=${_attrEsc(raceBoat.boat_id)}" target="_blank" rel="noopener" title="Open the boat catalog page">Edit boat ↗</a>`
@@ -4149,7 +4193,7 @@ function _drawerProfileBlock(raceBoat) {
         <div class="drawer-section drawer-profile">
             ${photoStrip}
             ${metaRow}
-            ${skipper}
+            ${skipperRow}
             ${linksRow}
             ${editLink}
         </div>
@@ -6912,7 +6956,7 @@ function renderPHRFRoster(boats) {
                     <div class="phrf-name">${_attrEsc(displayName)}</div>
                     <div class="phrf-sub">${_attrEsc(subtitle)}</div>
                 </div>
-                <span class="phrf-rating" title="PHRF rating (multiplier)">${rating}</span>
+                <span class="phrf-rating" title="ORR-EZ rating (multiplier)">${rating}</span>
                 <span class="phrf-finish" title="Finish wall-clock">${_attrEsc(finishLocal)}</span>
                 <select class="phrf-device" data-field="device_id" title="GPS tracker assignment">
                     ${opts}

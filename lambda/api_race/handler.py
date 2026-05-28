@@ -325,9 +325,63 @@ def delete_regatta(regatta_id):
 # embedded fields on race.boats[].
 
 _BOAT_FIELDS = [
-    'name', 'type', 'sail_number', 'club', 'loa_m', 'skipper',
+    'name', 'type', 'sail_number', 'club', 'loa_m',
+    # skippers (new) is the authoritative list [{name, photo}, …].
+    # skipper (legacy) is a flattened display string kept in sync for
+    # back-compat with old race code that reads boat.skipper directly.
+    'skippers', 'skipper',
     'photos', 'links', 'notes',
+    # ORR-EZ certificate page (regattaman.com/cert_form.php?sku=…) —
+    # one per boat. Dedicated field so the UI can render a single
+    # "🏷 Cert" button rather than digging through links[].
+    'cert_url',
 ]
+
+
+def _normalize_boat_skippers(boat):
+    """Ensure both the new skippers[] array and the legacy `skipper`
+    string are set and consistent. Mutates the dict in place. Called
+    on every read and write so old + new clients see the same shape."""
+    skippers = boat.get('skippers')
+    if not isinstance(skippers, list):
+        skippers = []
+    skippers = [s for s in skippers if isinstance(s, dict)]
+    # Trim to 2 — UI assumes at most two co-skippers.
+    skippers = skippers[:2]
+
+    # If skippers[] is empty but the legacy `skipper` string is set,
+    # synthesize entries from it (split on "&" for "A & B" form).
+    if not skippers and boat.get('skipper'):
+        parts = [p.strip() for p in re.split(r'\s*&\s*', boat['skipper']) if p.strip()]
+        skippers = [{'name': p, 'photo': None} for p in parts[:2]]
+        # Pull a legacy single-skipper photo into the first entry.
+        legacy_photo = (boat.get('photos') or {}).get('skipper')
+        if skippers and legacy_photo:
+            skippers[0]['photo'] = legacy_photo
+
+    # Pull per-slot photos from the photos dict into the array. Also
+    # handle the legacy `skipper` slot — old uploads went there before
+    # we split into skipper1/skipper2, so we migrate it to skipper1 on
+    # the first read so the new UI sees it.
+    photos = boat.get('photos') or {}
+    if photos.get('skipper') and not photos.get('skipper1'):
+        photos['skipper1'] = photos['skipper']
+    for i, s in enumerate(skippers):
+        slot_key = f'skipper{i+1}'
+        if s.get('photo') is None and photos.get(slot_key):
+            s['photo'] = photos[slot_key]
+
+    boat['skippers'] = skippers
+    # Mirror back into the legacy fields so old readers still work.
+    boat['skipper'] = ' & '.join(s.get('name', '') for s in skippers if s.get('name'))
+    if skippers:
+        photos.setdefault('skipper1', skippers[0].get('photo'))
+        if len(skippers) >= 2:
+            photos.setdefault('skipper2', skippers[1].get('photo'))
+        # Legacy `skipper` photo = the first skipper's photo.
+        photos.setdefault('skipper', skippers[0].get('photo'))
+    boat['photos'] = photos
+    return boat
 
 
 def list_boats(q=None, sail_number=None):
@@ -350,7 +404,7 @@ def get_boat(boat_id):
     boat = load_json(f'boats/{boat_id}.json')
     if not boat:
         return response(404, {'error': f'Boat not found: {boat_id}'})
-    return response(200, boat)
+    return response(200, _normalize_boat_skippers(boat))
 
 
 def create_boat(body):
@@ -363,16 +417,20 @@ def create_boat(body):
         'sail_number': body.get('sail_number', ''),
         'club': body.get('club', ''),
         'loa_m': body.get('loa_m'),
+        'skippers': body.get('skippers') or [],
         'skipper': body.get('skipper', ''),
         # Photos are URLs (or null). Uploaded via the photo endpoint
         # which writes to boats/<id>/photos/<slot>.<ext> and rewrites
-        # the URL into this dict.
-        'photos': body.get('photos') or {'boat': None, 'skipper': None},
-        'links': body.get('links') or [],          # [{label, url}]
+        # the URL into this dict. Slots: boat, skipper1, skipper2
+        # (plus a legacy `skipper` alias = skipper1).
+        'photos': body.get('photos') or {'boat': None, 'skipper1': None, 'skipper2': None},
+        'cert_url': body.get('cert_url', ''),
+        'links': body.get('links') or [],
         'notes': body.get('notes', ''),
         'created_at': now,
         'updated_at': now,
     }
+    _normalize_boat_skippers(boat)
     save_json(f'boats/{boat_id}.json', boat)
     _upsert_boat_index(boat)
     return response(201, boat)
@@ -385,6 +443,7 @@ def update_boat(boat_id, body):
     for k in _BOAT_FIELDS:
         if k in body:
             boat[k] = body[k]
+    _normalize_boat_skippers(boat)
     boat['updated_at'] = now_iso()
     save_json(f'boats/{boat_id}.json', boat)
     _upsert_boat_index(boat)
@@ -422,6 +481,8 @@ def _upsert_boat_index(boat):
         'club': boat.get('club', ''),
         'loa_m': boat.get('loa_m'),
         'skipper': boat.get('skipper', ''),
+        'skippers': boat.get('skippers') or [],
+        'cert_url': boat.get('cert_url') or '',
         'photos': boat.get('photos') or {},
     }
     boats = data.get('boats', [])
@@ -436,9 +497,13 @@ def _upsert_boat_index(boat):
 
 
 def upload_boat_photo(boat_id, slot, event):
-    """Multipart upload → boats/<id>/photos/<slot>.<ext> with public-read."""
-    if slot not in ('boat', 'skipper'):
-        return response(400, {'error': "slot must be 'boat' or 'skipper'"})
+    """Multipart upload → boats/<id>/photos/<slot>.<ext> with public-read.
+    Slots: boat, skipper1, skipper2 (skipper kept as a legacy alias for
+    skipper1 so old clients don't break)."""
+    if slot == 'skipper':
+        slot = 'skipper1'
+    if slot not in ('boat', 'skipper1', 'skipper2'):
+        return response(400, {'error': "slot must be 'boat', 'skipper1', or 'skipper2'"})
     boat = load_json(f'boats/{boat_id}.json')
     if not boat:
         return response(404, {'error': f'Boat not found: {boat_id}'})
@@ -467,6 +532,20 @@ def upload_boat_photo(boat_id, slot, event):
 
     url = f'https://{DATA_BUCKET}.s3.us-east-1.amazonaws.com/{key}?t={int(datetime.utcnow().timestamp())}'
     boat.setdefault('photos', {})[slot] = url
+    # For skipper slots, also push the URL into the matching skippers[]
+    # entry so the array (authoritative for the new UI) stays in sync
+    # with the photos dict (read by legacy code).
+    if slot in ('skipper1', 'skipper2'):
+        i = 0 if slot == 'skipper1' else 1
+        skippers = boat.get('skippers') or []
+        # Grow the array if needed — uploading a skipper2 photo before
+        # a skipper2 name exists shouldn't crash; the entry stays
+        # name-less and the user can fill it in later via PATCH.
+        while len(skippers) <= i:
+            skippers.append({'name': '', 'photo': None})
+        skippers[i]['photo'] = url
+        boat['skippers'] = skippers
+    _normalize_boat_skippers(boat)
     boat['updated_at'] = now_iso()
     save_json(f'boats/{boat_id}.json', boat)
     _upsert_boat_index(boat)

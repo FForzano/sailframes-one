@@ -105,14 +105,31 @@ function startNewBoat() {
         sail_number: '',
         club: '',
         loa_m: null,
-        skipper: '',
-        photos: { boat: null, skipper: null },
+        skippers: [],
+        photos: { boat: null, skipper1: null, skipper2: null },
+        cert_url: '',
         links: [],
         notes: '',
     };
     state.isNew = true;
     renderList();
     renderDetail();
+}
+
+// Display helpers — LOA in feet (sailors think in feet), metres still
+// stored as the canonical unit so map rendering doesn't change.
+const M_TO_FT = 3.28084;
+function mToFt(m) {
+    if (m == null || !Number.isFinite(Number(m))) return null;
+    return Number(m) * M_TO_FT;
+}
+function ftToM(ft) {
+    if (ft == null || !Number.isFinite(Number(ft))) return null;
+    return Number(ft) / M_TO_FT;
+}
+function fmtFt(m, decimals = 1) {
+    const ft = mToFt(m);
+    return ft == null ? '' : ft.toFixed(decimals);
 }
 
 function renderDetail() {
@@ -124,6 +141,15 @@ function renderDetail() {
     const b = state.selected;
     const photos = b.photos || {};
     const links = b.links || [];
+    // Always work with the new skippers[] shape. Old docs may only
+    // have the legacy `skipper` string — server-side normalize fills
+    // this in, but be defensive in case we're editing a draft locally.
+    b.skippers = Array.isArray(b.skippers) && b.skippers.length
+        ? b.skippers
+        : (b.skipper ? [{ name: b.skipper, photo: photos.skipper || null }] : []);
+
+    const skipper1 = b.skippers[0] || { name: '', photo: photos.skipper1 || photos.skipper || null };
+    const skipper2 = b.skippers[1] || { name: '', photo: photos.skipper2 || null };
 
     const photoTile = (slot, label, current) => `
         <label class="photo-tile ${current ? 'has-img' : ''}" data-slot="${slot}">
@@ -139,7 +165,6 @@ function renderDetail() {
         <div class="detail-header">
             <div class="photo-stack">
                 ${photoTile('boat', 'Boat', photos.boat)}
-                ${photoTile('skipper', 'Skipper', photos.skipper)}
             </div>
             <div class="detail-meta">
                 <div class="form-grid">
@@ -156,17 +181,44 @@ function renderDetail() {
                         <input type="text" data-field="sail_number" value="${escapeHtml(b.sail_number)}" placeholder="USA 14">
                     </div>
                     <div class="form-field">
-                        <label>LOA (m)</label>
-                        <input type="number" step="0.01" min="0" data-field="loa_m" value="${b.loa_m ?? ''}" placeholder="9.14">
+                        <label>LOA (ft) <span class="form-field-sub">stored in metres</span></label>
+                        <input type="number" step="0.01" min="0" data-field="loa_ft" value="${fmtFt(b.loa_m, 2)}" placeholder="30.0">
                     </div>
                     <div class="form-field">
                         <label>Yacht Club</label>
                         <input type="text" data-field="club" value="${escapeHtml(b.club)}" placeholder="Constitution YC">
                     </div>
                     <div class="form-field full">
-                        <label>Skipper(s) — current series</label>
-                        <input type="text" data-field="skipper" value="${escapeHtml(b.skipper)}" placeholder="Robert Pogue">
+                        <label>ORR-EZ Certificate URL</label>
+                        <div class="field-with-button">
+                            <input type="url" data-field="cert_url" value="${escapeHtml(b.cert_url || '')}" placeholder="https://www.regattaman.com/cert_form.php?sku=…">
+                            <button type="button" class="btn-secondary btn-launch-cert" id="btn-cert-open" ${b.cert_url ? '' : 'disabled'} title="Open certificate page">↗</button>
+                        </div>
                     </div>
+                    <div class="form-field full">
+                        <button type="button" class="btn-secondary btn-google-search" id="btn-google-search" ${(b.name || b.sail_number) ? '' : 'disabled'}>🔍 Search Google: ${escapeHtml(b.name || '(name)')} ${escapeHtml(b.sail_number ? '#' + b.sail_number : '')}</button>
+                    </div>
+                </div>
+
+                <div class="skippers-block">
+                    <h3 class="block-heading">Skippers <span class="block-sub">— up to two co-skippers</span></h3>
+                    <div class="skipper-row">
+                        ${photoTile('skipper1', 'Skipper 1', skipper1.photo)}
+                        <div class="form-field full">
+                            <label>Skipper 1 name</label>
+                            <input type="text" data-skipper-field="0" value="${escapeHtml(skipper1.name)}" placeholder="Paul Avillach">
+                        </div>
+                    </div>
+                    <div class="skipper-row">
+                        ${photoTile('skipper2', 'Skipper 2', skipper2.photo)}
+                        <div class="form-field full">
+                            <label>Skipper 2 name <span class="form-field-sub">(optional)</span></label>
+                            <input type="text" data-skipper-field="1" value="${escapeHtml(skipper2.name)}" placeholder="Kathryn Commons">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-grid">
                     <div class="form-field full">
                         <label>Notes</label>
                         <textarea data-field="notes" rows="2" placeholder="Anything worth remembering about the boat.">${escapeHtml(b.notes)}</textarea>
@@ -197,13 +249,36 @@ function renderDetail() {
         </div>
     `;
 
-    // Field listeners — push into state.selected on every change
+    // Field listeners — push into state.selected on every change.
+    // loa_ft is the form field; we convert to loa_m at write time so
+    // the canonical metric value is what gets stored.
     pane.querySelectorAll('[data-field]').forEach(input => {
         input.addEventListener('input', () => {
             const field = input.dataset.field;
             let v = input.value;
-            if (field === 'loa_m') v = v === '' ? null : Number(v);
+            if (field === 'loa_ft') {
+                state.selected.loa_m = v === '' ? null : ftToM(v);
+                return;
+            }
             state.selected[field] = v;
+        });
+    });
+
+    // Skipper-name listeners — write into state.selected.skippers[]
+    // and re-derive the legacy `skipper` string. Photos round-trip via
+    // the photo upload endpoint; we don't track them through this
+    // input.
+    pane.querySelectorAll('[data-skipper-field]').forEach(input => {
+        input.addEventListener('input', () => {
+            const i = Number(input.dataset.skipperField);
+            const skippers = state.selected.skippers || [];
+            while (skippers.length <= i) skippers.push({ name: '', photo: null });
+            skippers[i].name = input.value;
+            // Trim trailing empty entries so saving doesn't send blanks.
+            while (skippers.length && !skippers[skippers.length - 1].name) {
+                skippers.pop();
+            }
+            state.selected.skippers = skippers;
         });
     });
 
@@ -253,6 +328,24 @@ function renderDetail() {
         renderDetail();
     });
     el('btn-delete-boat')?.addEventListener('click', deleteBoat);
+
+    // Google search: opens a search for "boat name sail#" in a new
+    // tab. Useful for finding regatta results, owner photos, polar
+    // specs, anything the boat catalog can't store.
+    el('btn-google-search')?.addEventListener('click', () => {
+        const q = [state.selected.name, state.selected.sail_number]
+            .filter(Boolean).join(' ').trim();
+        if (!q) return;
+        const url = `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+        window.open(url, '_blank', 'noopener');
+    });
+
+    // Cert URL launch (small ↗ button next to the URL input).
+    el('btn-cert-open')?.addEventListener('click', () => {
+        if (state.selected.cert_url) {
+            window.open(state.selected.cert_url, '_blank', 'noopener');
+        }
+    });
 
     if (!state.isNew && state.selected.boat_id) loadRaceHistory(state.selected.boat_id);
 }

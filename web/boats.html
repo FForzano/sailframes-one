@@ -169,6 +169,57 @@
             font-size: 0.72rem; color: var(--text-secondary);
             text-transform: uppercase; letter-spacing: 0.05em;
         }
+        .form-field-sub {
+            text-transform: none; letter-spacing: 0;
+            opacity: 0.55; font-size: 0.7rem; margin-left: 4px;
+        }
+        .field-with-button {
+            display: flex; gap: 6px; align-items: stretch;
+        }
+        .field-with-button input { flex: 1; min-width: 0; }
+        .btn-launch-cert {
+            padding: 0 12px;
+            font-size: 0.95rem;
+        }
+        .btn-launch-cert:disabled {
+            opacity: 0.3; cursor: not-allowed;
+        }
+        .btn-google-search {
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 7px 12px;
+        }
+        .btn-google-search:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .skippers-block {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .block-heading {
+            margin: 0 0 10px;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        .block-sub {
+            font-weight: 400;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        .skipper-row {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 12px;
+            align-items: start;
+            margin-bottom: 12px;
+        }
+        .skipper-row .photo-tile {
+            width: 120px; height: 120px;
+        }
+        .skipper-row .form-field { gap: 4px; }
         .form-field input, .form-field textarea {
             background: rgba(255,255,255,0.05);
             color: var(--text-primary);
@@ -309,6 +360,6 @@
 
     <div class="toast" id="toast"></div>
 
-    <script type="module" src="./assets/js/boats-app.js?v=1"></script>
+    <script type="module" src="./assets/js/boats-app.js?v=2"></script>
 </body>
 </html>

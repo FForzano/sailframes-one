@@ -1017,6 +1017,12 @@ body.course-editing .boat-legend {
     color: var(--text-primary);
     border-color: rgba(255,255,255,0.25);
 }
+.drawer-links a.cert-link {
+    background: rgba(34, 211, 238, 0.12);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+}
 
 /* Wind-source dropdown (replaces segmented control). Single trigger button
    shows the currently selected station + summary; click to expand a menu
