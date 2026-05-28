@@ -1446,68 +1446,75 @@ function renderLaylines() {
     // fall back to the race-average if no sample has been seen yet (e.g.
     // initial render before the first updateBoatPositions tick).
     const twd = lastLaylineTWD ?? raceAvgTWD;
-    if (twd == null || !currentRace?.course?.length) return;
-    const marksById = buildMarksById(currentRace);
-    const startAnchor = startMidpoint(currentRace);
-    if (!startAnchor) return;
+    if (twd == null) return;
 
-    // Find the *next upwind beat* in the course from activeLeg forward.
-    // We scan each remaining leg and check whether the bearing from the
-    // previous mark (or start) into this mark is within ±90° of TWD —
-    // i.e. is this leg a beat? The first beat we hit is what we draw
-    // laylines for. This covers two-lap W-L courses (laylines on W2
-    // even after L is rounded) and courses with offset+gate marks
-    // (W2's laylines visible during the downwind segment, tactically
-    // useful for planning the second beat). Race 2 of 2026-05-04 had no
-    // laylines on its leg-3 windward because the prior code only tested
-    // bearing-from-START — fragile when the course has the same mark id
-    // appearing twice or when intermediate marks confuse the index walk.
-    const courseSeq = currentRace.course;
-    // Race-wide event count includes multi-lap roundings + finish-line
-    // crossing; it's the right ceiling for "race over, stop drawing".
-    const totalLegs = currentRace._totalLegs ?? courseSeq.length;
-    if (totalLegs > 0 && activeLeg >= totalLegs) return;  // race finished
-    // Walk the course modulo so multi-lap races (e.g. 2-lap W-L defined
-    // as course=[W,L]) still find the next upwind beat on lap 2.
-    const scanLimit = courseSeq.length * MAX_LAPS_TO_DETECT;
+    // Collect every mark that should get laylines. Two sources:
+    //   1. Marks explicitly typed `windward` (or `offset` — the
+    //      small mark just downwind of the windward, still part of
+    //      the upwind layline read). The user's mark-type assignment
+    //      is authoritative; if they typed it windward, draw the cone.
+    //   2. Marks reached by an upwind leg in the course sequence —
+    //      catches windward marks the user typed as `custom`.
+    // Deduped by mark_id so a mark hit by both heuristics renders once.
+    const seen = new Set();
+    const targets = [];   // [{ mark, label }]
 
-    let targetMark = null;
-    let targetIdx = -1;
-    for (let i = activeLeg; i < scanLimit; i++) {
-        const mark = marksById[courseSeq[i % courseSeq.length]];
-        if (!mark) continue;
-        const prevSeqIdx = (i - 1 + courseSeq.length) % courseSeq.length;
-        const prev = (i === 0)
-            ? startAnchor
-            : (marksById[courseSeq[prevSeqIdx]] || startAnchor);
-        const legBearing = bearingDegrees(prev.lat, prev.lon, mark.lat, mark.lon);
-        const offset = ((legBearing - twd + 540) % 360) - 180;
-        if (Math.abs(offset) <= 90) {
-            targetMark = mark;
-            targetIdx = i;
-            break;
+    for (const m of (currentRace?.marks || [])) {
+        if (!m || m.lat == null || m.lon == null) continue;
+        if (m.mark_type === 'windward' || m.mark_type === 'offset') {
+            seen.add(m.mark_id);
+            targets.push({ mark: m, label: m.name || m.mark_type });
         }
     }
-    if (!targetMark) return;  // no upwind leg ahead — racing downwind to finish
+
+    // Course-walk fallback: any mark whose approach-leg bearing is a
+    // beat (within ±90° of TWD) is a de-facto windward mark even if
+    // mark_type isn't set. Same modulo-MAX_LAPS scan as the old code
+    // so multi-lap W-L courses still get laylines on lap-N marks.
+    const courseSeq = currentRace?.course || [];
+    if (courseSeq.length) {
+        const marksById = buildMarksById(currentRace);
+        const startAnchor = startMidpoint(currentRace);
+        const scanLimit = courseSeq.length * MAX_LAPS_TO_DETECT;
+        for (let i = 0; i < scanLimit; i++) {
+            const markId = courseSeq[i % courseSeq.length];
+            const mark = marksById[markId];
+            if (!mark || mark.lat == null || mark.lon == null) continue;
+            if (seen.has(mark.mark_id)) continue;
+            const prevSeqIdx = (i - 1 + courseSeq.length) % courseSeq.length;
+            const prev = (i === 0)
+                ? startAnchor
+                : (marksById[courseSeq[prevSeqIdx]] || startAnchor);
+            if (!prev) continue;
+            const legBearing = bearingDegrees(prev.lat, prev.lon, mark.lat, mark.lon);
+            const offset = ((legBearing - twd + 540) % 360) - 180;
+            if (Math.abs(offset) <= 90) {
+                seen.add(mark.mark_id);
+                targets.push({ mark, label: mark.name || mark.mark_type || `Mark ${i + 1}` });
+            }
+        }
+    }
+
+    if (!targets.length) return;
 
     laylineLayer = L.featureGroup().addTo(map);
     const LAYLINE_M = 3000;
     const stbBearing = (twd + 180 - J80_UPWIND_TACK_ANGLE + 360) % 360;
     const portBearing = (twd + 180 + J80_UPWIND_TACK_ANGLE) % 360;
-    const stbEnd = destinationPoint(targetMark.lat, targetMark.lon, stbBearing, LAYLINE_M);
-    const portEnd = destinationPoint(targetMark.lat, targetMark.lon, portBearing, LAYLINE_M);
-
     const styleStb = { color: '#22d3ee', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
     const stylePort = { color: '#ef4444', weight: 1.5, opacity: 0.55, dashArray: '6,6' };
-    const markName = targetMark.name || targetMark.mark_type || `Mark ${targetIdx + 1}`;
     const twdLabel = `TWD ${twd.toFixed(0)}°`;
-    const legNote = (targetIdx > activeLeg) ? ` (leg ${targetIdx + 1})` : '';
-    L.polyline([[targetMark.lat, targetMark.lon], stbEnd], styleStb)
-        .bindTooltip(`Starboard layline → ${markName}${legNote} · ${twdLabel}`, { sticky: true })
-        .addTo(laylineLayer);
-    L.polyline([[targetMark.lat, targetMark.lon], portEnd], stylePort)
-        .bindTooltip(`Port layline → ${markName}${legNote} · ${twdLabel}`, { sticky: true })
-        .addTo(laylineLayer);
+
+    for (const { mark, label } of targets) {
+        const stbEnd = destinationPoint(mark.lat, mark.lon, stbBearing, LAYLINE_M);
+        const portEnd = destinationPoint(mark.lat, mark.lon, portBearing, LAYLINE_M);
+        L.polyline([[mark.lat, mark.lon], stbEnd], styleStb)
+            .bindTooltip(`Starboard layline → ${label} · ${twdLabel}`, { sticky: true })
+            .addTo(laylineLayer);
+        L.polyline([[mark.lat, mark.lon], portEnd], stylePort)
+            .bindTooltip(`Port layline → ${label} · ${twdLabel}`, { sticky: true })
+            .addTo(laylineLayer);
+    }
 }
 
 // Re-render laylines if the wind at the current playback time has shifted
