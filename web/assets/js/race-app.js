@@ -7008,83 +7008,61 @@ function handleGpxClear(deviceId) {
 }
 
 async function uploadPendingGpxFiles(raceId) {
-    // Device-keyed GPX uploads (fleet trackers E1..E6).
-    for (const [deviceId, file] of Object.entries(pendingGpxFiles)) {
+    // Returns a summary that saveRace surfaces to the user — every
+    // failure path used to log silently to the console only, which
+    // hid real problems (file dropped on the floor, parse errors,
+    // network failures, etc.). Counts AND error messages flow back
+    // so the user can act.
+    const summary = { ok: [], failed: [], reports: [] };
+
+    async function uploadOne(label, url, file) {
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const resp = await fetch(`${API_BASE}/api/races/${raceId}/boats/${deviceId}/gpx`, {
-                method: 'POST',
-                body: formData,
-            });
+            const resp = await fetch(url, { method: 'POST', body: formData });
             if (resp.ok) {
                 const result = await resp.json();
-                console.log(`[Race] GPX uploaded for ${deviceId}: ${result.points} points`);
+                summary.ok.push({ label, file: file.name, ...result });
+                if (result.report_url) summary.reports.push(result.report_url);
+                console.log(`[Race] uploaded ${label} (${file.name}): ${result.points} points`);
             } else {
-                console.error(`[Race] GPX upload failed for ${deviceId}:`, await resp.text());
+                const text = await resp.text();
+                summary.failed.push({ label, file: file.name, status: resp.status, error: text });
+                console.error(`[Race] upload failed ${label}:`, resp.status, text);
             }
         } catch (err) {
-            console.error(`[Race] GPX upload error for ${deviceId}:`, err);
+            summary.failed.push({ label, file: file.name, error: err?.message || String(err) });
+            console.error(`[Race] upload error ${label}:`, err);
         }
+    }
+
+    // Device-keyed GPX (fleet trackers E1..E6).
+    for (const [deviceId, file] of Object.entries(pendingGpxFiles)) {
+        await uploadOne(`GPX → ${deviceId}`,
+            `${API_BASE}/api/races/${raceId}/boats/${deviceId}/gpx`, file);
     }
     pendingGpxFiles = {};
 
-    // Boat-id-keyed GPX uploads (handicap boats with their own GPS
-    // hardware — no fleet device assigned).
+    // Boat-id-keyed GPX (handicap boats — Waterspeed, Garmin, etc.).
     for (const [boatId, file] of Object.entries(pendingGpxFilesByBoatId)) {
-        const formData = new FormData();
-        formData.append('file', file);
-        try {
-            const resp = await fetch(`${API_BASE}/api/races/${raceId}/boats-by-id/${boatId}/gpx`, {
-                method: 'POST',
-                body: formData,
-            });
-            if (resp.ok) {
-                const result = await resp.json();
-                console.log(`[Race] GPX uploaded for boat_id=${boatId}: ${result.points} points`);
-            } else {
-                console.error(`[Race] GPX upload failed for boat_id=${boatId}:`, await resp.text());
-            }
-        } catch (err) {
-            console.error(`[Race] GPX upload error for boat_id=${boatId}:`, err);
-        }
+        await uploadOne(`GPX → boat ${boatId}`,
+            `${API_BASE}/api/races/${raceId}/boats-by-id/${boatId}/gpx`, file);
     }
     pendingGpxFilesByBoatId = {};
 
-    // Boat-id-keyed VKX uploads (Vakaros Atlas binary). Server parses
-    // and writes to the same by-boat-id path as GPX, so the rest of
-    // the dashboard reads it via the unchanged gpx_path plumbing.
-    // Returned `report_url` opens in a new tab once the upload
-    // finishes — the boat owner gets a sharable diagnostic report.
-    const reportUrls = [];
+    // Boat-id-keyed Vakaros .vkx.
     for (const [boatId, file] of Object.entries(pendingVkxFilesByBoatId)) {
-        const formData = new FormData();
-        formData.append('file', file);
-        try {
-            const resp = await fetch(`${API_BASE}/api/races/${raceId}/boats-by-id/${boatId}/vkx`, {
-                method: 'POST',
-                body: formData,
-            });
-            if (resp.ok) {
-                const result = await resp.json();
-                console.log(`[Race] VKX uploaded for boat_id=${boatId}: ${result.points} points · report ${result.report_url}`);
-                if (result.report_url) reportUrls.push(result.report_url);
-            } else {
-                console.error(`[Race] VKX upload failed for boat_id=${boatId}:`, await resp.text());
-            }
-        } catch (err) {
-            console.error(`[Race] VKX upload error for boat_id=${boatId}:`, err);
-        }
+        await uploadOne(`VKX → boat ${boatId}`,
+            `${API_BASE}/api/races/${raceId}/boats-by-id/${boatId}/vkx`, file);
     }
     pendingVkxFilesByBoatId = {};
-    // Pop each VKX report in its own tab once saves are done. Most
-    // browsers block window.open after an async chain unless the
-    // user-gesture chain is intact — but the save button click that
-    // triggered uploadPendingGpxFiles IS such a gesture, so this
-    // succeeds. Multiple reports just open multiple tabs.
-    for (const url of reportUrls) {
+
+    // Pop each VKX report in its own tab.
+    for (const url of summary.reports) {
         try { window.open(url, '_blank', 'noopener'); } catch {}
     }
+
+    return summary;
 }
 
 function clearRaceForm() {
@@ -7246,44 +7224,48 @@ function renderPHRFRoster(boats) {
         `;
     }).join('');
 
-    // Live "device already in use" warning. Prevents two boats getting
-    // the same E# (which would clobber tracks). Listener rebound on
-    // every render since innerHTML wiped the old ones. The GPS-attach
-    // strip below the roster also re-renders on every change so the
-    // session/GPX rows reflect the current assignment.
-    container.addEventListener('change', (e) => {
-        // Per-row GPX file picker → stage in pendingGpxFilesByBoatId
-        if (e.target?.matches?.('input[type=file][data-phrf-gpx]')) {
-            const inp = e.target;
-            const bid = inp.dataset.boatId;
-            const file = inp.files?.[0];
-            inp.value = '';
-            if (!bid || !file) return;
-            pendingGpxFilesByBoatId[bid] = file;
-            // Staging GPX clears any staged VKX for the same boat —
-            // a boat ends up with one track source per race, not both.
-            delete pendingVkxFilesByBoatId[bid];
-            renderPHRFRoster(currentRace?.boats || []);
-            return;
-        }
-        // Per-row VKX (Vakaros Atlas binary) file picker.
-        if (e.target?.matches?.('input[type=file][data-phrf-vkx]')) {
-            const inp = e.target;
-            const bid = inp.dataset.boatId;
-            const file = inp.files?.[0];
-            inp.value = '';
-            if (!bid || !file) return;
-            pendingVkxFilesByBoatId[bid] = file;
-            delete pendingGpxFilesByBoatId[bid];
-            renderPHRFRoster(currentRace?.boats || []);
-            return;
-        }
-        // Device dropdown change → re-check conflicts + refresh strip.
-        if (e.target?.matches?.('.phrf-device')) {
-            _validatePHRFDeviceConflicts();
-            renderGPSAttachStrip();
-        }
-    });
+    // Bind the delegated change listener ONCE per container. Previously
+    // every render added a new listener, so by the second file-pick
+    // we'd handle the change twice (staging same file repeatedly,
+    // triggering recursive re-renders). The container itself is never
+    // recreated (only its innerHTML is wiped), so the listener
+    // survives renders.
+    if (!container.dataset.changeBound) {
+        container.addEventListener('change', (e) => {
+            // Per-row GPX file picker → stage in pendingGpxFilesByBoatId
+            if (e.target?.matches?.('input[type=file][data-phrf-gpx]')) {
+                const inp = e.target;
+                const bid = inp.dataset.boatId;
+                const file = inp.files?.[0];
+                inp.value = '';
+                if (!bid || !file) return;
+                pendingGpxFilesByBoatId[bid] = file;
+                // Staging GPX clears any staged VKX for the same boat
+                // — a boat ends up with one track source per race.
+                delete pendingVkxFilesByBoatId[bid];
+                renderPHRFRoster(currentRace?.boats || []);
+                return;
+            }
+            // Per-row VKX (Vakaros Atlas binary) file picker.
+            if (e.target?.matches?.('input[type=file][data-phrf-vkx]')) {
+                const inp = e.target;
+                const bid = inp.dataset.boatId;
+                const file = inp.files?.[0];
+                inp.value = '';
+                if (!bid || !file) return;
+                pendingVkxFilesByBoatId[bid] = file;
+                delete pendingGpxFilesByBoatId[bid];
+                renderPHRFRoster(currentRace?.boats || []);
+                return;
+            }
+            // Device dropdown change → re-check conflicts + refresh strip.
+            if (e.target?.matches?.('.phrf-device')) {
+                _validatePHRFDeviceConflicts();
+                renderGPSAttachStrip();
+            }
+        });
+        container.dataset.changeBound = '1';
+    }
     _validatePHRFDeviceConflicts();
 }
 
@@ -7711,9 +7693,30 @@ async function saveRace() {
         // race-edit modal.
         rememberRaceNames(savedRace);
 
-        // Upload any GPX tracks staged for this race
-        if (Object.keys(pendingGpxFiles).length > 0) {
-            await uploadPendingGpxFiles(savedRace.race_id);
+        // Upload any GPS tracks staged for this race — covers the
+        // legacy device-keyed GPX (pendingGpxFiles), boat-id-keyed
+        // GPX (pendingGpxFilesByBoatId), and Vakaros .vkx
+        // (pendingVkxFilesByBoatId). Checking only pendingGpxFiles
+        // was a silent-failure bug — handicap-boat uploads landed in
+        // the boat-id maps and were never sent to the server.
+        const hasStagedUploads =
+            Object.keys(pendingGpxFiles).length > 0 ||
+            Object.keys(pendingGpxFilesByBoatId).length > 0 ||
+            Object.keys(pendingVkxFilesByBoatId).length > 0;
+        if (hasStagedUploads) {
+            const summary = await uploadPendingGpxFiles(savedRace.race_id);
+            // Surface the outcome so silent failures (parse error,
+            // 4xx response, network drop) don't disappear into the
+            // console. Successful uploads get a brief confirmation;
+            // failures get an alert listing what went wrong.
+            if (summary.failed.length) {
+                const lines = summary.failed.map(f =>
+                    `• ${f.label} (${f.file}): ${f.error || ('HTTP ' + (f.status || '?'))}`);
+                alert(`Some GPS uploads failed:\n\n${lines.join('\n')}\n\nThe race was saved without those tracks. Re-open the editor to retry.`);
+            } else if (summary.ok.length) {
+                // Quietly OK — track will appear after loadRaceData.
+                console.log(`[Race] Uploaded ${summary.ok.length} GPS file(s).`);
+            }
         }
 
         closeRaceModal();
