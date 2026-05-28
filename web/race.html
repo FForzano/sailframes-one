@@ -70,7 +70,7 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
     <link rel="stylesheet" href="./assets/css/main.css?v=10">
-    <link rel="stylesheet" href="./assets/css/race.css?v=55">
+    <link rel="stylesheet" href="./assets/css/race.css?v=56">
     <link rel="stylesheet" href="./assets/css/race-chat.css?v=10">
     <link rel="stylesheet" href="./assets/css/race-start-review.css?v=2">
     <script src="./config.js"></script>
@@ -461,10 +461,28 @@
                     <div class="phrf-roster-hint">
                         Pick which fleet device (E1–E6) rode on each boat.
                         Boat names, ratings, classes and finish times are
-                        read-only in this view; edit them with the seed
-                        script if the regatta sheet changes.
+                        read-only here — edit boats on the <a href="/boats.html">Boats catalog</a>
+                        and rerun the seed script for results changes.
                     </div>
                     <div class="phrf-roster" id="phrf-roster">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Attach GPS data — for handicap races only. Renders
+                     one row per device the user has assigned in the
+                     PHRF roster above. Session dropdown picks a recorded
+                     SailFrames session; GPX button uploads an external
+                     track. Rebuilt every time the PHRF device picks
+                     change so it always reflects the current assignment. -->
+                <div class="form-section" id="gps-attach-section" style="display: none;">
+                    <h3>Attach GPS data</h3>
+                    <div class="gps-attach-hint">
+                        One row per device assigned above. Pick a SailFrames
+                        session or upload a GPX track exported from any
+                        other device.
+                    </div>
+                    <div class="gps-attach" id="gps-attach">
                         <!-- Populated dynamically -->
                     </div>
                 </div>
@@ -486,6 +504,6 @@
     </div>
 
     <!-- Scripts -->
-    <script type="module" src="./assets/js/race-app.js?v=109"></script>
+    <script type="module" src="./assets/js/race-app.js?v=110"></script>
 </body>
 </html>

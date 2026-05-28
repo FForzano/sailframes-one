@@ -27,6 +27,7 @@ DATA_BUCKET = os.environ.get('DATA_BUCKET', 'sailframes-fleet-data-prod')
 RACES_INDEX_KEY = "races/races.json"
 REGATTAS_INDEX_KEY = "regattas/regattas.json"
 RACEDAYS_INDEX_KEY = "racedays/racedays.json"
+BOATS_INDEX_KEY = "boats/boats.json"
 
 CORS_HEADERS = {
     'Content-Type': 'application/json',
@@ -79,6 +80,44 @@ def lambda_handler(event, context):
                 return update_raceday(raceday_id, json.loads(event.get('body', '{}')))
             elif http_method == 'DELETE':
                 return delete_raceday(raceday_id)
+
+        # Boats catalog — first-class entity for cross-race history,
+        # per-boat metadata (LOA, photos, links, skipper).
+        elif '/api/boats' in path:
+            boat_id = path_params.get('boat_id')
+            # If API Gateway didn't supply the path-param mapping (the
+            # `{boat_id}` proxy route is configured per-method), pluck
+            # the id straight from the URL — same fallback the GPX
+            # endpoint uses for device_id.
+            if not boat_id:
+                m = re.search(r'/api/boats/([^/]+)', path)
+                if m:
+                    boat_id = m.group(1)
+
+            # Photo upload: POST /api/boats/{boat_id}/photo/{slot}
+            if boat_id and '/photo/' in path and http_method == 'POST':
+                slot = path_params.get('slot')
+                if not slot:
+                    m = re.search(r'/photo/([^/]+)', path)
+                    slot = m.group(1) if m else None
+                return upload_boat_photo(boat_id, slot, event)
+
+            # Race history: GET /api/boats/{boat_id}/races
+            if boat_id and '/races' in path and http_method == 'GET':
+                return get_boat_race_history(boat_id)
+
+            # CRUD
+            if http_method == 'GET' and not boat_id:
+                qs = event.get('queryStringParameters', {}) or {}
+                return list_boats(qs.get('q'), qs.get('sail_number'))
+            elif http_method == 'GET':
+                return get_boat(boat_id)
+            elif http_method == 'POST':
+                return create_boat(json.loads(event.get('body', '{}')))
+            elif http_method == 'PATCH':
+                return update_boat(boat_id, json.loads(event.get('body', '{}')))
+            elif http_method == 'DELETE':
+                return delete_boat(boat_id)
 
         # Races
         elif '/api/races' in path:
@@ -274,6 +313,292 @@ def delete_regatta(regatta_id):
         return response(404, {'error': f'Regatta not found: {regatta_id}'})
     save_json(REGATTAS_INDEX_KEY, data)
     return response(200, {'deleted': regatta_id})
+
+
+# --- Boats catalog ---
+#
+# Boats are first-class entities that live independently of any race.
+# A boat doc holds identity + photos + links + per-boat properties
+# (LOA, default skipper). Race entries reference boats by boat_id;
+# per-race state (rating, device, finish_time, session_path) stays
+# on the race entry. Legacy races without boat_id keep working through
+# embedded fields on race.boats[].
+
+_BOAT_FIELDS = [
+    'name', 'type', 'sail_number', 'club', 'loa_m', 'skipper',
+    'photos', 'links', 'notes',
+]
+
+
+def list_boats(q=None, sail_number=None):
+    data = load_json(BOATS_INDEX_KEY)
+    boats = data.get('boats', [])
+    if sail_number:
+        boats = [b for b in boats if str(b.get('sail_number', '')).strip() == sail_number.strip()]
+    if q:
+        ql = q.lower()
+        boats = [b for b in boats
+                 if ql in (b.get('name', '') or '').lower()
+                 or ql in (b.get('type', '') or '').lower()
+                 or ql in str(b.get('sail_number', '')).lower()
+                 or ql in (b.get('club', '') or '').lower()]
+    boats = sorted(boats, key=lambda b: (b.get('name') or '').lower())
+    return response(200, {'boats': boats})
+
+
+def get_boat(boat_id):
+    boat = load_json(f'boats/{boat_id}.json')
+    if not boat:
+        return response(404, {'error': f'Boat not found: {boat_id}'})
+    return response(200, boat)
+
+
+def create_boat(body):
+    boat_id = str(uuid.uuid4())[:8]
+    now = now_iso()
+    boat = {
+        'boat_id': boat_id,
+        'name': body.get('name', ''),
+        'type': body.get('type', ''),
+        'sail_number': body.get('sail_number', ''),
+        'club': body.get('club', ''),
+        'loa_m': body.get('loa_m'),
+        'skipper': body.get('skipper', ''),
+        # Photos are URLs (or null). Uploaded via the photo endpoint
+        # which writes to boats/<id>/photos/<slot>.<ext> and rewrites
+        # the URL into this dict.
+        'photos': body.get('photos') or {'boat': None, 'skipper': None},
+        'links': body.get('links') or [],          # [{label, url}]
+        'notes': body.get('notes', ''),
+        'created_at': now,
+        'updated_at': now,
+    }
+    save_json(f'boats/{boat_id}.json', boat)
+    _upsert_boat_index(boat)
+    return response(201, boat)
+
+
+def update_boat(boat_id, body):
+    boat = load_json(f'boats/{boat_id}.json')
+    if not boat:
+        return response(404, {'error': f'Boat not found: {boat_id}'})
+    for k in _BOAT_FIELDS:
+        if k in body:
+            boat[k] = body[k]
+    boat['updated_at'] = now_iso()
+    save_json(f'boats/{boat_id}.json', boat)
+    _upsert_boat_index(boat)
+    return response(200, boat)
+
+
+def delete_boat(boat_id):
+    boat = load_json(f'boats/{boat_id}.json')
+    if not boat:
+        return response(404, {'error': f'Boat not found: {boat_id}'})
+    delete_json(f'boats/{boat_id}.json')
+    # Best-effort photo cleanup — boats/{id}/photos/* objects. List
+    # then delete; failures here don't block the catalog deletion.
+    try:
+        resp = s3.list_objects_v2(Bucket=DATA_BUCKET, Prefix=f'boats/{boat_id}/photos/')
+        for obj in resp.get('Contents', []):
+            s3.delete_object(Bucket=DATA_BUCKET, Key=obj['Key'])
+    except Exception as e:
+        logger.warning(f"Boat photo cleanup failed for {boat_id}: {e}")
+    # Remove from index
+    data = load_json(BOATS_INDEX_KEY)
+    data['boats'] = [b for b in data.get('boats', []) if b.get('boat_id') != boat_id]
+    save_json(BOATS_INDEX_KEY, data)
+    return response(200, {'deleted': boat_id})
+
+
+def _upsert_boat_index(boat):
+    """Keep boats/boats.json in sync. Stores summary fields only."""
+    data = load_json(BOATS_INDEX_KEY) or {'boats': []}
+    summary = {
+        'boat_id': boat['boat_id'],
+        'name': boat.get('name', ''),
+        'type': boat.get('type', ''),
+        'sail_number': boat.get('sail_number', ''),
+        'club': boat.get('club', ''),
+        'loa_m': boat.get('loa_m'),
+        'skipper': boat.get('skipper', ''),
+        'photos': boat.get('photos') or {},
+    }
+    boats = data.get('boats', [])
+    for i, b in enumerate(boats):
+        if b.get('boat_id') == boat['boat_id']:
+            boats[i] = summary
+            break
+    else:
+        boats.append(summary)
+    data['boats'] = boats
+    save_json(BOATS_INDEX_KEY, data)
+
+
+def upload_boat_photo(boat_id, slot, event):
+    """Multipart upload → boats/<id>/photos/<slot>.<ext> with public-read."""
+    if slot not in ('boat', 'skipper'):
+        return response(400, {'error': "slot must be 'boat' or 'skipper'"})
+    boat = load_json(f'boats/{boat_id}.json')
+    if not boat:
+        return response(404, {'error': f'Boat not found: {boat_id}'})
+
+    file_bytes, filename, content_type = _extract_multipart_file_with_meta(event)
+    if not file_bytes:
+        return response(400, {'error': 'No file received — POST multipart/form-data with field "file"'})
+
+    # Pick extension from filename, fall back to .jpg
+    ext = 'jpg'
+    if filename and '.' in filename:
+        ext = filename.rsplit('.', 1)[-1].lower()
+        if ext not in ('jpg', 'jpeg', 'png', 'webp', 'heic'):
+            ext = 'jpg'
+
+    key = f'boats/{boat_id}/photos/{slot}.{ext}'
+    ct = content_type or {
+        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+        'webp': 'image/webp', 'heic': 'image/heic',
+    }.get(ext, 'image/jpeg')
+
+    s3.put_object(
+        Bucket=DATA_BUCKET, Key=key, Body=file_bytes, ContentType=ct,
+        CacheControl='public, max-age=300',
+    )
+
+    url = f'https://{DATA_BUCKET}.s3.us-east-1.amazonaws.com/{key}?t={int(datetime.utcnow().timestamp())}'
+    boat.setdefault('photos', {})[slot] = url
+    boat['updated_at'] = now_iso()
+    save_json(f'boats/{boat_id}.json', boat)
+    _upsert_boat_index(boat)
+    return response(200, {'boat_id': boat_id, 'slot': slot, 'url': url})
+
+
+def _extract_multipart_file_with_meta(event):
+    """Same as _extract_multipart_file but also returns filename + content-type."""
+    headers = {k.lower(): v for k, v in (event.get('headers') or {}).items()}
+    content_type = headers.get('content-type', '')
+
+    body_raw = event.get('body', '') or ''
+    if event.get('isBase64Encoded'):
+        body_bytes = base64.b64decode(body_raw)
+    else:
+        body_bytes = body_raw.encode('latin-1')
+
+    boundary = None
+    for part in content_type.split(';'):
+        part = part.strip()
+        if part.lower().startswith('boundary='):
+            boundary = part[9:].strip('"\'')
+            break
+    if not boundary:
+        return (body_bytes if body_bytes else None, None, None)
+
+    delimiter = ('--' + boundary).encode('latin-1')
+    parts = body_bytes.split(delimiter)
+
+    for part in parts[1:]:
+        if part in (b'--', b'--\r\n', b''):
+            continue
+        sep = b'\r\n\r\n'
+        if sep not in part:
+            continue
+        headers_blob, file_body = part.split(sep, 1)
+        file_body = file_body.rstrip(b'\r\n')
+        if not file_body:
+            continue
+        # Parse Content-Disposition: form-data; name="file"; filename="x.jpg"
+        filename = None
+        ct = None
+        for h in headers_blob.split(b'\r\n'):
+            hl = h.decode('latin-1', 'ignore').lower()
+            if hl.startswith('content-disposition'):
+                m = re.search(r'filename="([^"]+)"', h.decode('latin-1', 'ignore'))
+                if m:
+                    filename = m.group(1)
+            elif hl.startswith('content-type:'):
+                ct = h.decode('latin-1', 'ignore').split(':', 1)[1].strip()
+        return (file_body, filename, ct)
+    return (None, None, None)
+
+
+def get_boat_race_history(boat_id):
+    """Walk every race in the index, look for boats[*].boat_id == boat_id.
+    Returns [{race_id, name, date, regatta_id, class, rating, finish_time,
+              finish_status, place}] sorted newest first.
+
+    OK at ~50 races. If this gets large we'll add a denormalized
+    boat_id → race_ids index updated at race save time."""
+    index = load_json(RACES_INDEX_KEY)
+    races = index.get('races', [])
+    out = []
+    for r in races:
+        race_id = r.get('race_id')
+        race = load_json(f'races/{race_id}/race.json')
+        if not race:
+            continue
+        for b in race.get('boats', []):
+            if b.get('boat_id') != boat_id:
+                continue
+            # Determine PHRF place within class if we can. Otherwise
+            # leave place=None and let the UI render '—'.
+            place = _compute_phrf_place(race, b)
+            out.append({
+                'race_id': race_id,
+                'name': race.get('name'),
+                'date': race.get('date'),
+                'regatta_id': race.get('regatta_id'),
+                'class': b.get('class'),
+                'rating': b.get('rating'),
+                'finish_time': b.get('finish_time'),
+                'finish_status': b.get('finish_status'),
+                'device_id': b.get('device_id'),
+                'place': place,
+            })
+            break
+    out.sort(key=lambda x: (x.get('date') or '', x.get('name') or ''), reverse=True)
+    return response(200, {'boat_id': boat_id, 'races': out})
+
+
+def _compute_phrf_place(race, target_boat):
+    """Mirror the frontend's PHRF ranking so the history row can show
+    '3rd in B'. Returns 1-based int or None."""
+    if target_boat.get('finish_status') != 'FIN':
+        return None
+    if not target_boat.get('finish_time'):
+        return None
+    cls = target_boat.get('class')
+    if not cls:
+        return None
+    classes = race.get('classes') or []
+    start_iso = next((c.get('start_time') for c in classes if c.get('id') == cls), None)
+    if not start_iso:
+        return None
+    try:
+        start_dt = datetime.fromisoformat(start_iso.replace('Z', '+00:00'))
+    except Exception:
+        return None
+
+    rows = []
+    for b in race.get('boats', []):
+        if b.get('class') != cls or b.get('finish_status') != 'FIN' or not b.get('finish_time'):
+            continue
+        try:
+            fdt = datetime.fromisoformat(b['finish_time'].replace('Z', '+00:00'))
+        except Exception:
+            continue
+        elapsed = (fdt - start_dt).total_seconds()
+        rating = b.get('rating')
+        if not isinstance(rating, (int, float)):
+            continue
+        rows.append((b, elapsed * rating))
+    rows.sort(key=lambda x: x[1])
+    for i, (b, _) in enumerate(rows, start=1):
+        if b is target_boat or (
+            b.get('sail_number') == target_boat.get('sail_number')
+            and b.get('boat_name') == target_boat.get('boat_name')
+        ):
+            return i
+    return None
 
 
 # --- Race Days ---

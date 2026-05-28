@@ -697,6 +697,74 @@ body.course-editing .boat-legend {
     background: rgba(244,33,46,0.15);
 }
 
+/* --- GPS-attach strip (session + GPX picker per assigned device) --- */
+
+.gps-attach-hint {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.6rem;
+}
+
+.gps-attach {
+    display: grid;
+    gap: 6px;
+}
+
+.gps-attach-empty {
+    padding: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+    text-align: center;
+    font-style: italic;
+}
+
+.gps-attach-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr);
+    gap: 10px;
+    align-items: center;
+    padding: 7px 9px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+}
+
+.gps-attach-device {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+}
+.gps-attach-color {
+    width: 10px;
+    height: 22px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+.gps-attach-label {
+    color: var(--text-primary);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gps-attach-arrow {
+    color: var(--text-secondary);
+    margin: 0 2px;
+}
+
+.gps-attach-source {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.gps-attach-source .session-select,
+.gps-attach-source .gpx-badge {
+    flex: 1;
+    min-width: 0;
+}
+
 /* Elapsed time display */
 .elapsed-time {
     font-family: monospace;
@@ -888,6 +956,67 @@ body.course-editing .boat-legend {
 
 .drawer-value.drawer-strong { font-size: 1.1rem; color: #22d3ee; font-weight: 600; }
 .drawer-sub { font-size: 0.7rem; opacity: 0.6; }
+
+/* Drawer profile (catalog-backed boats): photos + skipper + links +
+   "Edit boat" link to /boats.html. Renders above the live-metrics
+   sections; only present when the boat has a catalog entry. */
+.drawer-profile {
+    background: rgba(34, 211, 238, 0.04);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 0.5rem;
+}
+.drawer-photos {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.drawer-photo {
+    width: 88px;
+    height: 88px;
+    object-fit: cover;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.05);
+}
+.drawer-meta-row {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+.drawer-meta-item { margin-right: 8px; }
+.drawer-meta-item + .drawer-meta-item::before {
+    content: "·"; margin-right: 8px; opacity: 0.5;
+}
+.drawer-skipper {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.drawer-skipper strong { color: #22d3ee; font-weight: 600; }
+.drawer-links {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+.drawer-links a {
+    color: #22d3ee;
+    text-decoration: none;
+}
+.drawer-links a:hover { text-decoration: underline; }
+.drawer-edit-boat {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    padding: 3px 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+}
+.drawer-edit-boat:hover {
+    color: var(--text-primary);
+    border-color: rgba(255,255,255,0.25);
+}
 
 /* Wind-source dropdown (replaces segmented control). Single trigger button
    shows the currently selected station + summary; click to expand a menu

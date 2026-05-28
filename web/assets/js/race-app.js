@@ -2728,9 +2728,12 @@ function updateBoatPositions(timeSeconds) {
 
         // Real-scale hull polygon + mainsail boom. Both anchored to
         // the antenna fix; hull rotates with COG, boom rotates with
-        // COG and swings to the side opposite the wind.
+        // COG and swings to the side opposite the wind. For handicap
+        // races the boat-specific LOA (from the catalog) sizes the
+        // polygon — an Arcona 430 renders much bigger than a J/80.
         if (layer.hull) {
-            layer.hull.setLatLngs(hullPolygonLatLngs(closest.lat, closest.lon, course));
+            const dims = hullDimsForDevice(deviceId);
+            layer.hull.setLatLngs(hullPolygonLatLngs(closest.lat, closest.lon, course, dims));
         }
         if (layer.boom) {
             const bm = boomLatLngs(closest.lat, closest.lon, course, twaSigned);
@@ -2961,6 +2964,46 @@ function toggleBoatVisibility(deviceId) {
                 if (map.hasLayer(s)) map.removeLayer(s);
             }
         }
+    }
+}
+
+// --- Boats catalog hydration ---
+//
+// New races reference boats by boat_id (catalog FK). Old races keep
+// boat metadata embedded. This shim parallel-fetches catalog docs for
+// every unique boat_id on the race, then overlays the catalog fields
+// onto the matching per-race boat entry — but only fields that aren't
+// already set, so per-race overrides (e.g. a guest skipper for one
+// night) take precedence over the catalog default.
+async function hydrateBoatsFromCatalog(race) {
+    if (!race || !Array.isArray(race.boats)) return;
+    const ids = Array.from(new Set(race.boats
+        .map(b => b.boat_id).filter(Boolean)));
+    if (!ids.length) return;
+    const docs = await Promise.all(ids.map(id =>
+        fetch(`${API_BASE}/api/boats/${id}`)
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)));
+    const byId = {};
+    for (const d of docs) if (d?.boat_id) byId[d.boat_id] = d;
+    for (const b of race.boats) {
+        const cat = b.boat_id && byId[b.boat_id];
+        if (!cat) continue;
+        // Identity: prefer per-race overrides if set; otherwise inherit
+        // from catalog.
+        if (!b.boat_name) b.boat_name = cat.name;
+        if (!b.boat_type) b.boat_type = cat.type;
+        if (!b.sail_number) b.sail_number = cat.sail_number;
+        if (!b.club) b.club = cat.club;
+        // Catalog-only fields — always pulled (no per-race override
+        // path today; if we add one later, gate the assignment).
+        if (b.loa_m == null) b.loa_m = cat.loa_m;
+        if (!b.skipper) b.skipper = cat.skipper;
+        if (!b.team_name && cat.skipper) b.team_name = cat.skipper;
+        b.photos = b.photos || cat.photos || {};
+        b.links = b.links || cat.links || [];
+        b.notes = b.notes || cat.notes || '';
+        b._catalog = cat;   // keep raw for drawer / debug
     }
 }
 
@@ -4018,7 +4061,15 @@ function updateBoatDrawer() {
         </div>
     ` : '';
 
+    // Optional profile block from the boat catalog (photos, type, LOA,
+    // skipper, links). Only renders if any catalog data is present —
+    // legacy fleet races without boat_id show the live-data drawer
+    // exactly as before.
+    const raceBoat = (currentRace?.boats || []).find(b => b.device_id === drawerDeviceId);
+    const profileBlock = _drawerProfileBlock(raceBoat);
+
     document.getElementById('drawer-body').innerHTML = `
+        ${profileBlock}
         <div class="drawer-section">
             <div class="drawer-section-title">Motion</div>
             <div class="drawer-grid">
@@ -4050,6 +4101,58 @@ function updateBoatDrawer() {
             </div>
         </div>
         ${nextMarkBlock}
+    `;
+}
+
+// Drawer profile block: photos + identity + skipper + LOA + links.
+// Renders only when there's at least one catalog-sourced field; for
+// legacy races (no boat_id) this returns '' so the drawer keeps its
+// original live-data-only layout.
+function _drawerProfileBlock(raceBoat) {
+    if (!raceBoat) return '';
+    const photos = raceBoat.photos || {};
+    const links = raceBoat.links || [];
+    const hasCatalog = raceBoat.boat_id || photos.boat || photos.skipper
+        || raceBoat.skipper || raceBoat.loa_m != null || links.length;
+    if (!hasCatalog) return '';
+
+    const photoStrip = (photos.boat || photos.skipper) ? `
+        <div class="drawer-photos">
+            ${photos.boat ? `<img class="drawer-photo" src="${_attrEsc(photos.boat)}" alt="Boat" title="Boat">` : ''}
+            ${photos.skipper ? `<img class="drawer-photo" src="${_attrEsc(photos.skipper)}" alt="Skipper" title="Skipper">` : ''}
+        </div>
+    ` : '';
+
+    const meta = [];
+    if (raceBoat.boat_type) meta.push(`<span class="drawer-meta-item">${_attrEsc(raceBoat.boat_type)}</span>`);
+    if (raceBoat.loa_m) meta.push(`<span class="drawer-meta-item">${raceBoat.loa_m.toFixed(2)} m LOA</span>`);
+    if (raceBoat.club) meta.push(`<span class="drawer-meta-item">${_attrEsc(raceBoat.club)}</span>`);
+    const metaRow = meta.length ? `<div class="drawer-meta-row">${meta.join('')}</div>` : '';
+
+    const skipper = raceBoat.skipper
+        ? `<div class="drawer-skipper">Skipper: <strong>${_attrEsc(raceBoat.skipper)}</strong></div>`
+        : '';
+
+    const linksRow = links.length ? `
+        <div class="drawer-links">
+            ${links.map(l => l.url
+                ? `<a href="${_attrEsc(l.url)}" target="_blank" rel="noopener">${_attrEsc(l.label || l.url)}</a>`
+                : '').join(' · ')}
+        </div>
+    ` : '';
+
+    const editLink = raceBoat.boat_id
+        ? `<a class="drawer-edit-boat" href="/boats.html?boat=${_attrEsc(raceBoat.boat_id)}" target="_blank" rel="noopener" title="Open the boat catalog page">Edit boat ↗</a>`
+        : '';
+
+    return `
+        <div class="drawer-section drawer-profile">
+            ${photoStrip}
+            ${metaRow}
+            ${skipper}
+            ${linksRow}
+            ${editLink}
+        </div>
     `;
 }
 
@@ -6333,6 +6436,14 @@ async function loadRaceData(raceId) {
         // first frame instead of flashing.
         initClassFilterFromPersistence();
 
+        // Merge boat-catalog metadata for any race boats that reference
+        // boat_id. Photos / links / skipper / LOA flow from the catalog
+        // into the per-race object so the rest of the dashboard can
+        // read them off currentRace.boats[*] without having to know
+        // about the catalog. Legacy races (no boat_id) keep working
+        // unchanged.
+        await hydrateBoatsFromCatalog(currentRace);
+
         // Update UI with local time
         document.getElementById('race-name').textContent = currentRace.name;
         const startLocal = new Date(currentRace.start_time);
@@ -6705,8 +6816,10 @@ function clearRaceForm() {
     // built from a stale roster.
     const fs = document.getElementById('boat-assignments-section');
     const ps = document.getElementById('phrf-roster-section');
+    const gs = document.getElementById('gps-attach-section');
     if (fs) fs.style.display = '';
     if (ps) ps.style.display = 'none';
+    if (gs) gs.style.display = 'none';
 
     // Default boat assignments (6 boats)
     renderBoatAssignments([
@@ -6749,13 +6862,17 @@ function populateRaceForm(race) {
     const isHandicap = Array.isArray(race.classes) && race.classes.length > 0;
     const fleetSection = document.getElementById('boat-assignments-section');
     const phrfSection = document.getElementById('phrf-roster-section');
+    const gpsAttachSection = document.getElementById('gps-attach-section');
     if (isHandicap) {
         if (fleetSection) fleetSection.style.display = 'none';
         if (phrfSection) phrfSection.style.display = '';
+        if (gpsAttachSection) gpsAttachSection.style.display = '';
         renderPHRFRoster(race.boats || []);
+        renderGPSAttachStrip();
     } else {
         if (fleetSection) fleetSection.style.display = '';
         if (phrfSection) phrfSection.style.display = 'none';
+        if (gpsAttachSection) gpsAttachSection.style.display = 'none';
         renderBoatAssignments(race.boats || []);
         renderFinishOrder(race.finish_order || [], race.boats || []);
     }
@@ -6806,9 +6923,104 @@ function renderPHRFRoster(boats) {
 
     // Live "device already in use" warning. Prevents two boats getting
     // the same E# (which would clobber tracks). Listener rebound on
-    // every render since innerHTML wiped the old ones.
-    container.addEventListener('change', _validatePHRFDeviceConflicts);
+    // every render since innerHTML wiped the old ones. The GPS-attach
+    // strip below the roster also re-renders on every change so the
+    // session/GPX rows reflect the current assignment.
+    container.addEventListener('change', () => {
+        _validatePHRFDeviceConflicts();
+        renderGPSAttachStrip();
+    });
     _validatePHRFDeviceConflicts();
+}
+
+// Render the "Attach GPS data" strip beneath the PHRF roster — one
+// row per device the user has assigned. Each row shows the boat label
+// (read-only) + session dropdown + GPX upload button. Preserves any
+// pending GPX files staged in pendingGpxFiles across re-renders.
+function renderGPSAttachStrip() {
+    const container = document.getElementById('gps-attach');
+    if (!container) return;
+
+    // Walk the PHRF roster to learn current device assignments and
+    // pair them with their boat metadata. This is the source of truth
+    // — the persisted race.boats may be stale until save.
+    const rows = [];
+    document.querySelectorAll('#phrf-roster .phrf-row').forEach(row => {
+        const idx = Number(row.dataset.idx);
+        const sel = row.querySelector('.phrf-device');
+        const deviceId = sel?.value || '';
+        if (!deviceId) return;
+        const boat = (currentRace?.boats || [])[idx];
+        if (!boat) return;
+        // Use the latest session/gpx state — pendingGpxFiles wins (just
+        // staged this modal-open), then any previously saved gpx_path,
+        // then session_path from the boat record.
+        const gpxPath = boat.gpx_path || '';
+        const hasPendingGpx = !!pendingGpxFiles[deviceId];
+        const isGpxActive = hasPendingGpx || !!gpxPath;
+        const sessionPath = isGpxActive ? '' : (boat.session_path || '');
+        rows.push({ deviceId, idx, boat, sessionPath, gpxPath, hasPendingGpx, isGpxActive });
+    });
+
+    if (!rows.length) {
+        container.innerHTML = '<div class="gps-attach-empty">No devices assigned yet — pick E1–E6 from the dropdowns above to attach GPS data.</div>';
+        return;
+    }
+
+    // Sort by deviceId so the strip reads E1 → E6 even if the user
+    // assigned them out of order in the PHRF roster.
+    rows.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+
+    container.innerHTML = rows.map(({ deviceId, boat, sessionPath, gpxPath, hasPendingGpx, isGpxActive }) => {
+        const sessions = availableSessions[deviceId] || [];
+        const sessionOptions = sessions.map(s => {
+            const selected = sessionPath === s.path ? 'selected' : '';
+            const label = s.name ? `${s.label} - ${s.name}` : s.label;
+            return `<option value="${s.path}" ${selected}>${label}</option>`;
+        }).join('');
+        const color = colorFor(deviceId);
+        const yacht = boat?.boat_name || boat?.team_name || (boat?.sail_number ? `#${boat.sail_number}` : '');
+        const gpxLabel = hasPendingGpx
+            ? pendingGpxFiles[deviceId].name
+            : (gpxPath ? 'GPX uploaded' : '');
+
+        return `
+            <div class="gps-attach-row" data-device="${deviceId}" data-gpx-path="${gpxPath}">
+                <div class="gps-attach-device">
+                    <span class="gps-attach-color" style="background:${color}"></span>
+                    <span class="gps-attach-label">${deviceId} <span class="gps-attach-arrow">→</span> ${_attrEsc(yacht)}</span>
+                </div>
+                <div class="session-or-gpx gps-attach-source">
+                    <select data-field="session_path" class="session-select${isGpxActive ? ' hidden' : ''}">
+                        <option value="">Select session...</option>
+                        ${sessionOptions}
+                    </select>
+                    <div class="gpx-badge${isGpxActive ? '' : ' hidden'}">
+                        <span class="gpx-badge-name">${_attrEsc(gpxLabel)}</span>
+                        <button class="btn-gpx-clear" type="button" title="Remove GPX">&times;</button>
+                    </div>
+                    <label class="btn-gpx" title="Upload GPX track">GPX<input type="file" accept=".gpx" class="gpx-file-input" style="display:none"></label>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // Same file-input + clear handlers as renderBoatAssignments.
+    container.querySelectorAll('.gpx-file-input').forEach(input => {
+        const deviceId = input.closest('.gps-attach-row').dataset.device;
+        input.addEventListener('change', (e) => {
+            handleGpxFileSelect(e, deviceId);
+            // After staging, re-render so the gpx-badge replaces the dropdown.
+            setTimeout(renderGPSAttachStrip, 0);
+        });
+    });
+    container.querySelectorAll('.btn-gpx-clear').forEach(btn => {
+        const deviceId = btn.closest('.gps-attach-row').dataset.device;
+        btn.addEventListener('click', () => {
+            handleGpxClear(deviceId);
+            renderGPSAttachStrip();
+        });
+    });
 }
 
 function _validatePHRFDeviceConflicts() {
@@ -7031,6 +7243,20 @@ function getFormData() {
                 boats[idx].session_path = null;
                 boats[idx].gpx_path = null;
             }
+        });
+        // Merge session/GPX picks from the GPS-attach strip back into
+        // the right boat row (matched by device_id). Pending GPX files
+        // are uploaded separately after save by uploadPendingGpxFiles.
+        document.querySelectorAll('#gps-attach .gps-attach-row').forEach(row => {
+            const deviceId = row.dataset.device;
+            const target = boats.find(b => b.device_id === deviceId);
+            if (!target) return;
+            const gpxPath = row.dataset.gpxPath || null;
+            const hasPendingGpx = !!pendingGpxFiles[deviceId];
+            const isGpxActive = hasPendingGpx || !!gpxPath;
+            const sessionPath = isGpxActive ? null : (row.querySelector('[data-field="session_path"]')?.value || null);
+            target.session_path = sessionPath;
+            target.gpx_path = isGpxActive ? gpxPath : null;
         });
     } else {
         boats = [];
@@ -7302,7 +7528,14 @@ function applyRaceBoatClass() {
     // Rhodes 19, and 420 within ±0.02 m.
     HULL_BEAM_M = (beam && beam > 0) ? beam : HULL_LOA_M * 0.32;
     BOW_OFFSET_M = (bow != null && bow >= 0) ? bow : DEFAULT_BOW_OFFSET_M;
-    MARK_ZONE_RADIUS_M = HULL_LOA_M * 3;
+    // Mark zone (RRS 18) is 3 × LOA — for handicap fleets every boat
+    // has its own LOA, so we use the LARGEST boat's LOA × 3 as a
+    // single race-level zone. That's conservative (any smaller boat
+    // also gets the zone for free) and avoids per-mark complexity
+    // for now. Per-boat zones around each approaching boat is later
+    // work; today the zone is a static circle on each mark.
+    const handicapMaxLoa = _maxBoatLOA();
+    MARK_ZONE_RADIUS_M = (handicapMaxLoa || HULL_LOA_M) * 3;
     for (const entry of markZoneCircles) {
         entry.circle.setRadius(MARK_ZONE_RADIUS_M);
     }
@@ -7352,20 +7585,61 @@ function _offsetLatLng(refLat, refLon, forwardM, starboardM, cogDeg) {
     return [refLat + dLat, refLon + dLon];
 }
 
+// Largest LOA in the loaded race — drives the race-level mark zone
+// radius (3 × LOA per RRS 18) for handicap races. Returns null if
+// the race has no per-boat LOAs (legacy fleet races handled by the
+// race-level boat_class instead).
+function _maxBoatLOA() {
+    if (!Array.isArray(currentRace?.boats)) return null;
+    let max = null;
+    for (const b of currentRace.boats) {
+        if (typeof b.loa_m === 'number' && b.loa_m > 0) {
+            if (max == null || b.loa_m > max) max = b.loa_m;
+        }
+    }
+    return max;
+}
+
+// Per-device LOA/beam/bow lookup. Handicap races vary by boat; fleet
+// races inherit from the race-level boat_class (HULL_LOA_M et al).
+// `dims` falls back to those globals when the per-boat catalog data
+// isn't available, so legacy races render exactly as before.
+function hullDimsForDevice(deviceId) {
+    if (!deviceId || !currentRace?.boats) {
+        return { loa: HULL_LOA_M, beam: HULL_BEAM_M, bow: BOW_OFFSET_M };
+    }
+    const boat = currentRace.boats.find(b => b.device_id === deviceId);
+    const loa = (boat && boat.loa_m > 0) ? boat.loa_m : HULL_LOA_M;
+    // Beam: catalog beam if we ever store it, else 32% of LOA (good
+    // fit for J/80, Sonar 23, Rhodes 19, 420; close enough for
+    // anything cruiser-racer-shaped).
+    const beam = (boat && boat.beam_m > 0) ? boat.beam_m : loa * 0.32;
+    // Bow offset: ~38% of LOA is a good catch-all for a mast-stepped
+    // antenna on most cruiser-racer hulls.
+    const bow = (boat && boat.bow_offset_m != null && boat.bow_offset_m >= 0)
+        ? boat.bow_offset_m
+        : (loa === HULL_LOA_M ? BOW_OFFSET_M : loa * 0.38);
+    return { loa, beam, bow };
+}
+
 // Real-scale sailboat hull polygon for the currently-loaded boat class.
 // Returns an array of [lat, lon] vertices that closes into a hull
 // shape sized to the actual LOA / beam, oriented along COG, anchored
 // at the antenna fix. Falls back to an empty polygon when COG is
 // missing — better to draw nothing than spin a degenerate hull at
 // dock-still speeds.
-function hullPolygonLatLngs(antennaLat, antennaLon, cogDeg) {
+//
+// `dims` is optional — when omitted, uses the race-level boat_class
+// dimensions (HULL_LOA_M / HULL_BEAM_M / BOW_OFFSET_M). Handicap-fleet
+// callers pass per-boat dims via hullDimsForDevice().
+function hullPolygonLatLngs(antennaLat, antennaLon, cogDeg, dims) {
     if (cogDeg == null || !Number.isFinite(cogDeg)) return [];
-    const halfBeam = HULL_BEAM_M / 2;
+    const loa = dims?.loa ?? HULL_LOA_M;
+    const beam = dims?.beam ?? HULL_BEAM_M;
+    const bow = dims?.bow ?? BOW_OFFSET_M;
+    const halfBeam = beam / 2;
     return _HULL_OUTLINE.map(([xAft, yScaled]) => {
-        // Convert (x_aft from bow, y_scaled where ±1 = ±half_beam) to
-        // antenna-relative (forwardM, starboardM). Bow is BOW_OFFSET_M
-        // forward of antenna; x_aft grows away from the bow.
-        const forwardM   = BOW_OFFSET_M - xAft * HULL_LOA_M;
+        const forwardM   = bow - xAft * loa;
         const starboardM = yScaled * halfBeam;
         return _offsetLatLng(antennaLat, antennaLon, forwardM, starboardM, cogDeg);
     });

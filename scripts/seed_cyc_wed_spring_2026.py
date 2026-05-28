@@ -22,6 +22,7 @@ will succeed but those fields silently drop.
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -80,7 +81,7 @@ def _boat(cls, team, yacht, club, sail_no, boat_type, rating,
         "device_id": None,           # user assigns in editor
         "class": cls,
         "rating": rating,
-        "team_name": team,
+        "team_name": team,           # this race's skipper (legacy field)
         "boat_name": yacht,
         "sail_number": sail_no,
         "boat_type": boat_type,
@@ -90,6 +91,28 @@ def _boat(cls, team, yacht, club, sail_no, boat_type, rating,
         "session_path": None,
         "gpx_path": None,
     }
+
+
+# Known boat-type → LOA (metres). The seed script attaches these to
+# the boat catalog so the dashboard can size each hull correctly on
+# the map. Source: manufacturer specs / sailboatdata.com. Extend as
+# new types enter the fleet.
+BOAT_TYPE_LOA = {
+    "J/92":                       9.14,
+    "J/80":                       8.00,
+    "J/30":                       9.14,
+    "J/99":                       9.99,
+    "J/109":                     10.81,
+    "J/46 DK":                   14.02,
+    "Arcona 430":                13.10,
+    "Beneteau 36.7":             11.20,
+    "Columbia 30-2 Sport":        9.14,
+    "Frers 38":                  11.58,
+    "Buzzards Bay 30":            9.14,
+    "Pearson 33-2":              10.06,
+    "Jeanneau Sun Odyssey 410":  12.45,
+    "Sabre 34 MK1":              10.36,
+}
 
 
 # ---------- Boats — from the corrected Preliminary results sheet ----------
@@ -184,9 +207,69 @@ def find_existing_race(regatta_id):
     return None
 
 
+def find_or_create_boat(boat_entry):
+    """Find a catalog boat by sail_number, else create one. Returns
+    boat_id. Updates the catalog's loa_m / type / skipper if they
+    differ (idempotent re-sync)."""
+    sail = (boat_entry.get("sail_number") or "").strip()
+    if not sail:
+        # No sail number → don't try to dedupe; just create. The
+        # eventual user can clean these up by hand.
+        return _create_boat_doc(boat_entry)
+
+    _, data = _request("GET", f"/api/boats?sail_number={urllib.parse.quote(sail)}")
+    matches = data.get("boats", [])
+    if matches:
+        boat_id = matches[0]["boat_id"]
+        # Refresh LOA / type / club / skipper to the latest seed values.
+        patch = {
+            "type": boat_entry.get("boat_type") or matches[0].get("type", ""),
+            "loa_m": BOAT_TYPE_LOA.get(boat_entry.get("boat_type")) or matches[0].get("loa_m"),
+            "club": boat_entry.get("club") or matches[0].get("club", ""),
+            "skipper": boat_entry.get("team_name") or matches[0].get("skipper", ""),
+            "name": boat_entry.get("boat_name") or matches[0].get("name", ""),
+        }
+        _request("PATCH", f"/api/boats/{boat_id}", patch)
+        return boat_id
+
+    return _create_boat_doc(boat_entry)
+
+
+def _create_boat_doc(boat_entry):
+    body = {
+        "name": boat_entry.get("boat_name", ""),
+        "type": boat_entry.get("boat_type", ""),
+        "sail_number": boat_entry.get("sail_number", ""),
+        "club": boat_entry.get("club", ""),
+        "loa_m": BOAT_TYPE_LOA.get(boat_entry.get("boat_type")),
+        "skipper": boat_entry.get("team_name", ""),
+        "photos": {"boat": None, "skipper": None},
+        "links": [],
+        "notes": "",
+    }
+    _, created = _request("POST", "/api/boats", body)
+    return created["boat_id"]
+
+
 def main():
     print("Seeding CYC Wednesday Spring Series — Race 1 (2026-05-27)")
     regatta_id = find_or_create_regatta()
+
+    # Upsert every boat into the catalog, building a parallel array
+    # of (boat_id, race_entry) pairs. boat_id rides on the race entry
+    # so the dashboard can hydrate catalog metadata at load time.
+    print(f"  Upserting {len(BOATS)} boats into catalog…")
+    boats_with_ids = []
+    for b in BOATS:
+        bid = find_or_create_boat(b)
+        b2 = dict(b)
+        b2["boat_id"] = bid
+        # Stamp LOA on the race entry too so old-frontend snapshots
+        # (pre-hydration) still get a usable per-boat hull size.
+        loa = BOAT_TYPE_LOA.get(b.get("boat_type"))
+        if loa is not None:
+            b2["loa_m"] = loa
+        boats_with_ids.append(b2)
 
     existing = find_existing_race(regatta_id)
     race_payload = {
@@ -199,11 +282,25 @@ def main():
         "regatta_id": regatta_id,
         "classes": CLASSES,
         "race_conditions": "WNW 12 kts",
-        "boats": BOATS,
+        "boats": boats_with_ids,
     }
 
     if existing:
         print(f"  Updating existing race {existing}")
+        # Preserve user-set device_id / session_path / gpx_path on any
+        # boat already in the race (matched by sail_number). Re-running
+        # the seed must not wipe GPS tracker assignments or attached
+        # sessions/GPX files.
+        _, prior = _request("GET", f"/api/races/{existing}")
+        prior_by_sail = {(b.get("sail_number") or "").strip(): b
+                         for b in prior.get("boats", [])}
+        for b in race_payload["boats"]:
+            old = prior_by_sail.get((b.get("sail_number") or "").strip())
+            if not old:
+                continue
+            if old.get("device_id"):     b["device_id"] = old["device_id"]
+            if old.get("session_path"):  b["session_path"] = old["session_path"]
+            if old.get("gpx_path"):      b["gpx_path"] = old["gpx_path"]
         _, race = _request("PATCH", f"/api/races/{existing}", race_payload)
     else:
         print("  Creating new race")
