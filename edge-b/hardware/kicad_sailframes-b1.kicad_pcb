@@ -9882,7 +9882,7 @@
 				)
 			)
 		)
-		(property "Value" "CYAN"
+		(property "Value" "BLUE"
 			(at -10.5 -0.5 0)
 			(layer "F.Fab")
 			(uuid "b72cdbe1-b467-45d2-aa26-59000bcc2d07")
@@ -9912,6 +9912,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC Part #" "C99290"
+			(at 0 0 0)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "3ba2a48d-58ed-4bd1-a8f9-66cf688f635b")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -16362,6 +16375,18 @@
 				)
 			)
 		)
+		(property "LCSC" "C57369"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "3cc8053a-67eb-423f-85d1-f28b01517b3a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
 		(property ki_fp_filters "Connector*:*_1x??_*")
 		(path "/9f79f688-3a3b-45e6-93c6-3bc6a0142962")
 		(sheetname "/")
@@ -16372,7 +16397,7 @@
 				(pins "1" "2" "3" "4" "5" "6" "7" "8" "9" "10")
 			)
 		)
-		(attr through_hole exclude_from_pos_files exclude_from_bom dnp)
+		(attr through_hole)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
 			(start -1.38 24.24)
@@ -25675,14 +25700,27 @@
 			(justify left)
 		)
 	)
-	(gr_text "Sailframes.com\nB1.0"
-		(at 133 74 0)
+	(gr_text "JLCJLCJLCJLC"
+		(at 132.5 73.5 0)
+		(layer "F.SilkS")
+		(uuid "e41346e9-cf3b-42b3-bd1d-a979b5a210db")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+			(justify left bottom)
+		)
+	)
+	(gr_text "Sailframes.com    B1.0"
+		(at 132 71 0)
 		(layer "F.SilkS")
 		(uuid "cf640e60-8bbd-4643-9ac7-91cfb8e0d156")
 		(effects
 			(font
 				(size 2 2)
-				(thickness 0.1)
+				(thickness 0.4)
+				(bold yes)
 			)
 			(justify left bottom)
 		)

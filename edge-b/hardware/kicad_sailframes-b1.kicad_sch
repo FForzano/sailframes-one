@@ -16771,7 +16771,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "CYAN"
+		(property "Value" "BLUE"
 			(at 20.828 127 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -16806,6 +16806,17 @@
 		)
 		(property "Description" ""
 			(at 29.21 121.92 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC Part #" "C99290"
+			(at 20.828 127 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -17435,10 +17446,10 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom no)
+		(in_bom yes)
 		(on_board yes)
-		(in_pos_files no)
-		(dnp yes)
+		(in_pos_files yes)
+		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "9f79f688-3a3b-45e6-93c6-3bc6a0142962")
 		(property "Reference" "J8"
