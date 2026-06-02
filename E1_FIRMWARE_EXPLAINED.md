@@ -1,6 +1,6 @@
 # SailFrames E1 Firmware - Complete Annotated Guide
 
-This document explains every part of the `sailframes_e1.ino` firmware in detail.
+This document explains every part of the `sailframes_edge.ino` firmware in detail.
 Written for someone new to ESP32 and Arduino programming.
 
 ---

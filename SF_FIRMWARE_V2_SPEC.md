@@ -1,6 +1,6 @@
 # SailFrames Firmware v2.0.0 — Implementation Spec for Claude Code
 
-**Target codebase:** `edge-e/sailframes_e1.ino` (single firmware, runs on both E1 and B1 hardware)
+**Target codebase:** `edge-e/sailframes_edge.ino` (single firmware, runs on both E1 and B1 hardware)
 **Target version string:** `2026.06.xx.01` (date-based per existing scheme)
 **Scope:** OCS, ESP-NOW fleet mesh, RC unit role, race setup, 10 Hz GNSS, cloud config sync, status snapshots
 **Hard constraints (do not violate):**
@@ -15,7 +15,7 @@
 
 ## Pre-work for Claude Code: read before changing anything
 
-1. Read `sailframes_e1.ino` in full. The file is ~5500 lines. Pay particular attention to:
+1. Read `sailframes_edge.ino` in full. The file is ~5500 lines. Pay particular attention to:
    - The pin map (lines ~99-164) — verified against PCB v1.1, do not change
    - The OTA pull architecture (`performOTAUpdate`, lines ~3759-3955) — model new pull patterns on this
    - The telnet command interpreter (lines ~4075-4760) — extend it for new commands
@@ -24,7 +24,7 @@
 
 2. Read `BNO085_100k.h` — custom driver, 100 kHz I2C with reset sequence. Already working.
 
-3. Read `User_Setup.h` — TFT_eSPI config. Note that `TFT_BL` is on GPIO19 in the file but `BNO085_100k.h` notes that the actual pin map has `TFT_BL` on GPIO25 (the User_Setup.h file may be stale or hand-soldered swapped). Verify against `sailframes_e1.ino` definitions before any display code changes.
+3. Read `User_Setup.h` — TFT_eSPI config. Note that `TFT_BL` is on GPIO19 in the file but `BNO085_100k.h` notes that the actual pin map has `TFT_BL` on GPIO25 (the User_Setup.h file may be stale or hand-soldered swapped). Verify against `sailframes_edge.ino` definitions before any display code changes.
 
 4. Do not delete or rewrite existing working subsystems (Calypso BLE, OTA, upload, GPS RTCM3 config, IMU, TFT). Add alongside.
 
@@ -1129,9 +1129,9 @@ To bound scope:
 
 ## Coordination notes for Claude Code
 
-- Use `view` on `/mnt/user-data/uploads/sailframes_e1.ino` before any edit to confirm current line numbers
+- Use `view` on `/mnt/user-data/uploads/sailframes_edge.ino` before any edit to confirm current line numbers
 - Use `str_replace` for targeted edits; do not rewrite whole sections
-- After each stage, build with `arduino-cli compile --fqbn esp32:esp32:esp32 sailframes_e1.ino --build-property "build.partitions=min_spiffs"` and verify it links
+- After each stage, build with `arduino-cli compile --fqbn esp32:esp32:esp32 sailframes_edge.ino --build-property "build.partitions=min_spiffs"` and verify it links
 - Run `shasum -a 256` on the resulting .bin and update the manifest before promoting to S3
 - New files: create as separate `.h` headers (e.g., `mesh.h`, `ocs.h`, `rc_unit.h`, `mic.h`) included from main `.ino`. Keep .ino as the orchestrator, not the implementation.
 - All new code must respect the dual-core split: WiFi/OTA/telnet stays on Core 1, uploads stay on Core 0. ESP-NOW callbacks run in WiFi task (managed by the SDK). HTTP server (RC unit) runs on Core 1 alongside telnet (mutually exclusive via radio mode state machine).

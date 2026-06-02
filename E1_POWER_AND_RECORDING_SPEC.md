@@ -2,7 +2,7 @@
 
 ## Overview
 
-Two firmware changes to `sailframes_e1.ino`:
+Two firmware changes to `sailframes_edge.ino`:
 
 1. **Single momentary pushbutton** for power on/off using ESP32 deep sleep
 2. **GPS speed-based auto-recording** — no manual start/stop needed
