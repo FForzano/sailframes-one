@@ -1,5 +1,5 @@
 /*
- * SailFrames E1 — Fleet Tracker Firmware
+ * SailFrames Edge — Fleet Tracker Firmware (unified E + B devices)
  *
  * Hardware:
  *   - ESP32 DevKit V1 (ELEGOO)
@@ -118,7 +118,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.06.02.01"
+#define FW_VERSION    "2026.06.02.02"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -1438,6 +1438,14 @@ void ocsArm(double pin_lat, double pin_lon,
             double rc_lat,  double rc_lon,
             uint32_t start_time_ms) {
   ocsDisarm();
+  // A re-arm is a new start sequence — a clean slate. Clear any prior RC-side
+  // OCS latches on every peer so boats recalled in a previous start don't stay
+  // flagged OCS into the new one. (rc_ocs_called is RC-only state; clearing it
+  // on a racing boat is harmless.)
+  for (int i = 0; i < g_mesh_peer_count; i++) {
+    g_mesh_peers[i].rc_ocs_called = false;
+    g_mesh_peers[i].rc_ocs_called_at_ms = 0;
+  }
   g_ocs.armed = true;
   g_ocs.pin_lat = pin_lat;
   g_ocs.pin_lon = pin_lon;
@@ -1646,6 +1654,135 @@ void rcComputeFleetOCS() {
   }
 }
 
+// ============================================================
+// fleetwatch — live RC fleet dashboard (Serial)
+// ============================================================
+// Reverse FNV-1a lookup so the dashboard shows "E3" instead of a raw
+// 0x05cbe9c9. Fleet is small + fixed; just hash the known ids and match.
+const char* boatNameForSender(uint32_t id) {
+  static const char* names[] = {"E1","E2","E3","E4","E5","E6","B1","F1"};
+  for (unsigned i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
+    if (boatIdHash(names[i]) == id) return names[i];
+  }
+  return "??";
+}
+
+// Non-blocking live dashboard: `fleetwatch` toggles g_fleetWatch; this tick
+// runs from the main loop and re-paints the RC fleet table ~2 Hz using ANSI
+// cursor-home so it updates in place. Blocking here would freeze mesh/OCS and
+// trip the loop watchdog, so it MUST be loop-driven, not a while() in the cmd
+// handler. Needs a VT100 terminal (screen/picocom/minicom/PuTTY) — the
+// Arduino IDE Serial Monitor doesn't render the escapes.
+bool g_fleetWatch = false;
+unsigned long g_fleetWatchLast = 0;
+
+void fleetWatchTick() {
+  if (!g_fleetWatch) return;
+  unsigned long now = millis();
+  if (now - g_fleetWatchLast < 500) return;  // ~2 Hz
+  g_fleetWatchLast = now;
+  static uint32_t refresh = 0;
+  refresh++;
+
+  Serial.print("\033[H");  // cursor home (overwrite in place)
+  if (g_role != ROLE_RC_SIGNAL) {
+    Serial.printf("fleetwatch: role is not rc_signal (role=%d) — no fleet OCS here\033[K\r\n", (int)g_role);
+    Serial.print("\033[J");
+    return;
+  }
+  if (!g_ocs.armed) {
+    Serial.print("fleetwatch: OCS not armed — use 'race arm <pinLat> <pinLon> <rcLat> <rcLon> <secs>'\033[K\r\n");
+    Serial.print("\033[J");
+    return;
+  }
+  int32_t tts = (int32_t)(g_ocs.start_time_ms - now);
+  Serial.printf("RC FLEET LIVE  T%+ds  peers=%d  bow=%.2fm  #%lu   (type 'fleetwatch' to stop)\033[K\r\n",
+                tts / 1000, g_mesh_peer_count, OCS_BOW_OFFSET_M, (unsigned long)refresh);
+  Serial.printf("line %.6f,%.6f -> %.6f,%.6f\033[K\r\n",
+                g_ocs.pin_lat, g_ocs.pin_lon, g_ocs.rc_lat, g_ocs.rc_lon);
+  Serial.print("NAME ID          FIX SAT  SOG   HDG    d(m)    STATE age\033[K\r\n");
+  for (int i = 0; i < g_mesh_peer_count; i++) {
+    const MeshPeerState& p = g_mesh_peers[i];
+    const char* st = p.rc_ocs_called ? "OCS*" : (p.rc_distance_m < 0 ? "over" : "ok");
+    Serial.printf("%-4s 0x%08lx  %u  %2u  %4.1f  %4.0f  %+7.2f  %-4s  %lus\033[K\r\n",
+                  boatNameForSender(p.sender_id), (unsigned long)p.sender_id,
+                  (unsigned)p.fix_quality, (unsigned)p.sat_count,
+                  p.last_sog_cm_s / 51.4444, p.last_heading_deg10 / 10.0,
+                  p.rc_distance_m, st, (now - p.last_seen_ms) / 1000);
+  }
+  Serial.print("\033[J");  // erase anything below the table
+}
+
+// ============================================================
+// RC fleet OCS panel — live on the TFT (rc_signal + armed)
+// ============================================================
+// Shows each mesh peer by name with its distance-to-line and a colour-coded
+// OCS state on E6's screen. Partial redraw: the static layout is painted once
+// and only rows whose distance/state changed are repainted, so it updates
+// live without full-screen flicker. Replaces the nav display while the RC is
+// armed. Refresh cadence is sped up by the loop's dispGate while armed.
+bool g_rcPanelShown = false;
+
+void drawRcFleetPanel() {
+  static int      prevCount = -1;
+  static uint32_t prevSender[MESH_PEER_MAX];
+  static int      prevDm[MESH_PEER_MAX];
+  static int8_t   prevSt[MESH_PEER_MAX];
+  static int      prevTsec = -99999;
+
+  unsigned long now = millis();
+  int tsec = (int)((int32_t)(g_ocs.start_time_ms - now) / 1000);
+
+  if (!g_rcPanelShown || g_mesh_peer_count != prevCount) {
+    g_rcPanelShown = true;
+    prevCount = g_mesh_peer_count;
+    prevTsec = -99999;
+    for (int i = 0; i < MESH_PEER_MAX; i++) { prevSender[i] = 0; prevDm[i] = -1000000; prevSt[i] = -2; }
+    tft.fillScreen(COLOR_BG);
+    tft.fillRect(0, 0, SCREEN_WIDTH, 34, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("RC FLEET", 6, 8, 4);
+    tft.setTextColor(COLOR_LABEL, COLOR_BG);
+    tft.drawString("BOAT", 8, 42, 2);
+    tft.drawString("DIST", 95, 42, 2);
+    tft.drawString("ST", 238, 42, 2);
+    tft.drawFastHLine(0, 62, SCREEN_WIDTH, COLOR_DIVIDER);
+  }
+
+  // Countdown in the title bar (redraw only when the whole second changes).
+  if (tsec != prevTsec) {
+    prevTsec = tsec;
+    tft.fillRect(180, 0, SCREEN_WIDTH - 180, 34, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(TR_DATUM);
+    char tb[16]; snprintf(tb, sizeof(tb), "T%+ds", tsec);
+    tft.drawString(tb, SCREEN_WIDTH - 6, 8, 4);
+  }
+
+  const int rowH = 64, y0 = 70, maxRows = (SCREEN_HEIGHT - y0) / rowH;
+  for (int i = 0; i < g_mesh_peer_count && i < maxRows; i++) {
+    const MeshPeerState& p = g_mesh_peers[i];
+    int dm = (int)lroundf(p.rc_distance_m * 10.0f);
+    int8_t st = p.rc_ocs_called ? 2 : (p.rc_distance_m < 0 ? 1 : 0);
+    if (p.sender_id == prevSender[i] && dm == prevDm[i] && st == prevSt[i]) continue;
+    prevSender[i] = p.sender_id; prevDm[i] = dm; prevSt[i] = st;
+    int y = y0 + i * rowH;
+    tft.fillRect(0, y, SCREEN_WIDTH, rowH - 4, COLOR_BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextSize(2);
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.drawString(boatNameForSender(p.sender_id), 8, y + 6, 4);
+    char db[16]; snprintf(db, sizeof(db), "%+.1f", p.rc_distance_m);
+    tft.drawString(db, 95, y + 6, 4);
+    uint16_t sc = (st == 2) ? COLOR_ERROR : (st == 1) ? COLOR_WARN : COLOR_GOOD;
+    const char* ss = (st == 2) ? "OCS" : (st == 1) ? "OVR" : "OK";
+    tft.setTextColor(sc, COLOR_BG);
+    tft.drawString(ss, 238, y + 6, 4);
+    tft.setTextSize(1);
+  }
+}
+
 // Format gps.utc_time (HHMMSS) + gps.date (DDMMYY) into ISO8601 "YYYY-MM-DDTHH:MM:SSZ".
 // Returns false if either field is not yet populated.
 static bool formatGpsIso(char* out, size_t outSize) {
@@ -1673,7 +1810,7 @@ void setup() {
   esp_reset_reason_t resetReason = esp_reset_reason();
 
   Serial.println("\n=================================");
-  Serial.printf("  SailFrames E1 %s — PPK Logger\n", FW_VERSION);
+  Serial.printf("  SailFrames Edge %s\n", FW_VERSION);
   Serial.println("  Hardware Power Switch Edition");
   Serial.printf("  Reset reason: %s (%d)\n", resetReasonStr(resetReason), (int)resetReason);
   Serial.printf("  Free heap: %u, min ever: %u\n",
@@ -2861,7 +2998,7 @@ void handleTelnet() {
       if (telnetClient) telnetClient.stop();
       telnetClient = telnetServer.available();
       telnetClient.println("\n=================================");
-      telnetClient.printf("  SailFrames E1 %s\n", FW_VERSION);
+      telnetClient.printf("  SailFrames Edge %s\n", FW_VERSION);
       telnetClient.printf("  Boat: %s\n", config.boat_id);
       telnetClient.println("  Type 'help' for commands");
       telnetClient.println("=================================\n");
@@ -3404,6 +3541,8 @@ void updateDisplayD2() {
   static unsigned long lastStatusUpdate = 0;
 
   static int prevPendingN = -1;
+  static float prevLineDist = -99999;
+  static bool prevArmed = false;
   bool statusChanged = (wind.connected != prevWindConnected) ||
                        (wifiConnected != prevWifiConnected) ||
                        (abs(imu.heel - prevHeel) > 0.5) ||
@@ -3412,6 +3551,8 @@ void updateDisplayD2() {
                        (abs(awa - prevAWA2) > 1) ||
                        (battery.percent != prevBattery) ||
                        (pendingUploads != prevPendingN) ||
+                       (g_ocs.armed != prevArmed) ||
+                       (g_ocs.armed && abs(g_ocs.distance_to_line_m - prevLineDist) > 0.1) ||
                        (millis() - lastStatusUpdate > 2000);
 
   if (statusChanged) {
@@ -3424,6 +3565,8 @@ void updateDisplayD2() {
     prevAWA2 = awa;
     prevBattery = battery.percent;
     prevPendingN = pendingUploads;
+    prevLineDist = g_ocs.distance_to_line_m;
+    prevArmed = g_ocs.armed;
 
     // BOTTOM BAR: Two rows - WHITE on BLACK
     // Clear entire bottom bar first (50px tall)
@@ -3431,13 +3574,17 @@ void updateDisplayD2() {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
 
     // Row 1 (y=440): Heel + Pitch always; AWS + AWA appended when wind connected.
+    // When a race is armed, append signed distance-to-line in small print
+    // ("L+5.2m" / "L-4.3m") so the crew sees their line position at a glance.
     // Single row keeps heel/pitch visible even with the wind sensor active.
-    char row1[48];
+    char row1[64];
+    char lineTag[16] = "";
+    if (g_ocs.armed) snprintf(lineTag, sizeof(lineTag), " L%+.1fm", g_ocs.distance_to_line_m);
     if (config.wind_enabled && wind.connected) {
-      snprintf(row1, sizeof(row1), "H%+.0f P%+.0f  AWS%.1f AWA%03d",
-               imu.heel, imu.pitch, aws, (int)awa);
+      snprintf(row1, sizeof(row1), "H%+.0f P%+.0f AWS%.1f%s",
+               imu.heel, imu.pitch, aws, lineTag);
     } else {
-      snprintf(row1, sizeof(row1), "H %+.0f   P %+.0f", imu.heel, imu.pitch);
+      snprintf(row1, sizeof(row1), "H %+.0f  P %+.0f%s", imu.heel, imu.pitch, lineTag);
     }
     tft.setTextDatum(MC_DATUM);
     tft.drawString(row1, SCREEN_WIDTH/2, 440, 2);
@@ -3731,6 +3878,78 @@ void updateDisplayD3() {
 // flight, Core 0 owns the TFT exclusively; Core 1 stands down here.
 void updateDisplay() {
   if (otaInProgress) return;
+
+  // RC fleet panel takes over the screen while this unit is the armed Race
+  // Committee — a live, colour-coded table of every peer's distance-to-line
+  // and OCS state. (Checked before the boat-local OCS alarm: a stationary
+  // committee boat "over" its own line isn't meaningful; it monitors the fleet.)
+  if (g_role == ROLE_RC_SIGNAL && g_ocs.armed) {
+    drawRcFleetPanel();
+    return;
+  }
+  if (g_rcPanelShown) {  // just left the RC panel — repaint the nav display
+    g_rcPanelShown = false;
+    d2LayoutDrawn = false;
+    d3LayoutDrawn = false;
+    lastFullRedraw = 0;
+  }
+
+  // OCS alarm takes over the whole screen while this boat is over the line —
+  // whether it computed that itself (ocsTick) or was forced by an RC
+  // individual recall (ocsForceOver). When you're OCS the only thing that
+  // matters is "you're over, come back," so the nav display is hidden and the
+  // distance shows how far over you are (how far to dip back). Painted ONCE on
+  // entry; only the distance value region is redrawn, on change — no per-tick
+  // fillScreen (that would flicker). Big text uses font 4 scaled (fonts 6/7/8
+  // are digits-only, can't render "OCS"/"RETURN").
+  static bool ocsAlarmShown = false;
+  static bool ocsLastInv = false;
+  static int  ocsAlarmPrevDm = -1000000;  // last drawn distance, decimetres
+  if (g_ocs.armed && g_ocs.over_line) {
+    unsigned long now = millis();
+    // Blink at ~2 Hz: invert the whole screen every 250 ms — alternate
+    // white-on-black and black-on-white (black background, no red). The
+    // full-screen repaint only happens on a blink-phase flip (~4×/s) or a
+    // distance change, so it's the intended blink, not runaway flicker.
+    bool inv = ((now / 250) % 2) == 0;
+    uint16_t bg = inv ? TFT_BLACK : TFT_WHITE;
+    uint16_t fg = inv ? TFT_WHITE : TFT_BLACK;
+    int dm = (int)lroundf(g_ocs.distance_to_line_m * 10.0f);
+    bool full = !ocsAlarmShown || (inv != ocsLastInv);  // first entry or blink flip
+    if (full || dm != ocsAlarmPrevDm) {
+      ocsAlarmShown = true;
+      ocsLastInv = inv;
+      ocsAlarmPrevDm = dm;
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%+.1f m", g_ocs.distance_to_line_m);
+      tft.setTextColor(fg, bg);
+      tft.setTextDatum(MC_DATUM);
+      if (full) {
+        tft.fillScreen(bg);
+        tft.setTextSize(5);
+        tft.drawString("OCS", SCREEN_WIDTH/2, 110, 4);
+        tft.setTextSize(3);
+        tft.drawString("RETURN", SCREEN_WIDTH/2, 245, 4);
+        tft.drawString(buf, SCREEN_WIDTH/2, 360, 4);
+        tft.setTextSize(1);
+      } else {
+        // distance changed within the same blink phase — redraw just it
+        tft.fillRect(0, 315, SCREEN_WIDTH, 100, bg);
+        tft.setTextSize(3);
+        tft.drawString(buf, SCREEN_WIDTH/2, 360, 4);
+        tft.setTextSize(1);
+      }
+    }
+    return;
+  }
+  // Just left the alarm — force the nav display to fully repaint over the red.
+  if (ocsAlarmShown) {
+    ocsAlarmShown = false;
+    d2LayoutDrawn = false;
+    d3LayoutDrawn = false;
+    lastFullRedraw = 0;  // D1's force-redraw lever
+  }
+
   if (displayMode == 1) {
     updateDisplayD1();
   } else if (displayMode == 2) {
@@ -6393,6 +6612,18 @@ void processCommand(String cmd, bool fromTelnet) {
       }
     }
 
+  } else if (cmd == "fleetwatch") {
+    // Toggle the live RC fleet dashboard (refreshes from fleetWatchTick()
+    // in the main loop — non-blocking). VT100 terminal required.
+    g_fleetWatch = !g_fleetWatch;
+    if (g_fleetWatch) {
+      g_fleetWatchLast = 0;          // paint on the next tick immediately
+      Serial.print("\033[2J");       // clear screen on start
+      tprintln("fleetwatch: ON (live ~2 Hz; type 'fleetwatch' again to stop)");
+    } else {
+      tprintln("fleetwatch: OFF");
+    }
+
   } else if (cmd == "classes") {
     // Stage 5.5 — dump per-class bow_offset registry loaded from
     // /sf/classes.csv. RC-only (boats use OCS_BOW_OFFSET_M directly).
@@ -6452,6 +6683,7 @@ void processCommand(String cmd, bool fromTelnet) {
     tprintln("  radiomode  - Show current radio mode");
     tprintln("  mesh       - ESP-NOW peer mesh status + peers seen");
     tprintln("  fleet      - RC view of fleet OCS (RC-only)");
+    tprintln("  fleetwatch - live RC fleet OCS dashboard, ~2 Hz (RC-only; VT100 term)");
     tprintln("  classes    - Show /sf/classes.csv bow_offset registry (RC-only)");
     tprintln("  statusup   - Upload fleet health snapshot to S3 now");
     tprintln("  configsync - Fetch + apply cloud config from S3 (reboots if newer)");
@@ -6650,11 +6882,14 @@ void diagnosticsTask(void* param) {
     unsigned long now = millis();
     uint32_t iter = g_loopIter;
     long delta = (long)(iter - lastIter);
-    Serial.printf("[DIAG] uptime=%lus heap=%u sect=%s up=%s iter=%lu (+%ld)\n",
-                  now / 1000, ESP.getFreeHeap(),
-                  (const char*)g_loopSection,
-                  (const char*)g_uploadSection,
-                  (unsigned long)iter, delta);
+    // Suppress the heartbeat print while the live fleet dashboard is up, so
+    // its 5 s lines don't corrupt the ANSI table. Watchdog logic below still runs.
+    if (!g_fleetWatch)
+      Serial.printf("[DIAG] uptime=%lus heap=%u sect=%s up=%s iter=%lu (+%ld)\n",
+                    now / 1000, ESP.getFreeHeap(),
+                    (const char*)g_loopSection,
+                    (const char*)g_uploadSection,
+                    (unsigned long)iter, delta);
     lastIter = iter;
 
     // ---------- OTA hard deadline ----------
@@ -7109,6 +7344,9 @@ void loop() {
   g_loopSection = "rc-ocs";
   rcComputeFleetOCS();
 
+  g_loopSection = "fleetwatch";
+  fleetWatchTick();
+
   g_loopSection = "serial-cmd";
   handleSerialCommand();
 
@@ -7180,7 +7418,14 @@ void loop() {
   }
 #endif
 
-  if (now - lastDisp >= DISPLAY_UPDATE_MS) {
+  // The OCS alarm blinks at ~2 Hz (inverts every 250 ms); the normal 500 ms
+  // display cadence is too slow to render that (and aliases to a static
+  // frame), so tick the display ~every 120 ms while the alarm is up. The RC
+  // fleet panel also wants a faster, live refresh.
+  bool fastDisp = (g_ocs.armed && g_ocs.over_line) ||
+                  (g_role == ROLE_RC_SIGNAL && g_ocs.armed);
+  unsigned long dispGate = fastDisp ? 120 : DISPLAY_UPDATE_MS;
+  if (now - lastDisp >= dispGate) {
     g_loopSection = "display";
     updateDisplay();
     // Adaptive backlight — recheck at every display tick, only write

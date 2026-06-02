@@ -42,7 +42,7 @@ sailframes/core/
 │   └── S1_LEGACY.md       # Shelved Raspberry Pi notes
 ├── edge-e/                # ESP32 device (E1 = first gen)
 │   ├── hardware/          # KiCad PCB v1.1 (Gerbers ordered)
-│   └── firmware/          # ESP32 Arduino firmware (sailframes_e1.ino)
+│   └── firmware/          # ESP32 Arduino firmware (sailframes_edge.ino — unified E + B)
 ├── edge-s/                # LEGACY — Raspberry Pi (see docs/S1_LEGACY.md)
 ├── web/                   # Race dashboard
 │   ├── api/               # FastAPI backend
@@ -52,9 +52,9 @@ sailframes/core/
 ├── processing/            # Python analytics (maneuvers, polar, stats)
 ├── lambda/                # AWS Lambda (post-upload processing, APIs)
 ├── infrastructure/        # CDK/Terraform + deploy.sh
-├── scripts/               # Utility scripts (flash-e1.sh, sync, repro)
+├── scripts/               # Utility scripts (flash-edge.sh, sync, repro)
 ├── export/                # Report / video export
-└── .github/workflows/     # CI: firmware-e1.yml builds the .bin on push
+└── .github/workflows/     # CI: firmware-edge.yml builds the .bin on push
 ```
 
 ---
@@ -147,7 +147,11 @@ Freerouting + manual cleanup.
 
 ---
 
-## E1 Firmware (`edge-e/firmware/sailframes_e1/sailframes_e1.ino`)
+## Edge Firmware (`edge-e/firmware/sailframes_edge/sailframes_edge.ino`)
+
+> Single unified firmware for **both E (LG290P) and B (LC29HEAMD) devices**; branches on
+> `config.hardware_platform`. Renamed from `sailframes_e1` 2026-06-02 to end the E-only
+> confusion. CI: `.github/workflows/firmware-edge.yml`; flash: `scripts/flash-edge.sh`.
 
 - NMEA parsing (GGA/RMC/GSA/GSV) from LG290P at **10 Hz** (Rover mode)
 - BNO085 reports at **10 Hz** (was 1 Hz pre-`.05`; baked into firmware
@@ -740,7 +744,7 @@ Stations: 44013 / CSIM3 (Castle Island) / 44029 / BUZM3 / NTKM3 / KBOS (Logan).
     gotcha #22 as the primary diagnostic instead.
 
 24. **Serial reflash boots the OLD firmware after an OTA cycle**
-    (fixed in `scripts/flash-e1.sh` 2026-05-11) — the firmware uses
+    (fixed in `scripts/flash-edge.sh` 2026-05-11) — the firmware uses
     the `Minimal SPIFFS` partition layout, which has TWO app slots
     plus an `otadata` partition that tells the bootloader which slot
     to boot:
@@ -759,7 +763,7 @@ Stations: 44013 / CSIM3 (Castle Island) / 44029 / BUZM3 / NTKM3 / KBOS (Logan).
     ```
     esptool --port … erase-region 0xe000 0x2000
     ```
-    `flash-e1.sh` now does this automatically in app-only mode. For
+    `flash-edge.sh` now does this automatically in app-only mode. For
     a stuck device after a CLI flash that didn't include the erase,
     just run the command above + reset and the new firmware boots.
     `--full` mode is unaffected (writes bootloader + partitions

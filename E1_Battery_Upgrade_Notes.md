@@ -52,7 +52,7 @@ Micro-USB ────── PowerBoost USB port (for charging)
 
 ---
 
-## Firmware Changes Required (sailframes_e1.ino)
+## Firmware Changes Required (sailframes_edge.ino)
 
 ### 1. New Pin Definitions
 ```cpp

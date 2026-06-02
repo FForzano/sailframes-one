@@ -387,7 +387,7 @@
                 <div class="doc-content">
                     <ul>
                         <li><strong>Quectel modules</strong> (LG290P / LC29H) &mdash; Amazon stock fluctuates; Waveshare's own store and Robu.in are reliable backups. The important part is &quot;Waveshare-branded module&quot; &mdash; bare Quectel modules without breakout don't have headers or antenna.</li>
-                        <li><strong>ESP32 board</strong> &mdash; <em>must</em> be the ELEGOO V1 with the <strong>CP2102</strong> USB chip. CH340-variant boards work electrically but the firmware flashing scripts (<code>scripts/flash-e1.sh</code>) assume CP2102 enumeration.</li>
+                        <li><strong>ESP32 board</strong> &mdash; <em>must</em> be the ELEGOO V1 with the <strong>CP2102</strong> USB chip. CH340-variant boards work electrically but the firmware flashing scripts (<code>scripts/flash-edge.sh</code>) assume CP2102 enumeration.</li>
                         <li><strong>TFT</strong> &mdash; <em>must</em> be the <strong>ST7796U</strong> controller, 480 &times; 320, SPI. ILI9486 variants of the same physical size will need the <code>User_Setup.h</code> for TFT_eSPI swapped, and ILI9341 (320 &times; 240) is the wrong resolution.</li>
                         <li><strong>microSD module</strong> &mdash; ensure it has <strong>3.3 V level shifters</strong> on the data lines, not bare 5 V passthrough. Cheap modules without level shifters work intermittently and corrupt cards.</li>
                         <li><strong>LiPo cell</strong> &mdash; <code>906090</code> is the cell footprint (9 mm &times; 60 mm &times; 90 mm). Other 6000 mAh cells fit if their dimensions match the YETLEBOX internal volume.</li>
@@ -402,7 +402,7 @@
                 <div class="doc-content">
                     <p>
                         Same firmware
-                        (<code>edge-e/firmware/sailframes_e1/sailframes_e1.ino</code>)
+                        (<code>edge-e/firmware/sailframes_edge/sailframes_edge.ino</code>)
                         runs on both options. At boot the firmware sends
                         LG290P-specific <code>PQTM*</code> config; on an
                         LC29H board those commands return

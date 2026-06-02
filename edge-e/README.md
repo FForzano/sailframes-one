@@ -26,7 +26,7 @@ edge-e/
 │   ├── *.kicad_pcb    # PCB layout
 │   └── *.kicad_pro    # Project file
 └── firmware/          # ESP32/Arduino firmware
-    └── sailframes_e1/ # E1 device firmware
+    └── sailframes_edge/ # unified edge firmware (E + B devices)
 ```
 
 ## KiCad
@@ -43,7 +43,7 @@ kicad kicad_sailframes-e1.kicad_pro
 Build and flash using Arduino IDE or PlatformIO:
 
 ```bash
-cd edge-e/firmware/sailframes_e1
+cd edge-e/firmware/sailframes_edge
 # Open in Arduino IDE or use PlatformIO
 ```
 

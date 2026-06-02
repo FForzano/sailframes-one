@@ -71,7 +71,7 @@ The firmware has been updated to:
 - Test connectivity to S3 instead of API Gateway
 - Read device ID from SD card config.txt
 
-Flash `sailframes_e1.ino` to the ESP32.
+Flash `sailframes_edge.ino` to the ESP32.
 
 ### 3. Configure Device ID
 
@@ -125,7 +125,7 @@ The firmware reads this at boot and uses it for:
 
 ## Files Changed
 
-- `edge-e/firmware/sailframes_e1/sailframes_e1.ino` - Direct S3 HTTP upload
+- `edge-e/firmware/sailframes_edge/sailframes_edge.ino` - Direct S3 HTTP upload
 - `infrastructure/aws/lambda/upload_handler.py` - Returns HTTP presigned URLs (backup path)
 - `infrastructure/aws/s3-e1-upload-policy.json` - Bucket policy for public PUT
 
