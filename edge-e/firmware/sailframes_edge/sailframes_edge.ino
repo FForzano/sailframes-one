@@ -1,5 +1,5 @@
 /*
- * SailFrames E1 — Fleet Tracker Firmware
+ * SailFrames Edge — Fleet Tracker Firmware (unified E + B devices)
  *
  * Hardware:
  *   - ESP32 DevKit V1 (ELEGOO)
@@ -1810,7 +1810,7 @@ void setup() {
   esp_reset_reason_t resetReason = esp_reset_reason();
 
   Serial.println("\n=================================");
-  Serial.printf("  SailFrames E1 %s — PPK Logger\n", FW_VERSION);
+  Serial.printf("  SailFrames Edge %s\n", FW_VERSION);
   Serial.println("  Hardware Power Switch Edition");
   Serial.printf("  Reset reason: %s (%d)\n", resetReasonStr(resetReason), (int)resetReason);
   Serial.printf("  Free heap: %u, min ever: %u\n",
@@ -2998,7 +2998,7 @@ void handleTelnet() {
       if (telnetClient) telnetClient.stop();
       telnetClient = telnetServer.available();
       telnetClient.println("\n=================================");
-      telnetClient.printf("  SailFrames E1 %s\n", FW_VERSION);
+      telnetClient.printf("  SailFrames Edge %s\n", FW_VERSION);
       telnetClient.printf("  Boat: %s\n", config.boat_id);
       telnetClient.println("  Type 'help' for commands");
       telnetClient.println("=================================\n");

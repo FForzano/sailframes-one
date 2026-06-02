@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Download the latest CI-built E1 firmware from GitHub Actions and flash it
+# Download the latest CI-built edge firmware (unified E + B) from GitHub Actions and flash it
 # to a connected ESP32 over USB.
 #
 # Usage:
-#   scripts/flash-e1.sh                  # auto-detect port, app-only flash
-#   scripts/flash-e1.sh --port /dev/cu.usbserial-XXXX
-#   scripts/flash-e1.sh --full           # flash bootloader + partitions + app
-#   scripts/flash-e1.sh --fleet          # prompt to swap devices and reflash
-#   scripts/flash-e1.sh --no-flash       # download + verify only
-#   scripts/flash-e1.sh --run-id 12345   # use a specific workflow run
+#   scripts/flash-edge.sh                  # auto-detect port, app-only flash
+#   scripts/flash-edge.sh --port /dev/cu.usbserial-XXXX
+#   scripts/flash-edge.sh --full           # flash bootloader + partitions + app
+#   scripts/flash-edge.sh --fleet          # prompt to swap devices and reflash
+#   scripts/flash-edge.sh --no-flash       # download + verify only
+#   scripts/flash-edge.sh --run-id 12345   # use a specific workflow run
 #
 # Dependencies: gh, esptool, shasum, jq
 
 set -euo pipefail
 
-WORKFLOW="firmware-e1.yml"
-DOWNLOAD_DIR="${TMPDIR:-/tmp}/e1-fw"
+WORKFLOW="firmware-edge.yml"
+DOWNLOAD_DIR="${TMPDIR:-/tmp}/edge-fw"
 BAUD="${ESPTOOL_BAUD:-921600}"
 
 PORT=""
@@ -87,9 +87,9 @@ fi
 
 # ---- Resolve artifact name (workflow appends full SHA) ----
 ARTIFACT_NAME=$(gh api "repos/{owner}/{repo}/actions/runs/$RUN_ID/artifacts" \
-  --jq '.artifacts[] | select(.name | startswith("e1-firmware-")) | .name' | head -1)
+  --jq '.artifacts[] | select(.name | startswith("edge-firmware-")) | .name' | head -1)
 if [[ -z "$ARTIFACT_NAME" ]]; then
-  echo "ERROR: no e1-firmware-* artifact on run $RUN_ID" >&2
+  echo "ERROR: no edge-firmware-* artifact on run $RUN_ID" >&2
   exit 1
 fi
 
@@ -105,7 +105,7 @@ else
 fi
 
 # ---- Locate binaries ----
-APP_BIN=$(find "$TARGET" -maxdepth 1 -name 'sailframes_e1_*.bin' \
+APP_BIN=$(find "$TARGET" -maxdepth 1 -name 'sailframes_edge_*.bin' \
   ! -name '*.bootloader.bin' ! -name '*.partitions.bin' \
   ! -name '*.sha256' | head -1)
 if [[ -z "$APP_BIN" || ! -f "$APP_BIN" ]]; then
@@ -114,9 +114,9 @@ if [[ -z "$APP_BIN" || ! -f "$APP_BIN" ]]; then
   exit 1
 fi
 SHA_FILE="${APP_BIN}.sha256"
-VERSION=$(basename "$APP_BIN" | sed -E 's/^sailframes_e1_(.+)\.bin$/\1/')
-BOOT_BIN="$TARGET/sailframes_e1_${VERSION}.bootloader.bin"
-PART_BIN="$TARGET/sailframes_e1_${VERSION}.partitions.bin"
+VERSION=$(basename "$APP_BIN" | sed -E 's/^sailframes_edge_(.+)\.bin$/\1/')
+BOOT_BIN="$TARGET/sailframes_edge_${VERSION}.bootloader.bin"
+PART_BIN="$TARGET/sailframes_edge_${VERSION}.partitions.bin"
 
 echo "    Version: $VERSION"
 echo "    App:     $(basename "$APP_BIN") ($(wc -c < "$APP_BIN" | tr -d ' ') bytes)"
@@ -216,7 +216,7 @@ if $FLEET_MODE; then
   while true; do
     echo
     echo "############################################################"
-    echo "# Device $device_num — plug in the next E1 over USB and press Enter"
+    echo "# Device $device_num — plug in the next device over USB and press Enter"
     echo "# (or type 'q' then Enter to stop)"
     echo "############################################################"
     read -r line
