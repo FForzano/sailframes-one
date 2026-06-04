@@ -134,6 +134,14 @@ let currentRace = null;
 let raceData = null;
 let map = null;
 let boatLayers = {};  // device_id -> { track, marker }
+// AIS traffic overlay (non-participant vessels). Deliberately a separate
+// structure from boatLayers/raceData.boats: these render on the map and
+// animate with the scrubber but NEVER enter the leaderboard or charts.
+let aisData = null;          // raw API doc
+let aisMarkers = {};         // mmsi -> { marker, vessel, times, positions }
+let aisLayerGroup = null;    // L.layerGroup holding the vessel markers
+let aisControl = null;       // Leaflet toggle control
+let aisVisible = false;      // default OFF (data too sparse to be useful); persisted in localStorage 'sf_ais_on'
 let isPlaying = false;
 let playbackSpeed = 10;  // default 10× — 25-min race plays in ~2.5 min
 let currentTime = 0;  // seconds from race start
@@ -228,6 +236,9 @@ let markerOverlays = {
     vmg:      false,
     polarPct: false,
     rank:     false,
+    // Sail number next to the boat's initials. Off by default — keeps the
+    // map cleaner; toggle on via the SHOW legend.
+    sail:     false,
     // GNSS accuracy from the per-sample HDOP, surfaced as
     // ±<N>cm next to the boat label. HDOP is unit-less but
     // multiplying by ~1 m UERE (LG290P standard mode) gives a
@@ -405,7 +416,7 @@ async function init() {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             if (drawerDeviceId) closeBoatDrawer();
-            for (const id of ['leg-modal', 'maneuver-modal', 'tack-analysis-modal', 'roll-tacking-modal']) {
+            for (const id of ['leg-modal', 'maneuver-modal', 'tack-analysis-modal', 'roll-tacking-modal', 'orrez-modal']) {
                 const m = document.getElementById(id);
                 if (m && m.style.display !== 'none') m.style.display = 'none';
             }
@@ -440,13 +451,16 @@ async function init() {
     if (rtBtn) rtBtn.addEventListener('click', openRollTackingModal);
     const ppBtn = document.getElementById('btn-polar-plot');
     if (ppBtn) ppBtn.addEventListener('click', openPolarOverlay);
+    const orrezBtn = document.getElementById('btn-orrez-explainer');
+    if (orrezBtn) orrezBtn.addEventListener('click', openOrrEzModal);
 
     // Tactics-discussion drawer
     setupTacticsDrawer();
 
-    // Toolbar dropdowns (Race management, Analytics, Discuss Tactics with…)
+    // Toolbar dropdowns (Race management, Analytics, Learning, Discuss Tactics with…)
     setupToolbarDropdown('btn-race-mgmt', 'race-mgmt-menu');
     setupToolbarDropdown('btn-analytics', 'analytics-menu');
+    setupToolbarDropdown('btn-learning', 'learning-menu');
     setupToolbarDropdown('btn-tactics-dd', 'tactics-menu');
 
     // Mobile UX (only active when viewport ≤ 900 px — see race.css media query)
@@ -972,6 +986,174 @@ function destinationPoint(lat, lon, bearingDeg, distM) {
 // is in the upper half-plane relative to the wind (mark bearing within
 // ±90° of TWD as seen from the start), it counts. Length is scaled to be
 // visible across a typical Boston Harbor course (~3 km).
+// ============================================================
+// AIS traffic overlay (non-participant vessels)
+// ============================================================
+// Loaded from GET /api/races/<id>/ais →
+//   { vessels: [ { mmsi, name, category, type_raw, length_m, beam_m,
+//                  positions: [ {t,lat,lon,sog,cog,hdg,nav} ] } ] }
+// Renders muted/colour-coded chevrons that animate with the playback
+// scrubber. Hazardous commercial traffic (cargo/tanker/tug) is flagged
+// orange, ferries blue, pleasure/sail grey. They are obstacles only —
+// never scored, never in the leaderboard.
+
+const AIS_CAT_COLORS = {
+    commercial: '#ff8c1a',  // cargo / tanker / tug / dredger — real hazards
+    passenger:  '#3aa0ff',  // ferries / passenger
+    pleasure:   '#9aa0a6',
+    sailing:    '#9aa0a6',
+    other:      '#9aa0a6',
+};
+
+function _aisColor(cat) { return AIS_CAT_COLORS[cat] || AIS_CAT_COLORS.other; }
+
+// Marker size by vessel size — gross tonnage when known (so a 90k-GT
+// container ship dwarfs a 975-GT ferry), else length, else a small
+// default. sqrt/linear keeps the 122 .. 90,389 GT range from blowing up.
+function aisSizePx(v) {
+    let px;
+    if (v && v.gross_tonnage) px = 8 + Math.sqrt(v.gross_tonnage) / 12;
+    else if (v && v.length_m) px = 8 + v.length_m / 12;
+    else px = 9;
+    return Math.max(10, Math.min(34, Math.round(px)));
+}
+
+function aisIcon(category, cog, sizePx) {
+    // Chevron pointing north (0°); rotated to COG via inline transform.
+    const color = _aisColor(category);
+    const s = sizePx || 15;
+    const html = `<div class="ais-chevron" style="transform:rotate(${cog || 0}deg);color:${color}">`
+        + `<svg viewBox="0 0 16 16" width="${s}" height="${s}"><path d="M8 1 L14 15 L8 11 L2 15 Z" `
+        + `fill="currentColor" stroke="#0a0a0a" stroke-width="0.9"/></svg></div>`;
+    return L.divIcon({ html, className: 'ais-divicon', iconSize: [s, s], iconAnchor: [s / 2, s / 2] });
+}
+
+function aisPopupHtml(v, p) {
+    const dims = v.length_m ? `${Math.round(v.length_m)}×${v.beam_m ? Math.round(v.beam_m) : '?'} m` : '';
+    const gt = v.gross_tonnage ? `${Math.round(v.gross_tonnage).toLocaleString()} GT` : '';
+    const spd = (p && p.sog != null) ? `${(+p.sog).toFixed(1)} kn` : '';
+    const crs = (p && p.cog != null) ? `${Math.round(p.cog)}°` : '';
+    const typ = v.type_raw || v.category || '';
+    const sizeLine = [dims, gt].filter(Boolean).join(' · ');
+    return `<div class="ais-popup"><strong>${_attrEsc(v.name || '(unknown)')}</strong><br>`
+        + `${_attrEsc(typ)}${sizeLine ? '<br>' + sizeLine : ''}<br>`
+        + `MMSI ${_attrEsc(String(v.mmsi || '?'))}<br>${spd}${spd && crs ? ' · ' : ''}${crs}</div>`;
+}
+
+function clearAIS() {
+    if (aisLayerGroup) {
+        aisLayerGroup.clearLayers();
+        if (map && map.hasLayer(aisLayerGroup)) map.removeLayer(aisLayerGroup);
+    }
+    aisLayerGroup = null;
+    aisMarkers = {};
+    aisData = null;
+    if (aisControl) { try { map.removeControl(aisControl); } catch {} aisControl = null; }
+}
+
+async function loadRaceAIS(raceId) {
+    clearAIS();  // always clear the previous race's vessels first
+    try {
+        const saved = localStorage.getItem('sf_ais_on');
+        if (saved !== null) aisVisible = saved === '1';
+    } catch {}
+    let doc;
+    try {
+        const resp = await fetch(`${API_BASE}/api/races/${raceId}/ais`);
+        doc = await resp.json();
+    } catch (e) { console.warn('[AIS] fetch failed', e); return; }
+    const vessels = (doc && doc.vessels) || [];
+    if (!vessels.length) { console.log('[AIS] no vessels for this race'); return; }
+    aisData = doc;
+    aisLayerGroup = L.layerGroup();
+    buildAISMarkers(vessels);
+    if (aisVisible) aisLayerGroup.addTo(map);
+    addAISToggleControl();
+    updateAISPositions(playCursorSeconds || 0);
+    console.log(`[AIS] ${vessels.length} vessels loaded (${doc.source || '?'})`);
+}
+
+function buildAISMarkers(vessels) {
+    for (const v of vessels) {
+        const pts = v.positions || [];
+        if (!pts.length) continue;
+        // One directional logo per vessel, sized by tonnage. No track
+        // line and no interpolation — the marker only ever sits ON a real
+        // AIS fix (see updateAISPositions), so every shown position is a
+        // genuine reported point, not a guess.
+        const sizePx = aisSizePx(v);
+        const times = new Float64Array(pts.length);
+        for (let i = 0; i < pts.length; i++) times[i] = new Date(pts[i].t).getTime();
+        const marker = L.marker([pts[0].lat, pts[0].lon], {
+            icon: aisIcon(v.category, pts[0].cog, sizePx),
+            keyboard: false,
+        });
+        marker.bindPopup(aisPopupHtml(v, pts[0]));
+        marker.addTo(aisLayerGroup);
+        aisMarkers[v.mmsi] = { marker, vessel: v, times, positions: pts, sizePx };
+    }
+}
+
+// Place every AIS vessel at the playback cursor by SNAPPING to its
+// nearest real AIS fix in time — no interpolation. The marker therefore
+// only ever sits on a genuine reported position. When the nearest fix is
+// more than AIS_STALE_MS from the cursor (the vessel wasn't in the area
+// near that moment) the marker is hidden. Anchored vessels (SOG < 0.5 kt)
+// are dimmed. Writes ONLY marker state — never raceData / the leaderboard.
+const AIS_STALE_MS = 25 * 60 * 1000;
+function updateAISPositions(timeSeconds) {
+    if (!aisLayerGroup || !currentRace) return;
+    const startTime = new Date(currentRace.start_time).getTime();
+    const targetTime = startTime + timeSeconds * 1000;
+    for (const mmsi in aisMarkers) {
+        const a = aisMarkers[mmsi];
+        const times = a.times, pts = a.positions, n = times.length;
+        if (!n) { a.marker.setOpacity(0); continue; }
+        let bi = 0, bd = Infinity;
+        for (let i = 0; i < n; i++) {
+            const d = Math.abs(times[i] - targetTime);
+            if (d < bd) { bd = d; bi = i; }
+        }
+        if (bd > AIS_STALE_MS) { a.marker.setOpacity(0); continue; }
+        const p = pts[bi];
+        if (!p || p.lat == null || p.lon == null) { a.marker.setOpacity(0); continue; }
+        const anchored = (p.sog || 0) < 0.5;
+        a.marker.setLatLng([p.lat, p.lon]);
+        a.marker.setOpacity(anchored ? 0.45 : 0.95);
+        a.current = p;
+        const el = a.marker.getElement();
+        if (el) {
+            const c = el.querySelector('.ais-chevron');
+            if (c) c.style.transform = `rotate(${p.cog || 0}deg)`;
+        }
+        if (a.marker.isPopupOpen && a.marker.isPopupOpen()) {
+            a.marker.setPopupContent(aisPopupHtml(a.vessel, p));
+        }
+    }
+}
+
+function addAISToggleControl() {
+    if (!map || aisControl) return;
+    aisControl = L.control({ position: 'topright' });
+    aisControl.onAdd = function () {
+        const div = L.DomUtil.create('div', 'leaflet-bar map-toggle-control');
+        div.innerHTML = `<a href="#" id="ais-toggle" class="${aisVisible ? 'active' : ''}" title="Show/hide AIS vessel traffic (non-racers)">⚓ AIS</a>`;
+        L.DomEvent.disableClickPropagation(div);
+        const a = div.querySelector('#ais-toggle');
+        a.addEventListener('click', (e) => {
+            e.preventDefault();
+            aisVisible = !aisVisible;
+            a.classList.toggle('active', aisVisible);
+            try { localStorage.setItem('sf_ais_on', aisVisible ? '1' : '0'); } catch {}
+            if (!aisLayerGroup) return;
+            if (aisVisible) { aisLayerGroup.addTo(map); updateAISPositions(playCursorSeconds || 0); }
+            else if (map.hasLayer(aisLayerGroup)) map.removeLayer(aisLayerGroup);
+        });
+        return div;
+    };
+    aisControl.addTo(map);
+}
+
 function addLaylinesMapControl() {
     if (!map) return;
     const ctl = L.control({ position: 'topright' });
@@ -1145,6 +1327,7 @@ function addMarkerOverlaysMapControl() {
         { key: 'vmg',             label: 'VMG' },
         { key: 'polarPct',        label: '%pol' },
         { key: 'rank',            label: 'Rank' },
+        { key: 'sail',            label: 'Sail #' },
         { key: 'distances',       label: '↔ Dist' },
         { key: 'hdop',            label: '±cm GPS' },
     ];
@@ -1607,8 +1790,9 @@ function createBoatIcon(color, rotation = 0, initials = '', stats = {}, sailNumb
     // Sail number rides next to the team-initials chip in the same
     // dark pill — slightly de-emphasized (lighter weight, dimmer
     // colour) so the initials still scan first.
-    const sailHtml = sailNumber ? `<span class="bml-sail">${sailNumber}</span>` : '';
-    const label = (initials || sailNumber || parts.length)
+    const showSail = ovr.sail && sailNumber;
+    const sailHtml = showSail ? `<span class="bml-sail">${sailNumber}</span>` : '';
+    const label = (initials || showSail || parts.length)
         ? `<span class="boat-marker-label"><span class="bml-init" style="color:${color}">${initials}</span>${sailHtml}${statsHtml ? ' ' + statsHtml : ''}</span>`
         : '';
     return L.divIcon({
@@ -2523,6 +2707,21 @@ function windAt(timeMs) {
     return { tMs: timeMs, twd, tws };
 }
 
+// On-course wind for maneuver analysis. The NOAA buoy (windAt) carries a
+// ~15-20° course bias, which warps the tack-geometry "wind-up" frame and
+// makes real tacks fail isCleanTack. The fleet-inferred TWD
+// (_inferTWDFromFleetAt) is the actual on-course wind — same source the
+// laylines/polar use. Fleet inference is only valid for the CURRENT race
+// (it reads live boatLayers), so callers processing other races / boats
+// pass useFleet=false and fall back to the buoy.
+function analysisWindAt(timeMs, useFleet) {
+    if (useFleet) {
+        const fw = _inferTWDFromFleetAt(timeMs);
+        if (fw && fw.twd != null) return fw;
+    }
+    return windAt(timeMs);
+}
+
 function precomputeAllRoundings() {
     if (!currentRace) return;
     const marksById = buildMarksById(currentRace);
@@ -3209,6 +3408,65 @@ function _parseTimeToMs(t) {
     return Number.isFinite(ms) ? ms : null;
 }
 
+// The scored racing window for ONE boat: [class start gun, that boat's
+// finish]. All analysis (tacks, maneuvers, leg/polar stats) must clip to
+// this so pre-start milling and post-finish sailing-home never count.
+// end = official finish_time → else the boat's last mark rounding → else
+// the race end. Pass the boat record (has .class / .finish_time) and its
+// layer (has .roundingTimes).
+function racingWindowMsFor(boatRecord, layer) {
+    let startMs = currentRace?.start_time ? new Date(currentRace.start_time).getTime() : 0;
+    let endMs = currentRace?.end_time ? new Date(currentRace.end_time).getTime() : Infinity;
+    const cls = (currentRace?.classes || []).find(c => c.id === boatRecord?.class);
+    const gun = cls ? _parseTimeToMs(cls.start_time) : null;
+    if (gun != null) startMs = gun;
+    const fin = _parseTimeToMs(boatRecord?.finish_time);
+    if (fin != null) {
+        endMs = fin;
+    } else if (layer?.roundingTimes?.length) {
+        const last = layer.roundingTimes[layer.roundingTimes.length - 1];
+        if (last != null) endMs = last;
+    }
+    return { startMs, endMs };
+}
+
+// Median GPS sample rate (Hz) of a track, optionally restricted to a
+// [startMs, endMs] window. Surfaced in the boat panel + analytics so it's
+// obvious WHY a sparse track (e.g. a 0.1 Hz phone GPX = 1 fix / 10 s) can't
+// be tack/maneuver-analysed — the detector needs ~1 Hz or finer.
+function gpsHzFor(layer, startMs, endMs) {
+    const d = layer?.data;
+    if (!d || d.length < 5) return null;
+    const dts = [];
+    let prev = null;
+    for (let i = 0; i < d.length; i++) {
+        const t = (layer.times && Number.isFinite(layer.times[i])) ? layer.times[i] : new Date(d[i].t).getTime();
+        if (!Number.isFinite(t)) continue;
+        if (startMs != null && endMs != null && (t < startMs || t > endMs)) continue;
+        if (prev != null) { const dt = (t - prev) / 1000; if (dt > 0 && dt < 60) dts.push(dt); }
+        prev = t;
+    }
+    if (dts.length < 3) return null;
+    dts.sort((a, b) => a - b);
+    const med = dts[dts.length >> 1];
+    return med > 0 ? 1 / med : null;
+}
+
+function fmtGpsHz(hz) {
+    if (hz == null || !Number.isFinite(hz)) return '—';
+    if (hz >= 3) return `${Math.round(hz)} Hz`;
+    const s = hz.toFixed(1);
+    return `${s.endsWith('.0') ? s.slice(0, -2) : s} Hz`;
+}
+
+// Analysis-sufficiency bucket: ok ≥~1 Hz, low ~0.3-1 Hz, poor <0.3 Hz.
+function gpsHzClass(hz) {
+    if (hz == null) return 'gps-hz-unknown';
+    if (hz >= 0.9) return 'gps-hz-ok';
+    if (hz >= 0.3) return 'gps-hz-low';
+    return 'gps-hz-poor';
+}
+
 // Returns { class_id → [boats sorted by rank] } where each row carries
 // the PHRF computation (elapsed_sec, corrected_sec) plus the live
 // state pulled from calculatePositions() (speed_kn, etc.) when the boat
@@ -3275,6 +3533,148 @@ function computePHRFResults() {
     }
 
     return out;
+}
+
+// ===== ORR-EZ "Learning" explainer =====
+// A teaching panel that explains how the selected race is scored, using
+// THIS race's real boats and numbers. Reuses computePHRFResults() (the
+// same elapsed × rating math the leaderboard ranks on) so the worked
+// example always matches the official results.
+
+function _fmtDur(sec) {
+    if (sec == null || !Number.isFinite(sec)) return '—';
+    const s = Math.round(sec);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+    return h > 0
+        ? `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+        : `${m}:${String(ss).padStart(2, '0')}`;
+}
+
+function openOrrEzModal() {
+    const modal = document.getElementById('orrez-modal');
+    const body = document.getElementById('orrez-modal-body');
+    if (!modal || !body) return;
+    body.innerHTML = renderOrrEzExplainer();
+    modal.style.display = 'flex';
+}
+
+function renderOrrEzExplainer() {
+    if (!currentRace) return '<div class="modal-empty">Load a race first.</div>';
+    const classes = currentRace.classes || [];
+    if (!classes.length) {
+        return '<div class="modal-empty">This race isn’t scored on a handicap rating — boats finish on the line (first-to-finish), so there’s no corrected time to explain.</div>';
+    }
+    const results = computePHRFResults();
+    const band = (classes[0]?.rating_type || '').split('-').pop().trim() || '—';
+    const ratingLabel = _ratingLabel(classes[0]);
+    const esc = (typeof _attrEsc === 'function') ? _attrEsc : (s => String(s ?? ''));
+    const nm = (b) => (b?.boat_name || b?.team_name || 'Boat');
+
+    // --- Concept + formula (static) ---
+    let html = `
+    <div class="orrez">
+      <p class="orrez-lede">Boats of very different size and speed race together here, so first-across-the-line
+      wouldn’t be fair — a big fast boat would win every time. <strong>ORR-EZ</strong> gives each boat a
+      <strong>rating</strong> (a handicap number from its measurements) and scores the race on
+      <strong>corrected time</strong> instead of finish order.</p>
+
+      <div class="orrez-formula">
+        <div class="orrez-formula-main">Corrected&nbsp;time&nbsp;=&nbsp;Elapsed&nbsp;time&nbsp;×&nbsp;Rating</div>
+        <div class="orrez-formula-sub">Elapsed = your finish − your class’s start gun &nbsp;·&nbsp; <strong>lowest corrected time wins</strong></div>
+      </div>
+
+      <div class="orrez-grid2">
+        <div class="orrez-card">
+          <h4>Which way does the rating go?</h4>
+          <p>A <strong>higher rating = a faster boat</strong>. Because corrected = elapsed × rating, a fast boat’s
+          time gets scaled <em>up</em> — it’s expected to finish sooner, so it has to. A slower boat (lower
+          rating) gets its time scaled <em>down</em> as compensation. Two equally-rated boats just race straight up.</p>
+        </div>
+        <div class="orrez-card">
+          <h4>Why the wind band matters</h4>
+          <p>Boats’ <em>relative</em> speeds change with the breeze, so every boat has different ratings for
+          <strong>Light</strong>, <strong>Medium</strong> and <strong>Heavy</strong> air. The Race Committee picks the
+          band for the day. This race was scored <strong>${esc(band)}</strong> <span class="orrez-dim">(${esc(ratingLabel)})</span>.</p>
+        </div>
+        <div class="orrez-card">
+          <h4>Spinnaker vs Non-Spinnaker (NS)</h4>
+          <p>A boat racing <strong>without a spinnaker</strong> (white sails only) is slower, so it gets a
+          separate, more favourable <strong>“NS” rating</strong>. The same hull can enter Spinnaker <em>or</em>
+          Non-Spinnaker and is scored on whichever it actually sailed — the RC notes each boat’s configuration.
+          So your rating comes from <strong>the boat’s measurements + the course type + the wind band + whether
+          you flew a kite</strong>.</p>
+        </div>
+      </div>`;
+
+    // --- Per-class worked example + table (dynamic) ---
+    for (const cls of classes) {
+        const rows = (results[cls.id] || []);
+        const fin = rows.filter(r => r.status === 'FIN' && r.correctedSec != null);
+        html += `<h3 class="orrez-class">${esc(cls.name || cls.id)} <span class="orrez-dim">· ${esc(ratingLabel)}</span></h3>`;
+
+        // Line-honors (lowest elapsed) vs corrected winner (lowest corrected).
+        if (fin.length >= 2) {
+            const winner = fin[0];  // computePHRFResults sorts FIN by corrected ASC
+            const lineHonors = fin.reduce((a, b) => (b.elapsedSec < a.elapsedSec ? b : a));
+            if (lineHonors !== winner) {
+                const lhName = nm(lineHonors.boat), wName = nm(winner.boat);
+                const needElapsed = winner.correctedSec / lineHonors.rating;   // elapsed LH needed to win
+                const shortfall = lineHonors.elapsedSec - needElapsed;
+                const crossedGap = winner.finishMs - lineHonors.finishMs;       // ms LH crossed ahead by
+                const lostBy = winner.correctedSec - lineHonors.correctedSec;   // negative => LH actually won; here LH lost so >0... compute abs
+                html += `
+                <div class="orrez-callout">
+                  <strong>${esc(lhName)} crossed the line first</strong> (elapsed ${_fmtDur(lineHonors.elapsedSec)}) —
+                  but <strong>${esc(wName)} won ${esc(cls.name || cls.id)}</strong> on corrected time.
+                  ${esc(lhName)} is rated faster (<strong>${lineHonors.rating}</strong> vs <strong>${winner.rating}</strong>),
+                  so it owed time. To win it needed a corrected time under ${esc(wName)}’s ${_fmtDur(winner.correctedSec)} —
+                  i.e. an elapsed under <strong>${_fmtDur(needElapsed)}</strong>. It sailed ${_fmtDur(lineHonors.elapsedSec)},
+                  about <strong>${_fmtDur(Math.abs(shortfall))} too slow</strong>. It beat ${esc(wName)} across the line by only
+                  ${_fmtDur(Math.abs(crossedGap) / 1000)}, so on corrected time <strong>${esc(wName)} wins by ${_fmtDur(Math.abs(lostBy))}</strong>.
+                </div>`;
+            }
+        }
+
+        // Full worked table.
+        if (!rows.length) { html += '<p class="orrez-dim">No entries.</p>'; continue; }
+        const winnerCorrected = fin.length ? fin[0].correctedSec : null;
+        html += `<div class="orrez-tablewrap"><table class="orrez-table">
+            <thead><tr>
+              <th>#</th><th>Boat</th><th class="num">Rating</th><th class="num">Elapsed</th>
+              <th class="num orrez-calc">× rating =</th><th class="num">Corrected</th><th class="num">Δ to winner</th>
+            </tr></thead><tbody>`;
+        rows.forEach((r, i) => {
+            const place = r.status === 'FIN' && r.correctedSec != null ? (i + 1) : r.status;
+            const delta = (r.correctedSec != null && winnerCorrected != null)
+                ? (r.correctedSec === winnerCorrected ? '—' : '+' + _fmtDur(r.correctedSec - winnerCorrected))
+                : '';
+            const calc = (r.elapsedSec != null && r.rating != null)
+                ? `${_fmtDur(r.elapsedSec)} × ${r.rating}`
+                : '';
+            html += `<tr class="${i === 0 && r.status === 'FIN' ? 'orrez-winner' : ''}">
+                <td>${place}</td>
+                <td>${esc(nm(r.boat))} <span class="orrez-dim">${esc(r.boat?.boat_type || '')}</span></td>
+                <td class="num">${r.rating ?? '—'}</td>
+                <td class="num">${_fmtDur(r.elapsedSec)}</td>
+                <td class="num orrez-calc">${calc}</td>
+                <td class="num"><strong>${_fmtDur(r.correctedSec)}</strong></td>
+                <td class="num">${delta}</td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+    }
+
+    html += `
+      <div class="orrez-takeaways">
+        <h4>What it means on the water</h4>
+        <ul>
+          <li>To win, beat the boats rated near or above you by <strong>more than the rating gap</strong> between you.</li>
+          <li>You can finish ahead of a slower-rated boat and still <strong>lose to it on corrected</strong> — that’s the handicap doing its job.</li>
+          <li>Check your rating against your rivals’ to know how much time you <strong>owe</strong> (you’re faster) or are <strong>owed</strong> (you’re slower).</li>
+        </ul>
+      </div>
+    </div>`;
+    return html;
 }
 
 // Format a UTC ISO timestamp as the local wall-clock HH:MM:SS the
@@ -3354,7 +3754,13 @@ function renderPHRFLeaderboard() {
     for (const el of container.querySelectorAll('.leaderboard-item[data-boat-id]')) {
         el.addEventListener('click', () => {
             const bid = el.getAttribute('data-boat-id');
-            if (bid) openCatalogDrawer(bid);
+            if (!bid) return;
+            // A handicap boat keyed by boat_id can still have a GPS track
+            // (uploaded GPX/VKX). If so, open the full live drawer (motion,
+            // track quality, …) like the map marker does — only fall back to
+            // the catalog-only view for boats with no track at all.
+            if (boatLayers[bid]?.data?.length) openBoatDrawer(bid);
+            else openCatalogDrawer(bid);
         });
     }
 }
@@ -3902,7 +4308,7 @@ function updateSpeedChart() {
         toggle.style.background = color;
         const team = boatData.boat?.team_name;
         const boatName = boatData.boat?.boat_name;
-        const initials = teamInitials(team || boatName || deviceId);
+        const initials = teamInitials(boatName || team || deviceId);
         toggle.textContent = initials;
         toggle.title = team && boatName
             ? `${team} — ${boatName}`
@@ -4188,6 +4594,23 @@ function updateBoatDrawer() {
     const raceBoat = (currentRace?.boats || []).find(b => b.device_id === drawerDeviceId);
     const profileBlock = _drawerProfileBlock(raceBoat);
 
+    // Track quality — GPS sample rate over this boat's racing window. Makes
+    // it obvious when a sparse track can't support tack/maneuver analysis.
+    const dWin = racingWindowMsFor(boat, layer);
+    const dHz = gpsHzFor(layer, dWin.startMs, dWin.endMs);
+    const dHzNote = (dHz != null && dHz < 0.9)
+        ? '⚠ Too coarse for reliable tack / maneuver analysis — needs ≈1 Hz or finer.'
+        : '';
+    const trackBlock = `
+        <div class="drawer-section">
+            <div class="drawer-section-title">Track quality</div>
+            <div class="drawer-grid">
+                <div class="drawer-stat"><div class="drawer-label">GPS rate</div><div class="drawer-value ${gpsHzClass(dHz)}">${fmtGpsHz(dHz)}</div></div>
+                <div class="drawer-stat"><div class="drawer-label">Points</div><div class="drawer-value">${(layer?.data?.length || 0).toLocaleString()}</div></div>
+            </div>
+            ${dHzNote ? `<div class="drawer-track-note">${dHzNote}</div>` : ''}
+        </div>`;
+
     document.getElementById('drawer-body').innerHTML = `
         ${profileBlock}
         <div class="drawer-section">
@@ -4203,6 +4626,7 @@ function updateBoatDrawer() {
                 <div class="drawer-stat"><div class="drawer-label">Pitch</div><div class="drawer-value">${fmt(imu?.pitch, 0, '°')}</div></div>
             </div>
         </div>
+        ${trackBlock}
         ${ownWindBlock}
         <div class="drawer-section">
             <div class="drawer-section-title">True wind${weatherWindSource ? ' · ' + weatherWindSource : ''}</div>
@@ -4423,6 +4847,15 @@ let polarTrailSeconds = (() => {
     try { return Number(localStorage.getItem('sf-polar-trail-sec') || 0) || 0; }
     catch { return 0; }
 })();
+// Constant TWD offset added to the wind source before computing TWA.
+// Compensates for buoy-vs-racecourse wind bias, fast wind shifts the
+// interpolator can't keep up with, and current-induced COG/heading
+// split. Persisted globally; user adjusts via the polar-twd-nudge
+// input or the "snap" button (auto-snap to class opt_beat angle).
+let polarTWDNudgeDeg = (() => {
+    try { return Number(localStorage.getItem('sf-polar-twd-nudge') || 0) || 0; }
+    catch { return 0; }
+})();
 
 function openPolarOverlay() {
     const el = document.getElementById('polar-overlay');
@@ -4496,6 +4929,36 @@ function _polarSpeedKn(polar, twaDeg, twsKn) {
     return s ? 3600 / s : null;
 }
 
+// Look up the class's optimum close-hauled angle + speed at this TWS.
+// polar.opt_beat is keyed by integer TWS strings ("8", "10", …) and
+// stores {angle: degrees, vmg: s_per_nm}. Bilinear in TWS between the
+// two bracketing keys; returns {angle, sog_kn} or null.
+function _polarOptBeatAt(polar, twsKn) {
+    const ob = polar?.opt_beat;
+    if (!ob) return null;
+    const keys = Object.keys(ob).map(Number).filter(Number.isFinite).sort((a,b) => a - b);
+    if (!keys.length) return null;
+    let lo = keys[0], hi = keys[keys.length - 1];
+    for (let i = 0; i < keys.length - 1; i++) {
+        if (keys[i] <= twsKn && twsKn <= keys[i+1]) { lo = keys[i]; hi = keys[i+1]; break; }
+    }
+    if (twsKn < keys[0]) { lo = hi = keys[0]; }
+    if (twsKn > keys[keys.length - 1]) { lo = hi = keys[keys.length - 1]; }
+    const a = ob[String(lo)], b = ob[String(hi)];
+    if (!a && !b) return null;
+    const f = (hi === lo) ? 0 : (twsKn - lo) / (hi - lo);
+    const safe = (av, bv, ff) => (av == null ? bv : (bv == null ? av : av * (1 - ff) + bv * ff));
+    const angle = safe(a?.angle, b?.angle, f);
+    const vmg = safe(a?.vmg, b?.vmg, f);
+    if (!Number.isFinite(angle) || !Number.isFinite(vmg) || vmg <= 0) return null;
+    // VMG cell is the s/nm equivalent of the close-hauled speed component
+    // *along the wind axis*. Boat-speed along the boat's heading is
+    // VMG / cos(angle).
+    const sogVmg = 3600 / vmg;
+    const sog = sogVmg / Math.cos(angle * Math.PI / 180);
+    return { angle, sog };
+}
+
 // Build a sampled polar curve at fixed TWS: array of (twaDeg, sogKn).
 function _polarCurveAt(polar, twsKn) {
     if (!polar) return [];
@@ -4518,18 +4981,29 @@ function _polarCurrentBoatStates() {
         const p = layer.current;
         if (p.lat == null || p.lon == null) continue;
         const ts = p.t ? new Date(p.t).getTime() : null;
+        // Only count a boat while it's actually racing — cursor within its
+        // [gun, finish] window. Pre-start and post-finish drift don't belong
+        // in the polar cloud.
+        if (ts != null) {
+            const win = racingWindowMsFor(boatData.boat, layer);
+            if (ts < win.startMs || ts > win.endMs) continue;
+        }
         const w = windAt(ts);
         if (!w) continue;
         const cog = p.course || 0;
         // Signed TWA: +stb / -port. Same convention as marker labels.
-        const twa = ((w.twd - cog + 540) % 360) - 180;
+        // Apply the user's TWD nudge so the cluster can be aligned to
+        // the class opt_beat reference when the wind source is biased.
+        const twdAdj = w.twd + polarTWDNudgeDeg;
+        const twa = ((twdAdj - cog + 540) % 360) - 180;
         const sog = p.speed_kn || 0;
         out.push({
             trackKey,
             twa,
             sog,
             tws: w.tws,
-            twd: w.twd,
+            twd: twdAdj,
+            twdRaw: w.twd,
             boat: boatData.boat,
         });
     }
@@ -4567,7 +5041,7 @@ function _polarTrailFor(trackKey, windowSec, ptOf) {
         const w = windAt(t);
         if (!w) continue;
         const cog = p.course || 0;
-        const twa = ((w.twd - cog + 540) % 360) - 180;
+        const twa = (((w.twd + polarTWDNudgeDeg) - cog + 540) % 360) - 180;
         const sog = p.speed_kn || 0;
         const ageFrac = 1 - ((tNow - t) / (windowSec * 1000));
         const [x, y] = ptOf(twa, sog);
@@ -4672,6 +5146,34 @@ function _renderPolarFull() {
             svg.appendChild(mk('path', { d: stbD, stroke: color, class: 'polar-curve' }));
             svg.appendChild(mk('path', { d: portD, stroke: color, class: 'polar-curve' }));
         }
+
+        // Class beat-angle reference rays. opt_beat[tws] gives the
+        // class's optimum close-hauled TWA + VMG (s/nm) at that TWS.
+        // Boats sailing the class properly should sit on the dashed
+        // rays; a 15° offset between cluster and rays means the wind
+        // source is biased — dial the TWD nudge until they coincide.
+        const beat = _polarOptBeatAt(selected.polar, twsForScale);
+        if (beat && Number.isFinite(beat.angle) && Number.isFinite(beat.sog)) {
+            const [sx, sy] = ptOf(beat.angle, beat.sog);
+            const [px, py] = ptOf(-beat.angle, beat.sog);
+            svg.appendChild(mk('line', {
+                x1: cx, y1: cy, x2: sx, y2: sy,
+                class: 'polar-beat-ray',
+            }));
+            svg.appendChild(mk('line', {
+                x1: cx, y1: cy, x2: px, y2: py,
+                class: 'polar-beat-ray',
+            }));
+            // Tiny "opt 42°" tick at each ray's outer end so the user
+            // knows exactly what angle the dashed reference encodes.
+            svg.appendChild(mk('text', {
+                x: sx + 4, y: sy + 4, class: 'polar-beat-label',
+            })).textContent = `opt ${beat.angle.toFixed(0)}°`;
+            svg.appendChild(mk('text', {
+                x: px - 4, y: py + 4, class: 'polar-beat-label',
+                'text-anchor': 'end',
+            })).textContent = `opt ${beat.angle.toFixed(0)}°`;
+        }
     }
 
     // --- Trails (past polar positions) ---
@@ -4755,13 +5257,29 @@ function _renderPolarFull() {
     }
 
     // --- Header readout ---
+    // Lists what's actually feeding the math: TWS, mean TWD across the
+    // visible boats, wind source name, and the current nudge if any.
+    // Without this, a biased buoy silently warps the whole picture.
     const readout = document.getElementById('polar-wind-readout');
     if (readout) {
         if (states.length) {
             const trailStr = polarTrailSeconds > 0
                 ? ` · trail ${polarTrailSeconds < 60 ? polarTrailSeconds + 's' : (polarTrailSeconds / 60) + 'm'}`
                 : '';
-            readout.textContent = `TWS ~${twsForScale.toFixed(1)} kn · ${states.length} boat${states.length === 1 ? '' : 's'}${trailStr}`;
+            // Circular mean TWD across boats (already includes nudge).
+            let sx = 0, sy = 0;
+            for (const s of states) {
+                sx += Math.sin(s.twd * Math.PI / 180);
+                sy += Math.cos(s.twd * Math.PI / 180);
+            }
+            const twdMean = (Math.atan2(sx, sy) * 180 / Math.PI + 360) % 360;
+            const src = (typeof weatherWindSource === 'string' && weatherWindSource)
+                ? weatherWindSource : 'wind';
+            const nudgeStr = polarTWDNudgeDeg
+                ? ` · nudge ${polarTWDNudgeDeg > 0 ? '+' : ''}${polarTWDNudgeDeg}°`
+                : '';
+            readout.textContent =
+                `TWS ~${twsForScale.toFixed(1)} kn · TWD ${twdMean.toFixed(0)}° · ${src} · ${states.length} boat${states.length === 1 ? '' : 's'}${nudgeStr}${trailStr}`;
         } else {
             readout.textContent = 'No live boat data yet — start playback';
         }
@@ -4769,9 +5287,74 @@ function _renderPolarFull() {
 
     _polarRebuildBoatSelector();
     _polarRebuildTrailSelector();
+    _polarRebuildNudgeControl(states, selected);
     _polarRebuildLegend(states);
 
     svg.addEventListener('click', _polarHandleClick, { once: true });
+}
+
+// Wire the TWD nudge input + "snap" button. Snap computes the delta
+// between the median |TWA| of close-hauled-looking boats and the
+// selected boat's class opt_beat angle, and applies it to the nudge.
+function _polarRebuildNudgeControl(states, selected) {
+    const inp = document.getElementById('polar-twd-nudge');
+    const snap = document.getElementById('polar-twd-snap');
+    if (!inp || !snap) return;
+    inp.value = String(polarTWDNudgeDeg);
+    if (!inp.dataset.bound) {
+        inp.dataset.bound = '1';
+        inp.addEventListener('change', () => {
+            const v = Math.max(-45, Math.min(45, Math.round(Number(inp.value) || 0)));
+            polarTWDNudgeDeg = v;
+            inp.value = String(v);
+            try { localStorage.setItem('sf-polar-twd-nudge', String(v)); } catch {}
+            _renderPolarFull();
+        });
+    }
+    if (!snap.dataset.bound) {
+        snap.dataset.bound = '1';
+        snap.addEventListener('click', () => {
+            const sel = selected || (currentRace?.boats || []).find(b => b.polar);
+            const twsForScale = states.length
+                ? (states.reduce((s, b) => s + (b.tws || 0), 0) / states.length)
+                : 10;
+            const beat = sel?.polar ? _polarOptBeatAt(sel.polar, twsForScale) : null;
+            if (!beat) { alert('No class opt_beat to snap against.'); return; }
+            // Use only boats whose current |TWA| looks close-hauled
+            // (between 15° and 70°). Median is robust to one outlier
+            // (a boat tacking, or just rounded a windward mark).
+            const closeHauled = states
+                .map(s => Math.abs(s.twa))
+                .filter(a => a >= 15 && a <= 70)
+                .sort((a, b) => a - b);
+            if (!closeHauled.length) {
+                alert('No close-hauled boats in view to snap against.');
+                return;
+            }
+            const mid = closeHauled.length >> 1;
+            const median = closeHauled.length % 2
+                ? closeHauled[mid]
+                : (closeHauled[mid - 1] + closeHauled[mid]) / 2;
+            // We want median observed |TWA| to equal beat.angle, by
+            // adjusting TWD. If observed |TWA| < beat.angle, TWD is
+            // currently too tight to boats' headings → nudge OUTWARD.
+            // The sign of the nudge depends on which tack dominates:
+            // if the median port boat shows TWA=-25° vs opt -42°, we
+            // need TWD lower (nudge negative) for port; on starboard
+            // we need TWD higher. The set is mostly one-sided in
+            // practice, so we pick the side with more boats.
+            const portBoats = states.filter(s => s.twa < 0).length;
+            const stbBoats = states.filter(s => s.twa > 0).length;
+            const deltaMag = Math.round(beat.angle - median);
+            const newNudge = polarTWDNudgeDeg
+                + (portBoats >= stbBoats ? -deltaMag : +deltaMag);
+            const clamped = Math.max(-45, Math.min(45, newNudge));
+            polarTWDNudgeDeg = clamped;
+            inp.value = String(clamped);
+            try { localStorage.setItem('sf-polar-twd-nudge', String(clamped)); } catch {}
+            _renderPolarFull();
+        });
+    }
 }
 
 function _polarRebuildTrailSelector() {
@@ -4881,12 +5464,15 @@ function computeLegSummary() {
     for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
         const layer = boatLayers[deviceId];
         if (!layer?.data?.length || !layer.roundingTimes) continue;
-        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+        const team = boatData.boat?.boat_name || boatData.boat?.team_name || deviceId;
 
-        // Boundaries for completed legs only.
-        const bounds = [startTimeMs];
+        // Boundaries for completed legs only — first leg starts at THIS
+        // boat's class gun (not the generic race start), and we stop at
+        // its finish (drop any roundings logged after it finished).
+        const win = racingWindowMsFor(boatData.boat, layer);
+        const bounds = [win.startMs];
         for (const t of layer.roundingTimes) {
-            if (t !== undefined) bounds.push(t); else break;
+            if (t !== undefined && t <= win.endMs) bounds.push(t); else break;
         }
         if (bounds.length < 2) continue;
 
@@ -4987,7 +5573,7 @@ function openLegModal() {
 //   3. Use NOAA TWD at the entry to classify tack vs gybe by absolute
 //      TWA before the maneuver (<90° upwind = tack, >90° downwind = gybe).
 
-function detectManeuversForLayer(layer) {
+function detectManeuversForLayer(layer, useFleet = false) {
     const out = [];
     const data = layer.data;
     if (!data || data.length < 30) return out;
@@ -5017,7 +5603,7 @@ function detectManeuversForLayer(layer) {
         const after = speeds.slice(endIdx, Math.min(data.length, endIdx + 10));
         const avgAfter = after.reduce((s, v) => s + v, 0) / Math.max(1, after.length);
 
-        const wEntry = windAt(tMs[i]);
+        const wEntry = analysisWindAt(tMs[i], useFleet);
         let type = 'rounding', twaBefore = null, twaAfter = null;
         if (wEntry) {
             const a = ((wEntry.twd - cogs[i] + 540) % 360) - 180;
@@ -5056,8 +5642,10 @@ function openManeuverModal() {
     for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
         const layer = boatLayers[deviceId];
         if (!layer?.data?.length) continue;
-        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
-        const ms = detectManeuversForLayer(layer);
+        const team = boatData.boat?.boat_name || boatData.boat?.team_name || deviceId;
+        const win = racingWindowMsFor(boatData.boat, layer);
+        const ms = detectManeuversForLayer(layer, true)
+            .filter(m => m.tStart >= win.startMs && m.tStart <= win.endMs);
         for (const m of ms) allManeuvers.push({ deviceId, team, ...m });
 
         const tacks = ms.filter(m => m.type === 'tack');
@@ -5166,7 +5754,7 @@ const TA_WIDE_TURN_DEG = 95;    // turn angle above this gets a "wide" badge
 
 let tackAnalysisState = null;   // { tacks, selectedDevices: Set, highlightId, fleetBestId, perBoatBestId }
 
-function buildTackTrack(tack, layer) {
+function buildTackTrack(tack, layer, useFleet = false) {
     // Returns { id, deviceId, team, color, points: [{x,y,speed,t}],
     //   timeLostSec, turnAngle, durationSec, speedBefore, speedMin,
     //   isPort, twd, isExcluded } or null if essential data missing.
@@ -5174,7 +5762,10 @@ function buildTackTrack(tack, layer) {
     if (!data || data.length < 5) return null;
     const tMs = data.map(p => new Date(p.t).getTime());
 
-    const wAtApex = windAt((tack.tStart + tack.tEnd) / 2);
+    // On-course wind for the wind-up frame (fleet-inferred for the current
+    // race, buoy fallback) — using the biased buoy here is what made real
+    // tacks fail isCleanTack's geometry.
+    const wAtApex = analysisWindAt((tack.tStart + tack.tEnd) / 2, useFleet);
     if (!wAtApex || wAtApex.twd == null) return null;
     const twd = wAtApex.twd;
 
@@ -5390,20 +5981,22 @@ function buildTackTrack(tack, layer) {
 // gybes that got misclassified because TWD was off at the time).
 const TA_MIN_TURN = 70;     // a real tack should be ≥70° (typical 85-110°)
 const TA_MAX_TURN = 150;    // >150° = circling / artifact
+const TA_MIN_WINDWARD_GAIN_M = 2;  // post-apex must end this many m more upwind than pre
+const TA_MIN_X_EXTENT_M = 3;       // horizontal extent floor (not a vertical line)
 function isCleanTack(t) {
     if (t.turnAngle == null) return false;
     if (t.turnAngle < TA_MIN_TURN || t.turnAngle > TA_MAX_TURN) return false;
-    // Geometric sanity in the wind-up + mirrored frame:
-    //  • both pre and post should have y opposite signs (V across wind axis)
-    //  • both should sit on the +x side (V opens to the right)
-    //  • track must extend at least a few meters in x (not a vertical line)
-    if (t.preXmean == null || t.postXmean == null) return false;
     if (t.preYmean == null || t.postYmean == null) return false;
-    if (t.preYmean >= 0) return false;
-    if (t.postYmean <= 0) return false;
-    if (t.preXmean <= 0) return false;
-    if (t.postXmean <= 0) return false;
-    if (t.maxAbsX < 5) return false;     // <5m horizontal extent — not a real tack
+    // RELATIVE windward-gain test (tolerant of residual wind-frame rotation).
+    // The old version used strict absolute sign gates (preY<0 && postY>0 &&
+    // preX>0 && postX>0); with the ~15-20° buoy-wind bias rotating the frame,
+    // real tacks' borderline signs flipped and ~57% were wrongly excluded.
+    // A real tack always nets WINDWARD through the turn: post-apex the boat
+    // is more upwind (+y in the wind-up frame) than pre-apex. A bear-away or
+    // leeward rounding does the opposite, so this still rejects non-tacks —
+    // and gybes never reach here (classified out before isCleanTack).
+    if ((t.postYmean - t.preYmean) < TA_MIN_WINDWARD_GAIN_M) return false;
+    if (t.maxAbsX < TA_MIN_X_EXTENT_M) return false;
     return true;
 }
 
@@ -5510,11 +6103,15 @@ function openTackAnalysisModal() {
     for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
         const layer = boatLayers[deviceId];
         if (!layer?.data?.length) continue;
-        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+        const team = boatData.boat?.boat_name || boatData.boat?.team_name || deviceId;
         const color = layer.color || '#888';
-        const tacks = detectManeuversForLayer(layer).filter(m => m.type === 'tack');
+        // Clip to this boat's racing window (gun → its finish) and use the
+        // on-course (fleet-inferred) wind for the current race.
+        const win = racingWindowMsFor(boatData.boat, layer);
+        const tacks = detectManeuversForLayer(layer, true)
+            .filter(m => m.type === 'tack' && m.tStart >= win.startMs && m.tStart <= win.endMs);
         for (const t of tacks) {
-            const built1 = buildTackTrack({ ...t, deviceId, team, color }, layer);
+            const built1 = buildTackTrack({ ...t, deviceId, team, color }, layer, true);
             if (!built1) { droppedNoWind++; continue; }
             raw.push(built1);
         }
@@ -5547,10 +6144,26 @@ function openTackAnalysisModal() {
         }
     }
 
-    // Default selection: every boat that has ≥1 tack.
-    const allDevices = Array.from(new Set(built.map(t => t.deviceId)));
+    // Roster = EVERY boat with a track this race (keyed by trackKey),
+    // identified by BOAT NAME. The table and checkboxes show all of them,
+    // not just boats with detected tacks — a boat with 0 tacks still gets
+    // a row (N=0) instead of silently vanishing.
+    const allBoats = [];
+    for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
+        const layer = boatLayers[deviceId];
+        if (!layer?.data?.length) continue;
+        const win0 = racingWindowMsFor(boatData.boat, layer);
+        allBoats.push({
+            deviceId,
+            team: boatData.boat?.boat_name || boatData.boat?.team_name || deviceId,
+            color: layer.color || '#888',
+            gpsHz: gpsHzFor(layer, win0.startMs, win0.endMs),
+        });
+    }
+    const allDevices = allBoats.map(b => b.deviceId);
     tackAnalysisState = {
         tacksThisRace: built,
+        allBoats,
         tacksAcrossDay: null,         // populated lazily when user enters "Today" mode
         crossDayState: 'idle',         // idle | loading | ready | error
         selectedDevices: new Set(allDevices),
@@ -5571,7 +6184,12 @@ function openTackAnalysisModal() {
 
 function renderTackAnalysisShell(allDevices) {
     const st = tackAnalysisState;
+    // Seed with EVERY boat that has a track (count 0), then add tack
+    // counts — so zero-tack boats still get a chip instead of vanishing.
     const boatsBy = {};
+    for (const b of (st.allBoats || [])) {
+        boatsBy[b.deviceId] = { team: b.team, color: b.color, count: 0 };
+    }
     for (const t of st.tacksThisRace) {
         if (!boatsBy[t.deviceId]) boatsBy[t.deviceId] = { team: t.team, color: t.color, count: 0 };
         boatsBy[t.deviceId].count++;
@@ -5629,6 +6247,7 @@ function renderTackAnalysisShell(allDevices) {
                         <div><span class="ta-mname">Turn σ <span class="ta-arrow">↓</span></span> Smoothness of dCOG/dt across the turn. <em>Lower is better</em> (constant turn rate); high values = jerky steering.</div>
                         <div><span class="ta-mname">ΔTWA <span class="ta-arrow">⊙</span></span> Exit close-hauled angle minus entry. <em>Near 0 is symmetric.</em> Positive = footing for speed; negative = pinching.</div>
                         <div><span class="ta-mname">Lost (s) ± σ <span class="ta-arrow">↓ ↓</span></span> <em>Team-avg only.</em> Mean ± standard deviation. Two teams with the same mean and different σ are not equal — small σ = consistent crew.</div>
+                        <div><span class="ta-mname">GPS</span> Track sample rate. Tack &amp; maneuver detection needs <strong>≈1 Hz or finer</strong>. A <strong>0.1 Hz</strong> track (one fix every 10 s) is too coarse to resolve a tack, so those boats read low or empty (<span class="gps-hz-poor">red</span>) — it's a data-rate limit, not zero tacks.</div>
                     </div>
                 </details>
             </div>
@@ -5700,13 +6319,20 @@ async function ensureCrossDayTacks(body) {
             for (const [deviceId, boatData] of Object.entries(data.boats || {})) {
                 const gps = boatData?.sensors?.gps;
                 if (!gps?.length) continue;
-                const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+                const team = boatData.boat?.boat_name || boatData.boat?.team_name || deviceId;
                 // Reuse the current-race color if we have it, else fall back to grey.
                 const color = boatLayers[deviceId]?.color || '#888';
                 const fakeLayer = { data: gps, imu: boatData?.sensors?.imu || [] };
-                const tacks = detectManeuversForLayer(fakeLayer).filter(m => m.type === 'tack');
+                // Best-effort window for the other race (no per-class gun
+                // available cross-day): that race's start → this boat's
+                // finish. Buoy wind (fleet inference is current-race only).
+                const oStart = data.race?.start_time ? new Date(data.race.start_time).getTime() : -Infinity;
+                const oEnd = _parseTimeToMs(boatData.boat?.finish_time)
+                    ?? (data.race?.end_time ? new Date(data.race.end_time).getTime() : Infinity);
+                const tacks = detectManeuversForLayer(fakeLayer, false)
+                    .filter(m => m.type === 'tack' && m.tStart >= oStart && m.tStart <= oEnd);
                 for (const t of tacks) {
-                    const built = buildTackTrack({ ...t, deviceId, team, color }, fakeLayer);
+                    const built = buildTackTrack({ ...t, deviceId, team, color }, fakeLayer, false);
                     if (!built) { dropNoWind++; continue; }
                     if (!isCleanTack(built)) { dropQuality++; continue; }
                     pool.push(built);
@@ -5838,8 +6464,46 @@ function redrawTackAnalysis() {
         tracks = filteredTacks.map(t => ({ ...t, thick: false }));
         listMode = 'tacks';
     } else {
-        // Team avg or team avg + day.
-        tracks = buildTeamAverages(filteredTacks).map(t => ({ ...t, thick: true }));
+        // Team avg / team avg + day. Show EVERY selected boat — including
+        // boats with too few tacks for an averaged plot line, and zero-tack
+        // boats (N=0). buildTeamAverages supplies the averaged track where
+        // coverage allows; the per-boat metrics are computed from the
+        // boat's own tacks so even a sparse boat still gets numbers.
+        const avgByDev = new Map(buildTeamAverages(filteredTacks).map(a => [a.deviceId, a]));
+        const tacksByDev = new Map();
+        for (const t of filteredTacks) {
+            if (!tacksByDev.has(t.deviceId)) tacksByDev.set(t.deviceId, []);
+            tacksByDev.get(t.deviceId).push(t);
+        }
+        const mean = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+        const roster = (st.allBoats || []).filter(b => st.selectedDevices.has(b.deviceId));
+        tracks = roster.map(b => {
+            const a = avgByDev.get(b.deviceId);
+            const ts = tacksByDev.get(b.deviceId) || [];
+            const losses = ts.map(t => t.timeLostSec).filter(v => v != null);
+            const meanLost = mean(losses);
+            let stdLost = null;
+            if (losses.length > 1 && meanLost != null) {
+                stdLost = Math.sqrt(losses.reduce((s, v) => s + (v - meanLost) ** 2, 0) / losses.length);
+            }
+            return {
+                id: a?.id || `team-${b.deviceId}`,
+                deviceId: b.deviceId, team: b.team, color: b.color,
+                gpsHz: b.gpsHz,
+                points: a?.points || [],          // averaged plot line only where coverage allows
+                count: ts.length,
+                meanLost, stdLost,
+                meanTurn: mean(ts.map(t => t.turnAngle).filter(v => v != null)),
+                meanSpeedDrop: mean(ts.map(t => (t.speedBefore != null && t.speedMin != null) ? (t.speedBefore - t.speedMin) : null).filter(v => v != null)),
+                meanHeel: mean(ts.map(t => t.maxHeel).filter(v => v != null)),
+                meanTurnRateStd: mean(ts.map(t => t.turnRateStd).filter(v => v != null)),
+                meanTwaDelta: mean(ts.map(t => t.twaDelta).filter(v => v != null)),
+                speedBefore: a?.speedBefore ?? ts[0]?.speedBefore ?? 0,
+                thick: true,
+            };
+        });
+        // Boats that tacked first (best tack-loss on top); zero-tack boats last.
+        tracks.sort((x, y) => ((x.count ? 0 : 1) - (y.count ? 0 : 1)) || ((x.meanLost ?? 999) - (y.meanLost ?? 999)));
         listMode = 'teams';
     }
 
@@ -5993,6 +6657,7 @@ function drawTackList(filteredTacks, tracks, listMode) {
         head.innerHTML = `<tr>
             <th>Team</th>
             <th>Sail #</th>
+            <th class="num" title="GPS sample rate of the track. Tack analysis needs ≈1 Hz or finer; a 0.1 Hz track (1 fix / 10 s) is too coarse to resolve tacks.">GPS</th>
             <th class="num">N</th>
             <th class="num">Turn°</th>
             <th class="num metric" title="Mean ± standard deviation of per-tack time-lost. Same mean with smaller σ = more consistent crew.">Lost&nbsp;(s)</th>
@@ -6008,6 +6673,7 @@ function drawTackList(filteredTacks, tracks, listMode) {
             return `<tr data-ta-id="${t.id}">
                 <td><span class="ta-row-color" style="background:${t.color}"></span>${t.team}</td>
                 <td>${sailNumberCell(t.deviceId)}</td>
+                <td class="num ${gpsHzClass(t.gpsHz)}" title="GPS sample rate">${fmtGpsHz(t.gpsHz)}</td>
                 <td class="num">${t.count}</td>
                 <td class="num">${t.meanTurn != null ? t.meanTurn.toFixed(0) + '°' : '—'}</td>
                 <td class="num metric">${lost}</td>
@@ -6017,7 +6683,7 @@ function drawTackList(filteredTacks, tracks, listMode) {
                 <td class="num">${t.meanTwaDelta != null ? (t.meanTwaDelta >= 0 ? '+' : '') + t.meanTwaDelta.toFixed(0) + '°' : '—'}</td>
             </tr>`;
         }).join('');
-        tbody.innerHTML = rows || '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:1rem">No teams in current selection.</td></tr>';
+        tbody.innerHTML = rows || '<tr><td colspan="10" style="text-align:center;color:var(--text-secondary);padding:1rem">No teams in current selection.</td></tr>';
         return;
     }
 
@@ -6359,14 +7025,16 @@ function _rtGatherProfilesForCurrentRace() {
     for (const [deviceId, boatData] of Object.entries(raceData.boats)) {
         const layer = boatLayers[deviceId];
         if (!layer?.data?.length) continue;
-        const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+        const team = boatData.boat?.boat_name || boatData.boat?.team_name || deviceId;
         const sailNumber = (boatData.boat?.sail_number != null ? String(boatData.boat.sail_number) : '').trim();
         const color = layer.color || '#888';
         // Assess IMU health ONCE per boat-recording (not per tack —
         // sensor failures are recording-wide). The flag propagates
         // through to every profile for this boat.
         const imuHealth = _rtAssessImuHealth(layer.imu);
-        const tacks = detectManeuversForLayer(layer).filter(m => m.type === 'tack');
+        const win = racingWindowMsFor(boatData.boat, layer);
+        const tacks = detectManeuversForLayer(layer, true)
+            .filter(m => m.type === 'tack' && m.tStart >= win.startMs && m.tStart <= win.endMs);
         for (const t of tacks) {
             const meta = {
                 deviceId, team, sailNumber, color, imuHealth,
@@ -6394,12 +7062,16 @@ async function _rtGatherProfilesForDay() {
             for (const [deviceId, boatData] of Object.entries(data.boats || {})) {
                 const gps = boatData?.sensors?.gps;
                 if (!gps?.length) continue;
-                const team = boatData.boat?.team_name || boatData.boat?.boat_name || deviceId;
+                const team = boatData.boat?.boat_name || boatData.boat?.team_name || deviceId;
                 const sailNumber = (boatData.boat?.sail_number != null ? String(boatData.boat.sail_number) : '').trim();
                 const color = boatLayers[deviceId]?.color || '#888';
                 const fakeLayer = { data: gps, imu: boatData?.sensors?.imu || [] };
                 const imuHealth = _rtAssessImuHealth(fakeLayer.imu);
-                const tacks = detectManeuversForLayer(fakeLayer).filter(m => m.type === 'tack');
+                const oStart = data.race?.start_time ? new Date(data.race.start_time).getTime() : -Infinity;
+                const oEnd = _parseTimeToMs(boatData.boat?.finish_time)
+                    ?? (data.race?.end_time ? new Date(data.race.end_time).getTime() : Infinity);
+                const tacks = detectManeuversForLayer(fakeLayer, false)
+                    .filter(m => m.type === 'tack' && m.tStart >= oStart && m.tStart <= oEnd);
                 for (const t of tacks) {
                     const meta = {
                         deviceId, team, sailNumber, color, imuHealth,
@@ -6964,6 +7636,9 @@ function updatePlaybackPosition() {
     // Update boat positions on map
     updateBoatPositions(currentTime);
 
+    // Update AIS traffic positions (map-only; never touches leaderboard)
+    updateAISPositions(currentTime);
+
     // Update leaderboard
     renderLeaderboard();
 }
@@ -6983,9 +7658,10 @@ function formatTime(seconds) {
 // is enough.
 function updateRegattaDocsBar(regattaId) {
     const slots = [
-        { id: 'regatta-doc-nor', field: 'nor_url' },
-        { id: 'regatta-doc-si',  field: 'si_url' },
-        { id: 'regatta-doc-web', field: 'website_url' },
+        // The Website / NOR / SI links live in the Learning menu.
+        { id: 'learning-doc-nor', field: 'nor_url' },
+        { id: 'learning-doc-si',  field: 'si_url' },
+        { id: 'learning-doc-web', field: 'website_url' },
     ];
     const regatta = regattaId ? (regattas || []).find(r => r.regatta_id === regattaId) : null;
     for (const slot of slots) {
@@ -7193,6 +7869,12 @@ async function loadRaceData(raceId) {
 
         console.log(`[Race] Total GPS points: ${totalGpsPoints}, boatLayers:`, Object.keys(boatLayers));
 
+        // AIS traffic overlay (non-participant vessels). Separate fetch,
+        // separate layer — fire-and-forget so it never blocks the race
+        // render; it self-clears the previous race and hides its own
+        // toggle when a race has no AIS data.
+        loadRaceAIS(raceId);
+
         // Initial framing: always zoom to start line + first mark on
         // race load — that's where the action begins regardless of
         // whether follow-mode is enabled. The follow-mode throttle is
@@ -7228,6 +7910,7 @@ async function loadRaceData(raceId) {
         // Render legend and leaderboard
         renderBoatLegend();
         renderLeaderboard();
+        renderClassStartJumps();
 
         // Apply the multi-class filter to the freshly-added map layers.
         // No-op for single-class races. Must run after addBoatTrack so
@@ -7286,10 +7969,11 @@ async function loadRaceData(raceId) {
                 const allManeuvers = [];
                 for (const [deviceId, layer] of Object.entries(boatLayers)) {
                     if (typeof detectManeuversForLayer !== 'function') break;
-                    const team = raceData?.boats?.[deviceId]?.boat?.team_name
-                              || raceData?.boats?.[deviceId]?.boat?.boat_name
-                              || deviceId;
-                    for (const m of detectManeuversForLayer(layer)) {
+                    const boat = raceData?.boats?.[deviceId]?.boat;
+                    const team = boat?.boat_name || boat?.team_name || deviceId;
+                    const win = racingWindowMsFor(boat, layer);
+                    for (const m of detectManeuversForLayer(layer, true)) {
+                        if (m.tStart < win.startMs || m.tStart > win.endMs) continue;
                         allManeuvers.push({ deviceId, team, ...m });
                     }
                 }
@@ -7604,19 +8288,123 @@ function populateRaceForm(race) {
     const fleetSection = document.getElementById('boat-assignments-section');
     const phrfSection = document.getElementById('phrf-roster-section');
     const gpsAttachSection = document.getElementById('gps-attach-section');
+    const classStartsSection = document.getElementById('class-starts-section');
     if (isHandicap) {
         if (fleetSection) fleetSection.style.display = 'none';
         if (phrfSection) phrfSection.style.display = '';
         if (gpsAttachSection) gpsAttachSection.style.display = '';
+        if (classStartsSection) classStartsSection.style.display = '';
+        renderClassStartsEditor(race.classes || []);
         renderPHRFRoster(race.boats || []);
         renderGPSAttachStrip();
     } else {
         if (fleetSection) fleetSection.style.display = '';
         if (phrfSection) phrfSection.style.display = 'none';
         if (gpsAttachSection) gpsAttachSection.style.display = 'none';
+        if (classStartsSection) classStartsSection.style.display = 'none';
         renderBoatAssignments(race.boats || []);
         renderFinishOrder(race.finish_order || [], race.boats || []);
     }
+}
+
+// Render the per-class jump chips in the timeline footer. One button
+// per class with a start_time; click → scrub the playback cursor to
+// that elapsed offset (and pause). Hidden when there's nothing useful
+// to jump to (0 or 1 class, or no start times yet).
+function renderClassStartJumps() {
+    const el = document.getElementById('class-start-jumps');
+    if (!el) return;
+    const classes = (currentRace?.classes || []).filter(c => c.start_time);
+    const raceStartMs = currentRace?.start_time
+        ? new Date(currentRace.start_time).getTime() : null;
+    if (classes.length < 2 || raceStartMs == null) {
+        el.hidden = true;
+        el.innerHTML = '';
+        return;
+    }
+    // Earliest start first — matches the order the on-water sequence ran.
+    const sorted = classes.slice().sort((a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+    el.hidden = false;
+    el.innerHTML = sorted.map(c => {
+        const ms = new Date(c.start_time).getTime();
+        const elapsedSec = Math.max(0, Math.round((ms - raceStartMs) / 1000));
+        const wall = new Date(ms).toLocaleTimeString('en-GB',
+            { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const name = c.name || c.id || '?';
+        return `<button type="button" class="class-start-jump"
+            data-elapsed="${elapsedSec}"
+            title="Jump playback to ${_attrEsc(name)} start (${_attrEsc(wall)})">
+            <span class="csj-arrow">→</span>
+            <span class="csj-name">${_attrEsc(name)}</span>
+            <span class="csj-time">${_attrEsc(wall)}</span>
+        </button>`;
+    }).join('');
+    el.querySelectorAll('.class-start-jump').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tSec = Number(btn.dataset.elapsed);
+            if (!Number.isFinite(tSec)) return;
+            if (isPlaying) togglePlayback();
+            window.seekTo(tSec);
+        });
+    });
+}
+
+// Per-class start-time editor — one row per class[*], time-of-day
+// picker bound to classes[i].start_time. Edits write back into
+// currentRace.classes so the existing classes-round-trip path in
+// getFormData() picks them up unchanged.
+function renderClassStartsEditor(classes) {
+    const container = document.getElementById('class-starts-list');
+    if (!container) return;
+    if (!classes.length) { container.innerHTML = ''; return; }
+    container.innerHTML = classes.map((c, idx) => {
+        const label = c.name || c.id || `Class ${idx + 1}`;
+        const local = _isoToLocalHMS(c.start_time);
+        return `
+            <div class="class-start-row" data-class-idx="${idx}">
+                <span class="class-start-label">${_attrEsc(label)}</span>
+                <input type="time" step="1"
+                       class="class-start-input"
+                       data-class-idx="${idx}"
+                       value="${_attrEsc(local)}">
+                <span class="class-start-hint">${_attrEsc(c.rating_type || c.rating_system || '')}</span>
+            </div>
+        `;
+    }).join('');
+    container.querySelectorAll('.class-start-input').forEach(inp => {
+        inp.addEventListener('change', () => {
+            const idx = Number(inp.dataset.classIdx);
+            const cls = currentRace?.classes?.[idx];
+            if (!cls) return;
+            const iso = _localHMSToIso(inp.value, cls.start_time);
+            if (iso) cls.start_time = iso;
+        });
+    });
+}
+
+// "2026-05-27T22:35:00Z" → "18:35:00" (browser local). Returns ''
+// if missing. Used by the class-starts editor to pre-fill <input type="time">.
+function _isoToLocalHMS(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// Convert HH:MM[:SS] from <input type="time"> back to an ISO UTC string,
+// keeping the existing date portion of prevIso (so we don't accidentally
+// move the race a day around when only the time-of-day changed).
+function _localHMSToIso(hms, prevIso) {
+    if (!hms) return null;
+    const parts = hms.split(':').map(Number);
+    if (parts.length < 2 || parts.some(p => !Number.isFinite(p))) return null;
+    const [h, m, s = 0] = parts;
+    const base = prevIso ? new Date(prevIso) : new Date();
+    if (!Number.isFinite(base.getTime())) return null;
+    base.setHours(h, m, s, 0);
+    return base.toISOString().replace('.000Z', 'Z');
 }
 
 // PHRF roster: one row per boat in the regatta sheet. Editable field
@@ -8043,7 +8831,13 @@ function getFormData() {
             // a session under no device.
             if (!v) {
                 boats[idx].session_path = null;
-                boats[idx].gpx_path = null;
+                // A by-boat-id GPX/VKX (the boat brought its own GPS) is
+                // NOT tied to any E-device, so an empty device dropdown
+                // must not drop it — otherwise own-GPS tracks get wiped on
+                // every re-edit. Only clear device-keyed GPX here.
+                if (!/\/by-boat-id\//.test(boats[idx].gpx_path || '')) {
+                    boats[idx].gpx_path = null;
+                }
             }
         });
         // Merge session/GPX picks from the GPS-attach strip back into
