@@ -131,6 +131,21 @@
                 </div>
             </div>
 
+            <!-- Learning dropdown: rule explainers + the regatta's own
+                 documents. The Website/NOR/SI links are populated from the
+                 loaded race's regatta by updateRegattaDocsBar(). -->
+            <div class="tb-dropdown" id="learning-dropdown">
+                <button id="btn-learning" class="btn-secondary" type="button"
+                        aria-haspopup="true" aria-expanded="false"
+                        title="Learn how scoring works · read the regatta docs">Learning ▾</button>
+                <div class="tb-menu" id="learning-menu" hidden role="menu">
+                    <button id="btn-orrez-explainer" class="tb-menu-item" role="menuitem" title="How ORR-EZ handicap scoring works, with this race's real numbers">ORR-EZ Explained</button>
+                    <a id="learning-doc-web" class="tb-menu-item" role="menuitem" target="_blank" rel="noopener" style="display:none">Regatta Website ↗</a>
+                    <a id="learning-doc-nor" class="tb-menu-item" role="menuitem" target="_blank" rel="noopener" style="display:none">Notice of Race (NOR) ↗</a>
+                    <a id="learning-doc-si"  class="tb-menu-item" role="menuitem" target="_blank" rel="noopener" style="display:none">Sailing Instructions (SI) ↗</a>
+                </div>
+            </div>
+
             <!-- Discuss Tactics dropdown: peer discussion or AI coach.
                  #btn-tactics opens the discussion drawer (existing
                  handler in setupTacticsDrawer). #btn-race-coach opens
@@ -145,14 +160,8 @@
                     <button id="btn-race-coach" class="tb-menu-item" role="menuitem" title="Ask Anthropic's Claude about this race">Coach AI (claude.ai)</button>
                 </div>
             </div>
-            <!-- Regatta-level public docs (NOR / SI / Website). Each
-                 anchor opens in a new tab; hidden when the loaded
-                 race's regatta has no link for that slot. -->
-            <span class="regatta-docs" id="regatta-docs">
-                <a id="regatta-doc-nor" class="btn-doc" target="_blank" rel="noopener" style="display:none" title="Notice of Race">NOR</a>
-                <a id="regatta-doc-si"  class="btn-doc" target="_blank" rel="noopener" style="display:none" title="Sailing Instructions">SI</a>
-                <a id="regatta-doc-web" class="btn-doc" target="_blank" rel="noopener" style="display:none" title="Regatta Website">Website</a>
-            </span>
+            <!-- Regatta docs (Website / NOR / SI) now live in the
+                 Learning menu — populated by updateRegattaDocsBar(). -->
         </div>
         <a href="./sessions.html" class="nav-link">Sessions</a>
         <a href="./session.html" class="nav-link">Timeline</a>
@@ -277,6 +286,19 @@
                         <option value="600">10 min</option>
                     </select>
                 </label>
+                <!-- TWD nudge. The wind source is often a NOAA station
+                     1+ km from the racecourse, and TWD shifts can lag
+                     in the interpolation; tidal drift also splits COG
+                     from heading. Dialing this in until the cluster
+                     sits on the dashed class-beat rays compensates. -->
+                <label class="polar-boat-select-wrap" title="Add a constant TWD offset to compensate for buoy-vs-racecourse wind bias">
+                    TWD ±
+                    <input type="number" id="polar-twd-nudge" min="-45" max="45" step="1" value="0" style="width:4.2em">
+                    °
+                    <button type="button" id="polar-twd-snap"
+                            class="polar-twd-snap"
+                            title="Auto-set nudge so the median close-hauled boat sits on the class opt_beat angle">snap</button>
+                </label>
                 <button class="polar-overlay-close" data-close-polar title="Close (Esc)">×</button>
             </div>
             <div class="polar-svg-wrap">
@@ -307,6 +329,19 @@
                 <button class="modal-close" data-close-modal="maneuver-modal">&times;</button>
             </div>
             <div class="modal-body" id="maneuver-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- ORR-EZ "Learning" explainer: how this race is scored, with its
+         real boats & numbers (rendered by renderOrrEzExplainer). -->
+    <div class="modal" id="orrez-modal" style="display: none;">
+        <div class="modal-backdrop" data-close-modal="orrez-modal"></div>
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2>ORR-EZ scoring — how this race is handicapped</h2>
+                <button class="modal-close" data-close-modal="orrez-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="orrez-modal-body"></div>
         </div>
     </div>
 
@@ -419,6 +454,10 @@
         <div class="timeline">
             <span class="time-label" id="time-current">00:00:00</span>
             <span class="time-wall" id="time-wall" title="Local wall-clock time at the cursor"></span>
+            <!-- Per-class start jump chips. Hidden until currentRace.classes is
+                 populated with start_times; one button per class scrubs the
+                 playback to that class's gun. -->
+            <div class="class-start-jumps" id="class-start-jumps" hidden></div>
             <input type="range" id="timeline-slider" min="0" max="1000" value="0" step="1">
             <span class="time-label" id="time-total">00:00:00</span>
             <button id="btn-share-moment" class="btn-share-moment"
@@ -484,6 +523,22 @@
                         <!-- Populated dynamically -->
                     </div>
                     <button id="btn-match-sessions" class="btn-secondary">Auto-Match Sessions</button>
+                </div>
+
+                <!-- Per-class start times (handicap multi-class races).
+                     Hidden for fleet races. Each row binds to a
+                     classes[*] entry; on save the edited time-of-day
+                     replaces classes[].start_time. -->
+                <div class="form-section" id="class-starts-section" style="display: none;">
+                    <h3>Class Starts</h3>
+                    <div class="form-hint">
+                        One start time per class. Drives the timeline
+                        jump-buttons, the start-review countdown, and
+                        the elapsed-time math for corrected scoring.
+                    </div>
+                    <div class="class-starts-list" id="class-starts-list">
+                        <!-- Populated dynamically from currentRace.classes -->
+                    </div>
                 </div>
 
                 <!-- PHRF Roster (handicap multi-class races). Hidden for

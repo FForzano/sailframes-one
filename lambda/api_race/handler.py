@@ -181,6 +181,14 @@ def lambda_handler(event, context):
                 pad_end = int(qs.get('pad_end', '0') or 0)
                 return get_race_data(race_id, sensors, pad_start, pad_end)
 
+            # AIS traffic (non-participant vessels) endpoint. Kept separate
+            # from /data per-boat sensors so it can NEVER enter the
+            # leaderboard/charts. Optional ?start=&end= clip the per-vessel
+            # tracks to a sub-window.
+            if race_id and path.endswith('/ais') and http_method == 'GET':
+                qs = event.get('queryStringParameters', {}) or {}
+                return get_race_ais(race_id, qs.get('start'), qs.get('end'))
+
             # CRUD operations
             if http_method == 'GET' and not race_id:
                 qs = event.get('queryStringParameters', {}) or {}
@@ -292,6 +300,17 @@ def create_regatta(body):
         # the structured {id, name, loa_m, bow_offset_m} object — stored
         # opaque so existing records keep working.
         'boat_class': body.get('boat_class', ''),
+        # Handicap rating system used by this regatta — "ORR-EZ", "PHRF",
+        # "One-Design", or other. Defaults each race's classes[*].rating_system
+        # at read time via _hydrate_rating_system(); a class with an explicit
+        # value overrides the regatta default.
+        'rating_system': body.get('rating_system') or 'ORR-EZ',
+        # Pre-start signal sequence length in minutes. 5 = RRS 26 (keelboat
+        # standard: warning at −5:00, prep at −4:00, prep down at −1:00,
+        # gun at 0). 3 = RRS Appendix S (dinghy / one-design rabbit-style).
+        # Hydrated into race.start_sequence_minutes when not set per-race;
+        # drives the start-review countdown anchor + horn pattern.
+        'start_sequence_minutes': body.get('start_sequence_minutes') or 5,
         'start_date': body.get('start_date', ''),
         'end_date': body.get('end_date', ''),
         # Optional public-facing docs the race dashboard surfaces as
@@ -320,7 +339,9 @@ def update_regatta(regatta_id, body):
             # boat_class is special-cased: it's allowed to be set to an
             # empty object or `null`, so we let it through with a
             # presence check (not the truthy `is not None`).
-            for key in ['name', 'venue', 'boat_class', 'start_date', 'end_date',
+            for key in ['name', 'venue', 'boat_class', 'rating_system',
+                        'start_sequence_minutes',
+                        'start_date', 'end_date',
                         'nor_url', 'si_url', 'website_url']:
                 if key in body:
                     regatta[key] = body[key]
@@ -535,6 +556,82 @@ def _upsert_boat_index(boat):
     save_json(BOATS_INDEX_KEY, data)
 
 
+def _hydrate_start_sequence(race_data):
+    """Fill in race.start_sequence_minutes from the parent regatta.
+    Per-race override wins; missing field on both = caller defaults
+    to 5 (RRS 26). Same lookup pattern as _hydrate_rating_system."""
+    if race_data.get('start_sequence_minutes'):
+        return race_data
+    regatta_id = race_data.get('regatta_id')
+    if not regatta_id:
+        return race_data
+    index = load_json(REGATTAS_INDEX_KEY) or {}
+    default = next(
+        (r.get('start_sequence_minutes')
+         for r in index.get('regattas', [])
+         if r.get('regatta_id') == regatta_id and r.get('start_sequence_minutes')),
+        None,
+    )
+    if default:
+        race_data['start_sequence_minutes'] = default
+    return race_data
+
+
+def _hydrate_rating_system(race_data):
+    """Fill in classes[*].rating_system from the parent regatta's
+    default. Per-class values (when explicitly set) always win. Lets
+    the regatta editor pick "ORR-EZ" / "PHRF" / etc. once and have
+    every race inherit it without per-class re-entry, while still
+    allowing a class to override when a regatta mixes systems."""
+    classes = race_data.get('classes') or []
+    if not classes:
+        return race_data
+    if all(c.get('rating_system') for c in classes):
+        return race_data
+    regatta_id = race_data.get('regatta_id')
+    if not regatta_id:
+        return race_data
+    index = load_json(REGATTAS_INDEX_KEY) or {}
+    default = next(
+        (r.get('rating_system') for r in index.get('regattas', [])
+         if r.get('regatta_id') == regatta_id and r.get('rating_system')),
+        None,
+    )
+    if not default:
+        return race_data
+    for c in classes:
+        if not c.get('rating_system'):
+            c['rating_system'] = default
+    return race_data
+
+
+def _hydrate_polars(race_data):
+    """Fill in boats[*].polar from the boats catalog index. Per-race
+    boat entries reference catalog rows by boat_id and don't bake in
+    the polar — that way a re-scrape of the cert (which updates the
+    catalog) shows up immediately on old races too. Mutates in place
+    and returns race_data. Race-level polars (if ever set) win over
+    the catalog version."""
+    boats = race_data.get('boats') or []
+    needed = {b.get('boat_id') for b in boats
+              if b.get('boat_id') and not b.get('polar')}
+    if not needed:
+        return race_data
+    index = load_json(BOATS_INDEX_KEY) or {}
+    polar_by_id = {
+        b.get('boat_id'): b.get('polar')
+        for b in index.get('boats', [])
+        if b.get('boat_id') in needed and b.get('polar')
+    }
+    if not polar_by_id:
+        return race_data
+    for b in boats:
+        bid = b.get('boat_id')
+        if bid and not b.get('polar') and polar_by_id.get(bid):
+            b['polar'] = polar_by_id[bid]
+    return race_data
+
+
 def upload_boat_photo(boat_id, slot, event):
     """Multipart upload → boats/<id>/photos/<slot>.<ext> with public-read.
     Slots: boat, skipper1, skipper2 (skipper kept as a legacy alias for
@@ -657,9 +754,9 @@ def get_boat_race_history(boat_id):
         for b in race.get('boats', []):
             if b.get('boat_id') != boat_id:
                 continue
-            # Determine PHRF place within class if we can. Otherwise
+            # Determine handicap place within class if we can. Otherwise
             # leave place=None and let the UI render '—'.
-            place = _compute_phrf_place(race, b)
+            place = _compute_handicap_place(race, b)
             out.append({
                 'race_id': race_id,
                 'name': race.get('name'),
@@ -677,9 +774,11 @@ def get_boat_race_history(boat_id):
     return response(200, {'boat_id': boat_id, 'races': out})
 
 
-def _compute_phrf_place(race, target_boat):
-    """Mirror the frontend's PHRF ranking so the history row can show
-    '3rd in B'. Returns 1-based int or None."""
+def _compute_handicap_place(race, target_boat):
+    """Mirror the frontend's handicap (TOT) ranking so the history row
+    can show '3rd in B'. Same elapsed×rating math whether the regatta
+    is scored ORR-EZ, PHRF, or anything else with a TOT multiplier.
+    Returns 1-based int or None."""
     if target_boat.get('finish_status') != 'FIN':
         return None
     if not target_boat.get('finish_time'):
@@ -822,6 +921,9 @@ def get_race(race_id):
     race_data = load_json(f'races/{race_id}/race.json')
     if not race_data:
         return response(404, {'error': f'Race not found: {race_id}'})
+    _hydrate_rating_system(race_data)
+    _hydrate_start_sequence(race_data)
+    _hydrate_polars(race_data)
     return response(200, race_data)
 
 
@@ -846,7 +948,7 @@ def create_race(body):
         # race page defaults to J/80 (24 m) when absent.
         'boat_class': body.get('boat_class'),
         # Multi-class handicap races: per-class start times + rating
-        # type, used to compute PHRF elapsed/corrected. When absent the
+        # type, used to compute elapsed/corrected. When absent the
         # race is single-start and the leaderboard ranks by GPS course
         # progress as before.
         'classes': body.get('classes', []),
@@ -897,6 +999,36 @@ def update_race(race_id, body):
     race_data = load_json(f'races/{race_id}/race.json')
     if not race_data:
         return response(404, {'error': f'Race not found: {race_id}'})
+
+    # Sticky own-GPS tracks (server-side guard). An uploaded by-boat-id
+    # GPX/VKX track is authoritative — the upload created the file and set
+    # the link. The race editor has NO affordance to clear a by-boat-id
+    # track, so any payload that drops the link is ALWAYS accidental (the
+    # classic case: a stale editor build nulls gpx_path for boats with no
+    # E-device — see getFormData's device-clear path). Restore it here so
+    # editing a race can never strip uploaded tracks, regardless of the
+    # client's JS version.
+    #
+    # We only restore when the incoming boat has NO GPS source at all
+    # (gpx_path + session_path + device_id all empty): that's the
+    # accidental-wipe signature. If the user intentionally switched the
+    # boat to a fleet session/device, those fields are set and we leave
+    # the payload untouched.
+    if isinstance(body.get('boats'), list):
+        prev_gpx = {
+            b.get('boat_id'): b.get('gpx_path')
+            for b in race_data.get('boats', [])
+            if b.get('boat_id') and '/by-boat-id/' in (b.get('gpx_path') or '')
+        }
+        for nb in body['boats']:
+            if not isinstance(nb, dict):
+                continue
+            bid = nb.get('boat_id')
+            if (bid and prev_gpx.get(bid)
+                    and not nb.get('gpx_path')
+                    and not nb.get('session_path')
+                    and not nb.get('device_id')):
+                nb['gpx_path'] = prev_gpx[bid]
 
     # NOTE: 'date' MUST stay in this allowlist. The dashboard groups
     # races by `race.date` for the day-picker dropdown, so a race whose
@@ -1005,7 +1137,7 @@ def get_race_data(race_id, sensors_str, pad_start_sec=0, pad_end_sec=0):
         if not track_key:
             continue
         # No GPS source at all → don't synthesize an empty entry. The
-        # PHRF leaderboard renders these from race.boats[] regardless.
+        # handicap leaderboard renders these from race.boats[] regardless.
         if not session_path and not gpx_path:
             continue
 
@@ -1101,6 +1233,43 @@ def _in_window(t, start, end):
         return s.replace('Z', '').split('.')[0] if s else ''
     tn, s, e = norm(t), norm(start), norm(end)
     return s <= tn <= e
+
+
+def get_race_ais(race_id, start=None, end=None):
+    """Return non-participant AIS vessel tracks for a race's map overlay.
+
+    Stored at races/{race_id}/ais/vessels.json (written by
+    scripts/fetch_ais_datalastic.py). Optional start/end ISO clip each
+    vessel's position array to a sub-window. Missing file -> empty list,
+    so the frontend simply hides the AIS toggle.
+
+    This data is deliberately a separate path from raceData.boats: AIS
+    vessels render on the map only and never feed the leaderboard,
+    rankings, or charts.
+    """
+    doc = load_json(f'races/{race_id}/ais/vessels.json')
+    if not doc or not doc.get('vessels'):
+        return response(200, {'vessels': [], 'source': None})
+
+    vessels = doc.get('vessels', [])
+    if start and end:
+        clipped = []
+        for v in vessels:
+            pts = [p for p in v.get('positions', []) if _in_window(p.get('t', ''), start, end)]
+            if pts:
+                vv = {k: val for k, val in v.items() if k != 'positions'}
+                vv['positions'] = pts
+                clipped.append(vv)
+        vessels = clipped
+
+    return response(200, {
+        'vessels': vessels,
+        'source': doc.get('source'),
+        'center': doc.get('center'),
+        'radius_nm': doc.get('radius_nm'),
+        'window': doc.get('window'),
+        'generated_at': doc.get('generated_at'),
+    })
 
 
 # --- GPX Upload ---

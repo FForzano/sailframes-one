@@ -740,6 +740,13 @@ Resources:
       RouteKey: 'GET /api/races/{race_id}/data'
       Target: !Sub 'integrations/${RaceIntegration}'
 
+  RaceAisRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ApiGateway
+      RouteKey: 'GET /api/races/{race_id}/ais'
+      Target: !Sub 'integrations/${RaceIntegration}'
+
   RaceMatchSessionsRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
