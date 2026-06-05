@@ -23,7 +23,7 @@ Briefing JSON schema:
     "race_name": "...",
     "race_date": "YYYY-MM-DD",
     "generated_at": "ISO-8601",
-    "generator_model": "claude-opus-4-7",
+    "generator_model": "claude-sonnet-4-6" (per-boat) | "claude-opus-4-7" (overview),
     "status": "draft" | "in_review" | "approved" | "exported",
     "reviewer_email": "...",
     "reviewer_started_at": "ISO-8601",
@@ -102,7 +102,23 @@ NOTIFY_TOPIC_ARN = os.environ.get(
     "arn:aws:sns:us-east-1:581790374840:sailframes-coach-notifications",
 )
 
-GENERATOR_MODEL = "claude-opus-4-7"
+# Model split (mirrors the chat box: Sonnet for routine work, Opus only
+# for the big synthesis report).
+#   • Per-boat briefings are routine, high-volume "here's how your crew
+#     did" reports — Sonnet handles them well at ~1/5 the per-token cost
+#     of Opus.
+#   • The whole-fleet RACE OVERVIEW is the one synthesis report where
+#     Opus's extra reasoning earns its price — same logic as the chat
+#     box's "Full debrief" chip.
+# Override per-deploy via env if the tradeoff ever shifts.
+OVERVIEW_MODEL = os.environ.get("OVERVIEW_MODEL", "claude-opus-4-7")
+BOAT_MODEL = os.environ.get("BOAT_MODEL", "claude-sonnet-4-6")
+# Back-compat alias (referenced in the schema docstring / older stored docs).
+GENERATOR_MODEL = OVERVIEW_MODEL
+
+
+def _model_for(is_overview):
+    return OVERVIEW_MODEL if is_overview else BOAT_MODEL
 
 # --- Long-lived session tokens ------------------------------------------
 # Google ID tokens expire after 1 hour, which is too aggressive for a
@@ -291,15 +307,17 @@ SUBMIT_BRIEFING_TOOL = {
 }
 
 
-GENERATE_PROMPT = """\
+# The prompts are split into a STABLE system block (style guide / task
+# framing — identical across every per-boat briefing, so it sits at the
+# front of the cacheable prefix) and a VOLATILE user block (boat identity
+# + race data). cache_control goes on the big user block, so regenerating
+# the same boat within the 5-min TTL reads the whole prefix from cache
+# instead of re-billing it. See `_generate_briefing`.
+GENERATE_SYSTEM = """\
 You are producing a written coach debrief for ONE boat in ONE race. The output
 will be reviewed by a human coach — they will edit, approve, or delete each
 paragraph before it is sent back to the skipper. Length cap: 4-6 paragraphs,
 ~100-140 words each, total under 700 words.
-
-Subject boat: {team_name} (device {device_id})
-Race: {race_name}
-Date: {race_date} (venue local time)
 
 Style:
   • Direct, concrete, second-person ('your start', 'you tacked at 14:32:08').
@@ -315,24 +333,27 @@ For each paragraph, propose an `image_hint` only if a specific visual would
 materially help the skipper see what you're describing. Use type='none'
 otherwise.
 
+Call submit_briefing with your paragraphs.
+"""
+
+GENERATE_USER = """\
+Subject boat: {team_name} (device {device_id})
+Race: {race_name}
+Date: {race_date} (venue local time)
+
 The race data (boats, GPS, IMU, wind, course, finishing positions, etc.):
 ```json
 {race_data_json}
 ```
-
-Call submit_briefing with your paragraphs.
 """
 
 
-OVERVIEW_PROMPT = """\
+OVERVIEW_SYSTEM = """\
 You are producing a written RACE OVERVIEW debrief — a single report covering
 the whole race across all boats, not one skipper. The output will be reviewed
 by a human coach, edited and approved paragraph-by-paragraph, and delivered
 to the whole fleet (or used by a coach as a teaching artifact). Length cap:
 4-6 paragraphs, ~100-140 words each, total under 700 words.
-
-Race: {race_name}
-Date: {race_date} (venue local time)
 
 Style:
   • Third-person, addressing the fleet collectively. Name the boats by team
@@ -351,12 +372,17 @@ For each paragraph, propose an `image_hint` only if a specific visual would
 help (typically `race_map_segment` framing the relevant time window of the
 race). Use type='none' otherwise.
 
+Call submit_briefing with your paragraphs.
+"""
+
+OVERVIEW_USER = """\
+Race: {race_name}
+Date: {race_date} (venue local time)
+
 The race data (boats, GPS, IMU, wind, course, finishing positions, etc.):
 ```json
 {race_data_json}
 ```
-
-Call submit_briefing with your paragraphs.
 """
 
 # Sentinel "device_id" for the race-wide overview report. Anything starting
@@ -375,49 +401,94 @@ def _fetch_race(race_id):
     return race, data
 
 
-def _compact_for_opus(race, data, focal_device_id=None):
-    """Down-sample sensor streams so the prompt stays under context limits.
+# Long-context premium pricing kicks in above 200K input tokens on both
+# Sonnet 4.6 and Opus 4.7 (≈2× the input price). Keep the serialized
+# race-data block comfortably under that so a briefing never trips the
+# premium tier — regardless of race length. We estimate tokens from the
+# JSON char count (dense numeric JSON runs ~3.5 chars/token; dividing by
+# 3.5 over-counts tokens a touch, which only makes us coarsen sooner —
+# the safe direction) and progressively halve the cadence until it fits.
+DATA_TOKEN_BUDGET = 140_000          # headroom under 200K for system + tool schema + output
+_CHARS_PER_TOKEN = 3.5
 
-    Per-boat briefing: focal boat at 1Hz GPS+IMU, others at 5s GPS only.
-    Race overview (focal_device_id=None): every boat at 2s GPS, no IMU.
-    """
 
-    def downsample(samples, step_sec):
-        if not samples:
-            return []
-        out = []
-        last_t = -1e18
-        for s in samples:
-            t = s.get("t")
-            if not t:
-                continue
-            tms = _iso_to_ms(t)
-            if tms is None:
-                continue
-            if tms - last_t >= step_sec * 1000:
-                out.append(s)
-                last_t = tms
-        return out
+def _downsample(samples, step_sec):
+    if not samples or not step_sec:
+        return []
+    out = []
+    last_t = -1e18
+    for s in samples:
+        t = s.get("t")
+        if not t:
+            continue
+        tms = _iso_to_ms(t)
+        if tms is None:
+            continue
+        if tms - last_t >= step_sec * 1000:
+            out.append(s)
+            last_t = tms
+    return out
 
+
+def _build_compact(race, data, focal_device_id, gps_focal_step, imu_focal_step, gps_other_step):
+    """One down-sample pass. The focal boat gets the fine cadence
+    (gps_focal_step + IMU); every other boat gets gps_other_step, no IMU.
+    Overview mode (focal_device_id=None): all boats at gps_other_step."""
     overview_mode = focal_device_id is None
     compact = {"race": race, "boats": {}}
     for dev, b in (data.get("boats") or {}).items():
         sensors = b.get("sensors") or {}
         focal = (not overview_mode) and (dev == focal_device_id)
-        if overview_mode:
-            gps_step, imu_step = 2, None
-        elif focal:
-            gps_step, imu_step = 1, 1
+        if focal:
+            gps_step, imu_step = gps_focal_step, imu_focal_step
         else:
-            gps_step, imu_step = 5, None
+            gps_step, imu_step = gps_other_step, None
         compact["boats"][dev] = {
             "boat": b.get("boat", {}),
             "sensors": {
-                "gps": downsample(sensors.get("gps") or [], gps_step),
-                "imu": downsample(sensors.get("imu") or [], imu_step) if imu_step else [],
+                "gps": _downsample(sensors.get("gps") or [], gps_step),
+                "imu": _downsample(sensors.get("imu") or [], imu_step) if imu_step else [],
                 "wind": sensors.get("wind") or [],
             },
         }
+    return compact
+
+
+def _compact_for_briefing(race, data, focal_device_id=None):
+    """Down-sample sensor streams for the prompt, then coarsen the cadence
+    if the serialized block exceeds DATA_TOKEN_BUDGET (keeping the request
+    under the 200K long-context premium threshold).
+
+    Base cadence — per-boat briefing: focal boat 1Hz GPS + 1Hz IMU, others
+    5s GPS only. Race overview (focal_device_id=None): every boat 2s GPS,
+    no IMU. Long races coarsen in 2× steps until they fit.
+    """
+    overview_mode = focal_device_id is None
+    if overview_mode:
+        gps_focal, imu_focal, gps_other = 2, None, 2
+    else:
+        gps_focal, imu_focal, gps_other = 1, 1, 5
+
+    char_budget = int(DATA_TOKEN_BUDGET * _CHARS_PER_TOKEN)
+    coarsen = 1
+    compact = None
+    for _ in range(7):                       # up to 64× coarsening
+        compact = _build_compact(
+            race, data, focal_device_id,
+            gps_focal * coarsen,
+            (imu_focal * coarsen) if imu_focal else None,
+            gps_other * coarsen,
+        )
+        size = len(json.dumps(compact, ensure_ascii=False))
+        if size <= char_budget:
+            if coarsen > 1:
+                print(f"[compact] coarsened {coarsen}x to ~{size // 1000}KB "
+                      f"(focal={focal_device_id})")
+            return compact
+        coarsen *= 2
+
+    print(f"[compact] WARNING: ~{len(json.dumps(compact)) // 1000}KB after "
+          f"{coarsen // 2}x coarsening (focal={focal_device_id})")
     return compact
 
 
@@ -641,19 +712,23 @@ def _shorten_email(email):
 def _generate_briefing(race_id, device_id):
     race, data = _fetch_race(race_id)
     is_overview = device_id == RACE_OVERVIEW_ID
+    model = _model_for(is_overview)
     if is_overview:
         team_name = "Race overview"
         # Compact every boat at moderate cadence — no focal subject.
-        compact = _compact_for_opus(race, data, focal_device_id=None)
+        compact = _compact_for_briefing(race, data, focal_device_id=None)
+        system_text = OVERVIEW_SYSTEM
+        user_template = OVERVIEW_USER
     else:
         boat = (data.get("boats") or {}).get(device_id, {}).get("boat", {}) or {}
         team_name = boat.get("team_name") or boat.get("boat_name") or device_id
-        compact = _compact_for_opus(race, data, focal_device_id=device_id)
+        compact = _compact_for_briefing(race, data, focal_device_id=device_id)
+        system_text = GENERATE_SYSTEM
+        user_template = GENERATE_USER
     race_name = race.get("name") or race_id
     race_date = race.get("date") or ""
 
-    prompt_template = OVERVIEW_PROMPT if is_overview else GENERATE_PROMPT
-    prompt = prompt_template.format(
+    user_text = user_template.format(
         team_name=team_name,
         device_id=device_id,
         race_name=race_name,
@@ -661,13 +736,41 @@ def _generate_briefing(race_id, device_id):
         race_data_json=json.dumps(compact, ensure_ascii=False),
     )
 
+    # Prompt caching: the stable style guide goes in `system`; the big
+    # per-boat race-data block is the cache breakpoint. Regenerating the
+    # same target within the 5-min TTL reads the whole prefix from cache
+    # (~0.1× input price) instead of re-billing it.
     response = _anthropic().messages.create(
-        model=GENERATOR_MODEL,
+        model=model,
         max_tokens=8000,
+        system=[{"type": "text", "text": system_text}],
         tools=[SUBMIT_BRIEFING_TOOL],
         tool_choice={"type": "tool", "name": "submit_briefing"},
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": user_text,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+            }
+        ],
     )
+
+    # Cache visibility in CloudWatch — confirms reads actually land
+    # (Opus was at 0% cache reads before this change).
+    u = getattr(response, "usage", None)
+    if u is not None:
+        print(
+            f"[generate] model={model} device={device_id} "
+            f"in={getattr(u, 'input_tokens', '?')} "
+            f"cache_write={getattr(u, 'cache_creation_input_tokens', 0)} "
+            f"cache_read={getattr(u, 'cache_read_input_tokens', 0)} "
+            f"out={getattr(u, 'output_tokens', '?')}"
+        )
 
     paragraphs_raw = None
     for block in response.content:
@@ -675,7 +778,7 @@ def _generate_briefing(race_id, device_id):
             paragraphs_raw = block.input.get("paragraphs", [])
             break
     if not paragraphs_raw:
-        raise RuntimeError("Opus did not call submit_briefing")
+        raise RuntimeError(f"{model} did not call submit_briefing")
 
     paragraphs = []
     for i, p in enumerate(paragraphs_raw, start=1):
@@ -702,7 +805,7 @@ def _generate_briefing(race_id, device_id):
         "race_name": race_name,
         "race_date": race_date,
         "generated_at": _now_iso(),
-        "generator_model": GENERATOR_MODEL,
+        "generator_model": model,
         "status": "draft",
         "reviewer_email": None,
         "reviewer_started_at": None,
