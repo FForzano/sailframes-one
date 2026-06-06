@@ -120,7 +120,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.06.05.04"
+#define FW_VERSION    "2026.06.05.05"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -260,9 +260,12 @@ struct GPSData {
   char date[8] = "010100";
   bool valid = false;
   bool newGGA = false;
-  // GST 1-sigma position error std-devs in metres (RTK Phase-2 accuracy readout).
-  // 0 until a GST sentence parses; ~1-2 cm at RTK FIXED, ~0.3-1 m at FLOAT.
+  // GST 1-sigma position error std-devs in metres (LG290P; 0 until GST parses).
   float lat_std = 0, lon_std = 0, alt_std = 0;
+  // Unified horizontal 1-sigma accuracy (m), 0 = no data. Set from GST
+  // (LG290P, = sqrt(lat_std^2+lon_std^2)) OR from $PQTMEPE EPE_2D (LC29HEA,
+  // which supports neither GST nor float GST). The whole system reads this.
+  float hacc_m = 0;
 } gps;
 
 struct IMUData {
@@ -1332,9 +1335,8 @@ static void meshBuildAndSendBoatState() {
   } else {
     p->hdop_x10 = 0;   // no data
   }
-  float hacc_m = sqrtf(gps.lat_std * gps.lat_std + gps.lon_std * gps.lon_std);
-  float hacc_mm = hacc_m * 1000.0f;
-  p->hacc_mm = (hacc_mm > 0.5f) ? (uint8_t)fminf(255.0f, lroundf(hacc_mm)) : 0;  // 0 = no GST
+  float hacc_mm = gps.hacc_m * 1000.0f;   // unified: GST (LG290P) or PQTMEPE (LC29HEA)
+  p->hacc_mm = (hacc_mm > 0.5f) ? (uint8_t)fminf(255.0f, lroundf(hacc_mm)) : 0;  // 0 = no data
 
   esp_err_t err = esp_now_send(MESH_BROADCAST_ADDR, buf, sizeof(buf));
   if (err == ESP_OK) {
@@ -1877,13 +1879,20 @@ void drawRcFleetPanel() {
 bool g_rcPrePanelShown = false;
 
 void drawRcPreRacePanel() {
+  // Sunlight-readable: BIG font-4 values, ALL BLACK (no color washes out on the
+  // white-background TFT). One line per boat: name · FIX · ACC · HDOP · SAT,
+  // under column headers. Partial per-row redraw on change. Fix state is read
+  // from the text (FIX/FLT/---), not color.
   static uint32_t prevSender[MESH_PEER_MAX];
-  static int8_t   prevQ[MESH_PEER_MAX], prevLink[MESH_PEER_MAX];
+  static int8_t   prevQ[MESH_PEER_MAX];
   static int      prevSat[MESH_PEER_MAX], prevHdop[MESH_PEER_MAX], prevHacc[MESH_PEER_MAX];
-  static int      prevConn = -1, prevFixed = -1, prevBaseSat = -1;
+  static int      prevConn = -1, prevFixed = -1;
+  static int      prevBaseSat = -1, prevBaseHdop = -1, prevBaseHacc = -1;
   static int8_t   prevBaseReady = -1;
 
-  unsigned long now = millis();
+  const int CX_NAME = 8, CX_FIX = 76, CX_ACC = 146, CX_HDOP = 234, CX_SAT = 288;
+  const int HDR_Y = 46, DIV_Y = 64, ROW0 = 70, rowH = 48;
+
   int conn = g_mesh_peer_count, fixed = 0;
   for (int i = 0; i < g_mesh_peer_count; i++)
     if (g_mesh_peers[i].fix_quality == 4) fixed++;
@@ -1892,72 +1901,74 @@ void drawRcPreRacePanel() {
   // Static layout — repaint on first show or when the peer COUNT changes.
   if (!g_rcPrePanelShown || conn != prevConn) {
     g_rcPrePanelShown = true;
-    prevConn = -999; prevFixed = -999; prevBaseSat = -1; prevBaseReady = -1;
+    prevConn = -999; prevFixed = -999;
+    prevBaseSat = -1; prevBaseHdop = -1; prevBaseHacc = -1; prevBaseReady = -1;
     for (int i = 0; i < MESH_PEER_MAX; i++) {
-      prevSender[i]=0; prevQ[i]=-2; prevSat[i]=-1; prevLink[i]=-2; prevHdop[i]=-1; prevHacc[i]=-1;
+      prevSender[i]=0; prevQ[i]=-2; prevSat[i]=-1; prevHdop[i]=-1; prevHacc[i]=-1;
     }
     tft.fillScreen(COLOR_BG);
     tft.fillRect(0, 0, SCREEN_WIDTH, 34, TFT_BLACK);
     tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.setTextDatum(TL_DATUM);
     tft.drawString("RC PRE-RACE", 6, 8, 4);
-    tft.drawFastHLine(0, 92, SCREEN_WIDTH, COLOR_DIVIDER);
+    tft.setTextColor(COLOR_TEXT, COLOR_BG); tft.setTextDatum(TL_DATUM);
+    tft.drawString("BOAT", CX_NAME, HDR_Y, 2);
+    tft.drawString("ST",   CX_FIX,  HDR_Y, 2);
+    tft.drawString("ACC",  CX_ACC,  HDR_Y, 2);
+    tft.drawString("HDOP", CX_HDOP, HDR_Y, 2);
+    tft.drawString("SAT",  CX_SAT,  HDR_Y, 2);
+    tft.drawFastHLine(0, DIV_Y, SCREEN_WIDTH, COLOR_DIVIDER);
   }
 
-  // Header right: "<fixed>/<connected> FIX" readiness gauge (green when all fixed).
+  // Header right: "<fixed>/<connected> FIX" readiness gauge (white on black bar).
   if (conn != prevConn || fixed != prevFixed) {
     prevConn = conn; prevFixed = fixed;
     tft.fillRect(168, 0, SCREEN_WIDTH - 168, 34, TFT_BLACK);
-    tft.setTextColor((conn > 0 && fixed == conn) ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
-    tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK); tft.setTextDatum(TR_DATUM);
     char hb[20]; snprintf(hb, sizeof(hb), "%d/%d FIX", fixed, conn);
     tft.drawString(hb, SCREEN_WIDTH - 6, 8, 4);
   }
 
-  // This base's own status line (y 44-88). (Base has no GST accuracy — it's the
-  // frame origin — so just sat + READY/SURVEY.)
-  if (baseReady != prevBaseReady || gps.satellites != prevBaseSat) {
-    prevBaseReady = baseReady; prevBaseSat = gps.satellites;
-    tft.fillRect(0, 44, SCREEN_WIDTH, 46, COLOR_BG);
-    tft.setTextDatum(TL_DATUM); tft.setTextSize(1);
-    tft.setTextColor(COLOR_LABEL, COLOR_BG); tft.drawString("BASE", 8, 52, 4);
-    char bs[16]; snprintf(bs, sizeof(bs), "sat %d", gps.satellites);
-    tft.setTextColor(COLOR_TEXT, COLOR_BG); tft.drawString(bs, 110, 52, 4);
-    tft.setTextColor(baseReady ? COLOR_GOOD : TFT_ORANGE, COLOR_BG);
-    tft.drawString(baseReady ? "READY" : "SURVEY", 218, 52, 4);
+  // BASE row (row 0) — this boat's own status in the same columns: ST=RDY/SVY,
+  // ACC (gps.hacc_m), HDOP (gps.hdop), SAT (gps.satellites).
+  int bHd = (gps.valid && gps.hdop > 0.1f && gps.hdop < 25.5f) ? (int)lroundf(gps.hdop * 10) : 0;
+  int bHa = (gps.hacc_m > 0.0005f) ? (int)fminf(255.0f, lroundf(gps.hacc_m * 1000)) : 0;
+  if (baseReady != prevBaseReady || gps.satellites != prevBaseSat ||
+      bHd != prevBaseHdop || bHa != prevBaseHacc) {
+    prevBaseReady = baseReady; prevBaseSat = gps.satellites; prevBaseHdop = bHd; prevBaseHacc = bHa;
+    int y = ROW0;
+    tft.fillRect(0, y, SCREEN_WIDTH, rowH - 4, COLOR_BG);
+    tft.setTextSize(1); tft.setTextDatum(TL_DATUM); tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.drawString("BASE", CX_NAME, y + 4, 4);
+    tft.drawString(baseReady ? "RDY" : "SVY", CX_FIX, y + 4, 4);
+    char a[12], h[8], s[6];
+    if (bHa > 0) snprintf(a, sizeof(a), "%.1fcm", bHa / 10.0); else strcpy(a, "--");
+    if (bHd > 0) snprintf(h, sizeof(h), "%.1f", bHd / 10.0);   else strcpy(h, "--");
+    snprintf(s, sizeof(s), "%d", gps.satellites);
+    tft.drawString(a, CX_ACC,  y + 4, 4);
+    tft.drawString(h, CX_HDOP, y + 4, 4);
+    tft.drawString(s, CX_SAT,  y + 4, 4);
   }
 
-  // Per-boat rows — two lines each: line1 = name + fix (big); line2 = acc/hdop/
-  // sat/link (small). hdop/hacc come from the peer's broadcast (0 = no data → "--").
-  const int rowH = 62, y0 = 98;
-  int maxRows = (SCREEN_HEIGHT - y0) / rowH;
+  // Peer rows (below the BASE row) — name · FIX · ACC · HDOP · SAT, big + black.
+  int maxRows = (SCREEN_HEIGHT - (ROW0 + rowH)) / rowH;
   for (int i = 0; i < g_mesh_peer_count && i < maxRows; i++) {
     const MeshPeerState& p = g_mesh_peers[i];
     int q = p.fix_quality, sat = p.sat_count, hd = p.hdop_x10, ha = p.hacc_mm;
-    int8_t link = ((now - p.last_seen_ms) < 2500) ? 0 : 1;   // 0=OK 1=STALE
     if (p.sender_id == prevSender[i] && q == prevQ[i] && sat == prevSat[i] &&
-        link == prevLink[i] && hd == prevHdop[i] && ha == prevHacc[i]) continue;
-    prevSender[i]=p.sender_id; prevQ[i]=q; prevSat[i]=sat; prevLink[i]=link; prevHdop[i]=hd; prevHacc[i]=ha;
-    int y = y0 + i * rowH;
+        hd == prevHdop[i] && ha == prevHacc[i]) continue;
+    prevSender[i]=p.sender_id; prevQ[i]=q; prevSat[i]=sat; prevHdop[i]=hd; prevHacc[i]=ha;
+    int y = ROW0 + (i + 1) * rowH;
     tft.fillRect(0, y, SCREEN_WIDTH, rowH - 4, COLOR_BG);
-    // line 1: name (left) + fix (right, color-coded)
-    tft.setTextSize(1); tft.setTextDatum(TL_DATUM);
-    tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.drawString(boatNameForSender(p.sender_id), 8, y + 2, 4);
-    const char* fs = q==4?"FIX":q==5?"FLT":q==2?"DGP":q==1?"GPS":"---";
-    uint16_t fc = q==4 ? COLOR_GOOD : (q>=1 ? TFT_ORANGE : COLOR_ERROR);  // orange reads on white; yellow doesn't
-    tft.setTextDatum(TR_DATUM); tft.setTextColor(fc, COLOR_BG);
-    tft.drawString(fs, SCREEN_WIDTH - 8, y + 2, 4);
-    // line 2 (small): acc / hdop / sat / link
-    tft.setTextDatum(TL_DATUM); tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    char accs[16], hds[14], sts[12];
-    if (ha > 0) snprintf(accs, sizeof(accs), "acc %.1fcm", ha / 10.0); else strcpy(accs, "acc --");
-    if (hd > 0) snprintf(hds, sizeof(hds), "hdop %.1f", hd / 10.0);    else strcpy(hds, "hdop --");
-    snprintf(sts, sizeof(sts), "sat %d", sat);
-    tft.drawString(accs, 8,   y + 38, 2);
-    tft.drawString(hds,  128, y + 38, 2);
-    tft.drawString(sts,  210, y + 38, 2);
-    tft.setTextColor(link == 0 ? COLOR_GOOD : TFT_ORANGE, COLOR_BG);
-    tft.drawString(link == 0 ? "OK" : "..", 280, y + 38, 2);
+    tft.setTextSize(1); tft.setTextDatum(TL_DATUM); tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.drawString(boatNameForSender(p.sender_id), CX_NAME, y + 4, 4);
+    tft.drawString(q==4?"FIX":q==5?"FLT":q==2?"DGP":q==1?"GPS":"---", CX_FIX, y + 4, 4);
+    char a[12], h[8], s[6];
+    if (ha > 0) snprintf(a, sizeof(a), "%.1fcm", ha / 10.0); else strcpy(a, "--");
+    if (hd > 0) snprintf(h, sizeof(h), "%.1f", hd / 10.0);   else strcpy(h, "--");
+    snprintf(s, sizeof(s), "%d", sat);
+    tft.drawString(a, CX_ACC,  y + 4, 4);
+    tft.drawString(h, CX_HDOP, y + 4, 4);
+    tft.drawString(s, CX_SAT,  y + 4, 4);
   }
 }
 
@@ -2466,7 +2477,12 @@ void lg290pConfigRover() {
   configureLG290P();                       // unchanged: rover, 10 Hz, NMEA on (+save+restart)
   Serial.println("[GPS] Enabling RTK rover (PQTMCFGRTK,W,1,2,120) + GST accuracy...");
   sendPQTM("PQTMCFGRTK,W,1,2,120");        // DiffMode=Auto, RelMode=relative, 120 s diff-age
-  sendPQTM("PQTMCFGMSGRATE,W,GST,1");      // position error stats → cm accuracy in `rtk` cmd
+  // Accuracy output — enable BOTH so the SAME rover config works on either chip
+  // (this config also runs on LC29HEA boats left as hardware_platform=e1):
+  //   LG290P  -> GST (2-param form); LC29HEA NAKs it.
+  //   LC29HEA -> PQTMEPE (3-param form); LG290P NAKs it.
+  sendPQTM("PQTMCFGMSGRATE,W,GST,1");       // LG290P GST -> gps.hacc_m
+  sendPQTM("PQTMCFGMSGRATE,W,PQTMEPE,1,2"); // LC29HEA $PQTMEPE EPE_2D -> gps.hacc_m
   sendPQTM("PQTMSAVEPAR");
   delay(300);
 }
@@ -2489,6 +2505,9 @@ void lg290pConfigBase() {
   delay(200);
   sendPQTM("PQTMCFGMSGRATE,W,GGA,1");       // base mode auto-disables NMEA; RC still needs GGA
   sendPQTM("PQTMCFGMSGRATE,W,RMC,1");
+  sendPQTM("PQTMCFGMSGRATE,W,GSA,1");        // GSA -> base hdop for the RC panel
+  sendPQTM("PQTMCFGMSGRATE,W,GST,1");        // LG290P base accuracy -> gps.hacc_m
+  sendPQTM("PQTMCFGMSGRATE,W,PQTMEPE,1,2");  // (if base is ever LC29HEA) -> gps.hacc_m
   Serial.println("[GPS] LG290P base: MSM7 + 1006 + ephemeris @ 1 Hz");
 }
 
@@ -2502,11 +2521,12 @@ void lc29hConfigRover() {
   delay(200);
   sendPQTM("PAIR062,0,01");                 // enable GGA (sentence 0)
   delay(200);
+  sendPQTM("PQTMCFGMSGRATE,W,PQTMEPE,1,2"); // accuracy: LC29HEA $PQTMEPE EPE_2D -> gps.hacc_m
+  delay(200);                               // (LC29HEA supports neither GST nor float-GST)
   sendPQTM("PQTMSAVEPAR");
   delay(300);
-  // NOTE: RMC + GST ($PAIR062 sentence ids) for the B rover still need bench
-  // confirmation — GGA (fix quality) is sufficient for OCS; COG falls back to IMU;
-  // GST accuracy readout (E rover has it via PQTMCFGMSGRATE,W,GST,1) TODO for B.
+  // NOTE: RMC ($PAIR062 sentence id) for the B rover still needs bench
+  // confirmation — GGA (fix quality) is sufficient for OCS; COG falls back to IMU.
 }
 
 // B base (LC29HEA): bench-verified 2026-06-04. Base mode + survey-in + reboot,
@@ -2526,6 +2546,8 @@ void lc29hConfigBase() {
   sendPQTM("PAIR434,1"); delay(150);         // 1005 station position
   sendPQTM("PAIR436,1"); delay(150);         // ephemeris
   sendPQTM("PAIR062,0,01"); delay(150);      // GGA (base disables NMEA)
+  sendPQTM("PAIR062,2,01"); delay(150);      // GSA -> base hdop for the RC panel
+  sendPQTM("PQTMCFGMSGRATE,W,PQTMEPE,1,2"); delay(150);  // LC29HEA base accuracy -> gps.hacc_m
   Serial.println("[GPS] LC29HEA base: MSM7 + 1005 + ephemeris @ 1 Hz");
 }
 
@@ -2705,6 +2727,13 @@ void parseNMEA(const char* s) {
     if (getField(s, 6, f, sizeof(f))) { float v = atof(f); if (v >= 0 && v < 1000) gps.lat_std = v; }
     if (getField(s, 7, f, sizeof(f))) { float v = atof(f); if (v >= 0 && v < 1000) gps.lon_std = v; }
     if (getField(s, 8, f, sizeof(f))) { float v = atof(f); if (v >= 0 && v < 1000) gps.alt_std = v; }
+    gps.hacc_m = sqrtf(gps.lat_std * gps.lat_std + gps.lon_std * gps.lon_std);
+  } else if (strstr(s, "PQTMEPE")) {
+    // LC29HEA accuracy: $PQTMEPE,<ver>,<N>,<E>,<D>,<2D>,<3D>. Field 5 = horizontal
+    // (2D) error in metres. The LC29HEA supports neither GST nor float-GST, so
+    // this is its accuracy source (enabled via PQTMCFGMSGRATE,W,PQTMEPE,1,2).
+    char f[32];
+    if (getField(s, 5, f, sizeof(f))) { float v = atof(f); if (v >= 0 && v < 1000) gps.hacc_m = v; }
   }
 }
 
@@ -3505,8 +3534,8 @@ void logNav() {
   if (!navFile || !logging) return;
   sdWriting = true;
   unsigned long e = millis() - logStart;
-  // hacc = GST horizontal 1-sigma (m); 0 unless RTK rover w/ GST. ~cm at FIXED.
-  float hacc = sqrtf(gps.lat_std * gps.lat_std + gps.lon_std * gps.lon_std);
+  // hacc = horizontal 1-sigma (m); GST (LG290P) or PQTMEPE (LC29HEA); 0 = none.
+  float hacc = gps.hacc_m;
   navFile.printf("%lu,%s,%.10f,%.10f,%.3f,%.3f,%.2f,%d,%.2f,%d,%s,%.3f\n",
     e, gps.utc_time, gps.lat, gps.lon, gps.alt,
     gps.speed_kts, gps.course, gps.satellites, gps.hdop, gps.fix_quality, gps.date, hacc);
@@ -5285,14 +5314,12 @@ bool performOTAUpdate(bool manual) {
     }
   }
 
-  // OTA only on the home network. Hotspots have data caps and the
-  // 1.5 MB pull would chew through a phone plan; also avoids surprise
-  // updates when a boat associates with an unfamiliar AP.
-  if (strcmp(connectedSSID, HOME_WIFI_SSID) != 0) {
-    Serial.printf("[OTA] Refusing: only OTA on %s, currently on %s\n",
-                  HOME_WIFI_SSID, connectedSSID);
-    return false;
-  }
+  // OTA runs on ANY connected WiFi (SSID gate removed 2026-06-06 per request) —
+  // the fleet should pick up firmware wherever it gets online (yacht club,
+  // phone hotspot, home). Note: the ~1.5 MB pull will use hotspot data, and a
+  // boat associating with an unfamiliar AP may update there. The stall + 180 s
+  // deadline watchdogs (gotcha #22) still bound a bad download.
+  Serial.printf("[OTA] on %s — proceeding (any-WiFi OTA)\n", connectedSSID);
 
   // Claim the radio for OTA. Same gates the upload task uses:
   //  - pauseBLEForWiFi() stops in-flight NimBLE scans / wind client.
@@ -6537,10 +6564,8 @@ void processCommand(String cmd, bool fromTelnet) {
             roleName(g_role), roleIsBase() ? "base/produce" : "rover/consume", hwName(g_hw));
     tprintf("gps fix_quality=%d (4=RTK-FIXED 5=float 2=DGPS 1=GPS) sat=%d hdop=%.1f\n",
             gps.fix_quality, gps.satellites, gps.hdop);
-    float hAcc = sqrtf(gps.lat_std * gps.lat_std + gps.lon_std * gps.lon_std);
-    tprintf("accuracy(GST 1sigma): h=%.3f m  lat=%.3f lon=%.3f alt=%.3f m%s\n",
-            hAcc, gps.lat_std, gps.lon_std, gps.alt_std,
-            (gps.lat_std == 0 && gps.lon_std == 0) ? "  (no GST yet)" : "");
+    tprintf("accuracy: h=%.3f m (1sigma; GST=LG290P / PQTMEPE=LC29HEA)%s\n",
+            gps.hacc_m, (gps.hacc_m == 0) ? "  (no data yet)" : "");
     if (roleIsBase()) {
       tprintf("base: tx_msg_id=%u (frames fragmented+broadcast 2x)\n", (unsigned)g_rtcmTxMsgId);
     } else {
@@ -7452,7 +7477,7 @@ void uploadTaskFunc(void* param) {
               if (!wifiConnected) { g_uploadSection = "wifi-connect.ota-only"; connectWiFi(); }
               if (wifiConnected) {
                 g_uploadSection = "ota-only";
-                performOTAUpdate(false);   // body's SSID + version gates apply
+                performOTAUpdate(false);   // version gate only (any-WiFi OTA)
                 // Stage 3: piggyback fleet health snapshot on the same
                 // WiFi window. Once per boot — boats that idle on
                 // Home-IOT for hours don't need to spam status PUTs.
