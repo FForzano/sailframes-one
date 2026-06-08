@@ -120,7 +120,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.06.05.05"
+#define FW_VERSION    "2026.06.08.01"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -352,6 +352,7 @@ struct MeshPeerState {
     uint8_t  hdop_x10;             // RTK Phase-2: HDOP*10 from peer (0 = no data)
     uint8_t  hacc_mm;             // RTK Phase-2: GST horiz 1-sigma mm from peer (0 = no data)
     uint32_t last_seen_ms;
+    int8_t   last_rssi;            // ESP-NOW RX RSSI (dBm) of last packet — link-budget/range debug (0 = no data)
     uint32_t msg_count;
     uint16_t last_seq;
     // Stage 5 — RC-side OCS computation per peer.
@@ -1092,7 +1093,10 @@ void radioModeTransition(RadioMode target, const char* reason) {
 // identifier — stable across MAC changes) so the info pointer is
 // just ignored.
 static void meshOnReceive(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
-  (void)info;
+  // ESP-NOW RX RSSI (dBm) for link-budget / range debugging. Captured
+  // here, surfaced per-peer in the `mesh` command. Guard the pointer
+  // chain in case a core build doesn't populate rx_ctrl.
+  int8_t rx_rssi = (info && info->rx_ctrl) ? (int8_t)info->rx_ctrl->rssi : 0;
   if (len < (int)sizeof(MeshHeader)) {
     g_mesh_rx_dropped_bad_magic++;
     return;
@@ -1134,6 +1138,7 @@ static void meshOnReceive(const esp_now_recv_info_t* info, const uint8_t* data, 
     g_mesh_peers[idx].hdop_x10          = p->hdop_x10;   // 0 = no data
     g_mesh_peers[idx].hacc_mm           = p->hacc_mm;    // 0 = no data
     g_mesh_peers[idx].last_seen_ms      = millis();
+    g_mesh_peers[idx].last_rssi         = rx_rssi;
     g_mesh_peers[idx].last_seq          = h->seq;
     g_mesh_peers[idx].msg_count++;
   }
@@ -1267,6 +1272,17 @@ void meshInit() {
   // Re-enable STA mode here. This is idempotent if WiFi was already
   // up from a later connectWiFi().
   WiFi.mode(WIFI_STA);
+
+  // ESP-NOW range fixes (2026.06.08):
+  // 1) Disable modem power-save. Default STA power-save duty-cycles the
+  //    receiver, so it sleeps through broadcasts — at the link margin
+  //    this looks like a sharp short-range cliff (peers vanish past a
+  //    few metres). WIFI_PS_NONE keeps the RX always listening.
+  // 2) Pin max TX power for the ALWAYS-ON mesh. setTxPower was only
+  //    applied inside connectWiFi() (the upload window), so mesh-only
+  //    operation ran at the post-mode default. Make it explicit here.
+  WiFi.setSleep(false);                    // esp_wifi_set_ps(WIFI_PS_NONE)
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
   esp_err_t err = esp_now_init();
   if (err != ESP_OK) {
@@ -5074,6 +5090,7 @@ bool connectWiFi() {
     // BROWNOUT entries — if low-SoC devices start tripping that, dial
     // back to 17 dBm or add an SoC-conditional setting.
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    WiFi.setSleep(false);    // keep RX live for the always-on ESP-NOW mesh once the upload window ends
     WiFi.persistent(false);  // Don't save to flash
     WiFi.setAutoReconnect(false);
     // Pin to the strongest-BSSID + channel from the scan above. This
@@ -7008,10 +7025,11 @@ void processCommand(String cmd, bool fromTelnet) {
       unsigned long now = millis();
       for (int i = 0; i < g_mesh_peer_count; i++) {
         const MeshPeerState& p = g_mesh_peers[i];
-        tprintf("  peer 0x%08lx role=%u age=%lus msgs=%lu lat=%.7f lon=%.7f sog=%.1fkt cog=%d hdg.heel=%d\n",
+        tprintf("  peer 0x%08lx role=%u age=%lus rssi=%ddBm msgs=%lu lat=%.7f lon=%.7f sog=%.1fkt cog=%d hdg.heel=%d\n",
                 (unsigned long)p.sender_id,
                 (unsigned)p.unit_role,
                 (now - p.last_seen_ms) / 1000,
+                (int)p.last_rssi,
                 (unsigned long)p.msg_count,
                 p.last_lat_e7 / 1e7,
                 p.last_lon_e7 / 1e7,
