@@ -154,8 +154,13 @@
 
 #define GPS_BAUD      460800  // LG290P configured rate
 #define SERIAL_BAUD   115200
-#define SCREEN_WIDTH  320     // TFT portrait width
-#define SCREEN_HEIGHT 480     // TFT portrait height
+#ifdef BUILD_B1
+#define SCREEN_WIDTH  240     // B1: 2.8" ILI9341 portrait width
+#define SCREEN_HEIGHT 320     // B1: 2.8" ILI9341 portrait height
+#else
+#define SCREEN_WIDTH  320     // E: 3.5" ST7796 portrait width
+#define SCREEN_HEIGHT 480     // E: 3.5" ST7796 portrait height
+#endif
 #define BNO085_ADDR   0x4B    // GY-BNO08X breakout (ADO pin high)
 #define DPS310_ADDR   0x77    // Pressure/temperature sensor
 #define GPS_FIX_TIMEOUT_MS  300000
@@ -316,7 +321,11 @@ struct PressureData {
 // v2.0.0 foundation globals. Types live in v2_types.h (included at top
 // of file) so Arduino's auto-generated forward declarations can resolve
 // them.
+#ifdef BUILD_B1
+HardwarePlatform g_hw = HW_B1;   // B1 build default — a no-SD boot still uses the LC29H path
+#else
 HardwarePlatform g_hw = HW_E1;
+#endif
 UnitRole         g_role = ROLE_RACING_BOAT;
 RadioMode        g_radio_mode = MODE_BOOT;
 
@@ -401,7 +410,11 @@ struct Config {
   int stop_delay_sec = 180;
 
   // v2.0.0 foundation (SF_FIRMWARE_V2_SPEC.md Stage 1)
+#ifdef BUILD_B1
+  char hardware_platform[8] = "b1";       // "e1" or "b1" (B1 build default)
+#else
   char hardware_platform[8] = "e1";       // "e1" or "b1"
+#endif
   char unit_role[24]        = "racing_boat";
   int  config_version       = 0;          // bumped by cloud config sync (Stage 3)
   // RTK Phase-2 (docs/RTK_PHASE2_DESIGN.md). SD-config ONLY — deliberately NOT
@@ -2229,7 +2242,11 @@ void setup() {
   }
 
   // TFT Display - Initialize AFTER SD
+#ifdef BUILD_B1
+  Serial.println("[TFT] Initializing ILI9341V (B1 2.8\" 240x320)...");
+#else
   Serial.println("[TFT] Initializing ST7796U...");
+#endif
   // Backlight via PWM so we can dim during idle. Init at IDLE level —
   // updateBacklight() in the loop pushes to RECORDING when logging starts.
   // Core 3.x ledcAttach: one call attaches a pin with freq + resolution,
@@ -2238,10 +2255,19 @@ void setup() {
   ledcWrite(TFT_BL_PIN, TFT_BL_DUTY_IDLE);
   tft.init();
   tft.setRotation(2);  // Portrait orientation (180° from rotation 0)
+#ifdef BUILD_B1
+  // ILI9341 IPS: if colors look inverted on the bench, flip this to true.
+  tft.invertDisplay(false);
+#else
   tft.invertDisplay(true);  // Required for correct colors on this ST7796 panel
+#endif
   tft.fillScreen(COLOR_BG);
   oledOK = true;
+#ifdef BUILD_B1
+  Serial.println("[TFT] ILI9341V initialized (240x320 portrait)");
+#else
   Serial.println("[TFT] ST7796U initialized (320x480 portrait)");
+#endif
 
   // SD-card fault gate. If the card never came up, loadConfig() never ran
   // and config.boat_id is still its compile-time default ("E1"). Booting on
@@ -2254,6 +2280,16 @@ void setup() {
   // in the loop below still yields to the IDF idle task, keeping its
   // watchdog fed. Recovery is operator action: reseat the card + power-cycle.
   if (!sdOK) {
+#ifdef BUILD_B1
+    // B1.0 hardware has a dead microSD (J5 net→pad bug, fixed in v0.13). For
+    // bring-up, continue in DEGRADED mode instead of halting: no logging, the
+    // sentinel boat_id "UNCFG" (non-colliding), but TFT + GNSS + power latch all
+    // come up. The identity-impersonation risk the E gate below guards against
+    // does NOT apply — UNCFG never collides with a real boat. E build keeps the
+    // halt (this whole branch is compiled out without -DBUILD_B1).
+    Serial.println("[SD] B1 build: SD unavailable — continuing in DEGRADED mode "
+                   "(no logging, boat_id=UNCFG). v0.13 hardware fixes the SD.");
+#else
     tft.fillScreen(COLOR_BG);
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(COLOR_ERROR, COLOR_BG);
@@ -2273,6 +2309,7 @@ void setup() {
       Serial.println("[SD] HALTED: SD card failure — see TFT for contact info.");
       delay(5000);  // yields to idle task so the IDF idle WDT stays fed
     }
+#endif
   }
 
   // Splash screen - show device ID, domain, and firmware version
