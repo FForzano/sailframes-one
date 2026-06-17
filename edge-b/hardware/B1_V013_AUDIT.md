@@ -90,9 +90,12 @@ is real and on-disk: right edge steps in to X=170, Y≈92.5–121.3, co-located 
 - **JLC CPL rotations = physical polarity of every diode/LED/IC.** Netlist polarity ✓ ≠
   physical cathode ✓ (that's the CPL rotation). MUST verify every polarized part in JLC
   "Confirm Parts Placement" before fab — top cause of dead boards.
-- **GNSS RF path**: confirm a v0.12 board got an actual **satellite FIX** (not just NMEA),
-  to fully close the antenna→RF_IN / VDD_RF bias path (footprint pads 9/11 positions verified;
-  this is the empirical backstop).
+- **GNSS RF path**: ✅ **FIELD-VALIDATED 2026-06-17** on B1 hardware — open field, **40
+  satellites, HDOP 0.4, EPE accuracy 1.6 m** (autonomous). Confirms the antenna→RF_IN /
+  VDD_RF bias-tee + the custom 24-pin footprint work (footprint pads 9/11 positions were
+  already verified in the audit; this is the empirical backstop). Fix quality reads "GPS"
+  (not "SBAS") because the LC29HEA (EA variant) has no SBAS hardware — it's AA-only; the EA
+  reaches sub-metre precision via RTK corrections, not SBAS.
 
 ## Bottom line
 **Connectivity, U1 footprint, AND placement/edge-clearance: audited and clean.** Two pre-fab
