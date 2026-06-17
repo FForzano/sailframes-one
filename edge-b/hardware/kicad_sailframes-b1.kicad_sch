@@ -7977,7 +7977,7 @@
 	)
 	(wire
 		(pts
-			(xy 115.29 85.5) (xy 117.83 85.5)
+			(xy 87.63 85.09) (xy 90.17 85.09)
 		)
 		(stroke
 			(width 0)
@@ -8197,7 +8197,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.13 85.5) (xy 102.59 85.5)
+			(xy 77.47 85.09) (xy 74.93 85.09)
 		)
 		(stroke
 			(width 0)
@@ -9476,7 +9476,7 @@
 		(uuid "0b2d2a3f-35aa-429d-9638-280b9f3ba90f")
 	)
 	(label "MT3608_SW"
-		(at 117.83 85.5 0)
+		(at 90.17 85.09 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -10606,7 +10606,7 @@
 		(uuid "7b94b782-b561-4950-8312-67afb8e855c4")
 	)
 	(label "V5_UNSW"
-		(at 102.59 85.5 180)
+		(at 74.93 85.09 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -15694,10 +15694,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "9adff1b5-8d88-4236-925d-cd0edc4098c6")
 		(property "Reference" "Q_PWR1"
-			(at 227.33 168.91 0)
+			(at 231.902 166.624 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -15708,7 +15707,7 @@
 			)
 		)
 		(property "Value" "AO3401A"
-			(at 227.33 171.45 0)
+			(at 232.156 171.45 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -17327,7 +17326,7 @@
 	)
 	(symbol
 		(lib_id "B1_SS14:SS14")
-		(at 110.21 85.5 0)
+		(at 82.55 85.09 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -17335,10 +17334,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "cd6ebd02-bf11-4afe-b60d-813dfe33c795")
 		(property "Reference" "D9"
-			(at 114.02 84.23 0)
+			(at 81.788 81.28 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -17349,7 +17347,7 @@
 			)
 		)
 		(property "Value" "SS14"
-			(at 114.02 86.77 0)
+			(at 82.296 89.154 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -17360,7 +17358,7 @@
 			)
 		)
 		(property "Footprint" "Diode_SMD:D_SMA"
-			(at 110.21 85.5 0)
+			(at 82.55 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -17371,7 +17369,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 110.21 85.5 0)
+			(at 82.55 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -17382,7 +17380,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 110.21 85.5 0)
+			(at 82.55 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -17393,7 +17391,7 @@
 			)
 		)
 		(property "LCSC Part #" "C2480"
-			(at 0 0 0)
+			(at -27.66 -0.41 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

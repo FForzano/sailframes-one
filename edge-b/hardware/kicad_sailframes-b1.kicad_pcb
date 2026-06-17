@@ -8270,7 +8270,7 @@
 			)
 		)
 		(property "Value" "TP4056"
-			(at -19.35 -5.5 0)
+			(at -19.35 -6.5 0)
 			(layer "F.Fab")
 			(uuid "591bafca-2992-4fc7-8da2-187d4c5b6d8c")
 			(effects
