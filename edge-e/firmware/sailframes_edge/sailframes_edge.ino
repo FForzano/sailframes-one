@@ -138,7 +138,7 @@
 // CONFIGURATION
 // ============================================================
 // Firmware version: YYYY.MM.DD.N (date + daily build number)
-#define FW_VERSION    "2026.06.29.01"
+#define FW_VERSION    "2026.06.29.02"
 // v2.0.0 foundation: HW platform / unit role / radio mode skeleton.
 // 10 Hz GNSS + 10 Hz IMU are now baked-in firmware defaults (no longer
 // per-boat config knobs). config.txt holds per-boat / per-club state
@@ -3107,6 +3107,24 @@ void b1ParkedLoop() {
 void b1PowerTick() {
   unsigned long now = millis();
   g_b1QiPresent = b1ReadQiPresent();
+
+  // On the pad while recording = the sail is over and you've docked it. Stop
+  // the session (same as `stoprec`) so the stationary-upload path can ship it
+  // and the unit charges. Auto-start is speed-gated, so a stationary on-pad
+  // unit won't re-start. This is what makes "set it on the pad" mean
+  // stop+upload+charge for the sealed, button-less B unit.
+  if (g_b1QiPresent && logging) {
+    Serial.println("[B1PWR] on pad while recording — stopping session for upload.");
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(1000))) {
+      if (navFile)  { navFile.flush();  navFile.close(); }
+      if (imuFile)  { imuFile.flush();  imuFile.close(); }
+      if (windFile) { windFile.flush(); windFile.close(); }
+      if (presFile) { presFile.flush(); presFile.close(); }
+      xSemaphoreGive(sdMutex);
+    }
+    logging = false;
+    recState = REC_IDLE;
+  }
 
   // Trigger 1 — low battery while OFF the pad, sustained (ride out the sag from
   // a GNSS fix burst / TFT redraw). On the pad we're charging: cutoff ignored.
