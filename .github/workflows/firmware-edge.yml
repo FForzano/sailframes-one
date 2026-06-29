@@ -190,5 +190,7 @@ jobs:
             done
           }
 
+          # E fleet -> E binary.  B fleet -> B1 binary. Add new B units (B3, B4,
+          # ...) to the B list as they're provisioned with a boat_id.
           publish_variant "build/sailframes_edge_${V}.bin"    "firmware/sailframes_edge_${V}.bin"    E1 E2 E3 E4 E5 E6
-          publish_variant "build/sailframes_edge_b1_${V}.bin" "firmware/sailframes_edge_b1_${V}.bin" B1
+          publish_variant "build/sailframes_edge_b1_${V}.bin" "firmware/sailframes_edge_b1_${V}.bin" B1 B2
