@@ -40,7 +40,7 @@ def _is_not_found(exc: Exception) -> bool:
 
     if isinstance(exc, ClientError):
         code = exc.response.get("Error", {}).get("Code", "")
-        return code in ("404", "NoSuchKey", "NotFound")
+        return code in ("404", "NoSuchKey", "NotFound", "NoSuchBucket")
     return False
 
 
@@ -107,21 +107,31 @@ class ObjectBlobStore(BlobStore):
     def list_keys(self, prefix: str) -> list[str]:
         keys: list[str] = []
         paginator = self._s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for obj in page.get("Contents", []):
-                keys.append(obj["Key"])
+        try:
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    keys.append(obj["Key"])
+        except Exception as exc:
+            if _is_not_found(exc):
+                return keys
+            raise
         return keys
 
     def list_with_metadata(self, prefix: str) -> list[dict]:
         results: list[dict] = []
         paginator = self._s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-            for obj in page.get("Contents", []):
-                results.append({
-                    "key": obj["Key"],
-                    "size": obj["Size"],
-                    "last_modified": obj["LastModified"].isoformat(),
-                })
+        try:
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    results.append({
+                        "key": obj["Key"],
+                        "size": obj["Size"],
+                        "last_modified": obj["LastModified"].isoformat(),
+                    })
+        except Exception as exc:
+            if _is_not_found(exc):
+                return results
+            raise
         return results
 
     def open_stream(self, key: str) -> Tuple[Iterator[bytes], str, Optional[Any]]:

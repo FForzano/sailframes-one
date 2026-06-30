@@ -38,11 +38,7 @@ services:
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
       SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN}
       SAILFRAMES_ADMIN_BYPASS: "1"
-      # Switch the metadata backend on; the schema is created at startup.
       SAILFRAMES_METADATA_BACKEND: postgres
-      # Discrete credentials, not a concatenated DATABASE_URL: avoids holding
-      # the password in one plaintext connection-string token and lets
-      # SQLAlchemy URL-escape it (web/api/db/__init__.py builds the URL).
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-sailframes}
@@ -55,20 +51,16 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      minio:
-        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
 
-  # One-shot: create bucket, apply anonymous policies, register the
-  # ObjectCreated->webhook event on raw/*.csv. Exits when done.
   minio-init:
     image: minio/mc:latest
     depends_on:
       minio:
         condition: service_healthy
-      api:
-        condition: service_started
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
