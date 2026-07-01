@@ -26,12 +26,12 @@ import argparse
 import pathlib
 import sys
 
-# web/ on sys.path so ``import api...`` works regardless of CWD.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "web"))
+# Repo root on sys.path so ``import backend...`` works regardless of CWD.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
 def backfill(dry_run: bool = False) -> None:
-    from api.repositories import get_repos, select_metadata_backend
+    from backend.repositories import get_repos, select_metadata_backend
 
     repos = get_repos()
     print(f"Backend: {select_metadata_backend()}")

@@ -73,7 +73,7 @@ def run_migrations() -> None:
     from alembic import command
     from alembic.config import Config
 
-    api_dir = pathlib.Path(__file__).resolve().parent.parent  # web/api
+    api_dir = pathlib.Path(__file__).resolve().parent.parent  # backend
     cfg = Config(str(api_dir / "alembic.ini"))
     cfg.set_main_option("script_location", str(api_dir / "alembic"))
     command.upgrade(cfg, "head")

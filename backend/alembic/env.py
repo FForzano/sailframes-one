@@ -2,8 +2,8 @@
 
 Reuses the app's ``Base.metadata`` (so ``--autogenerate`` sees every table) and
 the app's ``_build_url()`` (so migrations use the exact same connection config
-as the running service). Puts ``web/`` on ``sys.path`` so ``import api...``
-works regardless of the CWD Alembic is invoked from.
+as the running service). Puts the repo root on ``sys.path`` so
+``import backend...`` works regardless of the CWD Alembic is invoked from.
 """
 
 import pathlib
@@ -13,12 +13,12 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-# web/ (parents: env.py -> alembic -> api -> web) on path for `import api...`.
+# Repo root on path for ``import backend...``.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from api.db.base import Base  # noqa: E402
-import api.db.models  # noqa: E402,F401  (registers all tables on Base.metadata)
-from api.db import _build_url  # noqa: E402
+from backend.db.base import Base  # noqa: E402
+import backend.db.models  # noqa: E402,F401  (registers all tables on Base.metadata)
+from backend.db import _build_url  # noqa: E402
 
 config = context.config
 if config.config_file_name is not None:

@@ -1,7 +1,7 @@
 """API request/response DTOs (Pydantic) for the SailFrames HTTP layer.
 
 These are the *wire* shapes accepted/returned by endpoints, kept separate from
-the storage-agnostic domain models in ``web/api/domain``. Endpoints translate
+the storage-agnostic domain models in ``backend/domain``. Endpoints translate
 between the two.
 """
 

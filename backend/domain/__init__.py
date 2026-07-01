@@ -4,7 +4,7 @@ These Pydantic models are the canonical in-memory representation of each
 entity. Endpoints and business logic work with *these* objects regardless of
 whether persistence is object storage (JSON) or Postgres — that is what keeps
 the logic single across backends. The repository layer
-(``web/api/repositories``) converts between these and the chosen backend.
+(``backend/repositories``) converts between these and the chosen backend.
 
 One module per aggregate; this package just re-exports them.
 """

@@ -1,7 +1,7 @@
 """FastAPI backend for SailFrames analysis dashboard.
 
 Composition root only: builds the app, wires middleware + the RBAC startup
-seed, includes every router from ``web/api/routers`` (one module per resource),
+seed, includes every router from ``backend/routers`` (one module per resource),
 and mounts the static frontend last. All endpoint logic lives in the router
 modules; shared HTTP helpers live in ``routers/_common.py``. Designed to run
 locally or behind API Gateway in AWS.
@@ -67,7 +67,7 @@ for _router in ALL_ROUTERS:
 
 # --- Static files (frontend) ---
 # Mounted LAST so the catch-all "/" does not shadow the API routes above.
-# Serves the web directory (contains race.html, index.html, assets/).
-web_dir = Path(__file__).parent.parent
+# Serves the legacy static web directory (race.html, index.html, assets/).
+web_dir = Path(__file__).resolve().parent.parent / "web"
 if web_dir.exists():
     app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="frontend")

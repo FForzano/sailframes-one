@@ -1,7 +1,7 @@
 """Repository interfaces for SailFrames structured ("small") data.
 
 Each repository persists one aggregate and speaks **domain objects**
-(``web/api/domain``), never dicts or ORM rows, so endpoints are identical
+(``backend/domain``), never dicts or ORM rows, so endpoints are identical
 across backends. Two implementations exist:
 
 - ``ObjectMetadataRepo`` (object_repo.py) — JSON in the blob store, preserving

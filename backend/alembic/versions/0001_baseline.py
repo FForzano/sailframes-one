@@ -13,7 +13,7 @@ every later phase's columns/tables from ``0001`` and the ``0001 -> 0002`` chain
 would break. Do NOT reintroduce ``create_all`` here.
 
 Bootstrapping an already-``create_all``'d DB with no data: run
-``alembic -c web/api/alembic.ini stamp head`` instead of ``upgrade``.
+``alembic -c backend/alembic.ini stamp head`` instead of ``upgrade``.
 
 Revision ID: 0001_baseline
 Revises:

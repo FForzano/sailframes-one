@@ -94,9 +94,14 @@ Planned top-level areas include:
 
 - `backend/`
 - `frontend/`
+- `workers/`
 - `docs/`
 - `examples/`
 - `scripts/`
+
+Current migration note:
+
+- `infrastructure/` remains temporary and is planned for removal only after backend/worker migration is complete.
 
 ## License
 

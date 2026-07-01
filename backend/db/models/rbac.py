@@ -2,7 +2,7 @@
 
 Full role-based access control: permissions are assigned to roles
 (``role_permissions``), roles are granted to users optionally scoped to a club
-(``user_roles.scope_club_id`` NULL = global). See ``web/api/auth`` for how
+(``user_roles.scope_club_id`` NULL = global). See ``backend/auth`` for how
 these are evaluated and seeded.
 """
 

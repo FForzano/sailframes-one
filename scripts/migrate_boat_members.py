@@ -26,9 +26,9 @@ import argparse
 import pathlib
 import sys
 
-# web/ on sys.path so ``import api...`` works regardless of CWD (mirrors
-# web/api/alembic/env.py).
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "web"))
+# Repo root on sys.path so ``import backend...`` works regardless of CWD
+# (mirrors backend/alembic/env.py usage).
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
 def _looks_like_email(value: str) -> bool:
@@ -52,8 +52,8 @@ def _skipper_email(entry) -> str | None:
 def migrate(dry_run: bool = False) -> None:
     from datetime import datetime, timezone
 
-    from api import domain
-    from api.repositories import get_repos, select_metadata_backend
+    from backend import domain
+    from backend.repositories import get_repos, select_metadata_backend
 
     repos = get_repos()
     now = datetime.now(timezone.utc).isoformat()

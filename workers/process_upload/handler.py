@@ -41,7 +41,7 @@ def _csv_reader(content):
 def _make_s3_client():
     """S3 client pointed at AWS S3 or, when SAILFRAMES_S3_ENDPOINT is set,
     a self-hosted MinIO (path-style addressing). Duplicated from
-    web/api/storage.py so the Lambda deployment stays self-contained."""
+    backend/storage so the worker can stay self-contained."""
     endpoint = os.environ.get('SAILFRAMES_S3_ENDPOINT')
     if not endpoint:
         return boto3.client('s3')

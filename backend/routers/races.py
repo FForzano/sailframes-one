@@ -8,6 +8,7 @@ day / regatta) goes through the repository layer.
 """
 
 import uuid
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
@@ -75,6 +76,19 @@ def _load_race_gps(race_data: dict) -> dict:
         if filtered:
             out[device_id] = filtered
     return out
+
+
+def _in_window(t: str, start: str, end: str) -> bool:
+    """Compare ISO timestamps defensively (ignores trailing Z / millis)."""
+    def _norm(value: str) -> str:
+        return (value or "").replace("Z", "").split(".")[0]
+
+    tn = _norm(t)
+    sn = _norm(start)
+    en = _norm(end)
+    if not (tn and sn and en):
+        return False
+    return sn <= tn <= en
 
 
 # --- Race CRUD ------------------------------------------------------------
@@ -199,6 +213,8 @@ def delete_race(race_id: str, request: Request):
 def get_race_data(
     race_id: str,
     sensors: str = Query("gps,imu,wind", description="Comma-separated sensors to load"),
+    pad_start: int = Query(0, ge=0, description="Seconds to extend before race start"),
+    pad_end: int = Query(0, ge=0, description="Seconds to extend after race end"),
 ):
     """
     Load time-aligned sensor data for all boats in a race.
@@ -212,6 +228,17 @@ def get_race_data(
 
     start_time = race_data["start_time"]
     end_time = race_data["end_time"]
+    filter_start = start_time
+    filter_end = end_time
+    if pad_start > 0 or pad_end > 0:
+        try:
+            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            filter_start = (start_dt - timedelta(seconds=pad_start)).isoformat().replace("+00:00", "Z")
+            filter_end = (end_dt + timedelta(seconds=pad_end)).isoformat().replace("+00:00", "Z")
+        except Exception:
+            filter_start = start_time
+            filter_end = end_time
     requested_sensors = [s.strip() for s in sensors.split(",")]
 
     boats_data = {}
@@ -234,7 +261,7 @@ def get_race_data(
                     if isinstance(data, list):
                         filtered = [
                             d for d in data
-                            if start_time <= d.get("t", "") <= end_time
+                            if _in_window(d.get("t", ""), filter_start, filter_end)
                         ]
                         boat_sensors[sensor] = filtered
                     else:
@@ -253,7 +280,7 @@ def get_race_data(
                 if isinstance(data, list):
                     filtered = [
                         d for d in data
-                        if start_time <= d.get("t", "") <= end_time
+                        if _in_window(d.get("t", ""), filter_start, filter_end)
                     ]
                     boat_sensors[sensor] = filtered
                 else:
@@ -279,6 +306,77 @@ def get_race_data(
             "start": start_time,
             "end": end_time,
         },
+    }
+
+
+@router.get("/{race_id}/gpx-status")
+def get_gpx_status(race_id: str):
+    """Return per-boat GPX import summary for debug and QA."""
+    race_data = get_race_dict(race_id)
+    if not race_data:
+        raise HTTPException(404, f"Race not found: {race_id}")
+
+    start_time = race_data.get("start_time", "")
+    end_time = race_data.get("end_time", "")
+    boats = []
+
+    for boat in race_data.get("boats", []):
+        device_id = boat.get("device_id")
+        if not device_id:
+            continue
+        gpx_path = boat.get("gpx_path")
+        entry = {"device_id": device_id, "gpx_path": gpx_path}
+        if not gpx_path:
+            entry["status"] = "no_gpx"
+            boats.append(entry)
+            continue
+
+        data = load_json_or_empty(gpx_path)
+        if not isinstance(data, list) or not data:
+            entry["status"] = "empty"
+            boats.append(entry)
+            continue
+
+        in_window = [d for d in data if _in_window(d.get("t", ""), start_time, end_time)]
+        entry.update({
+            "status": "ok",
+            "total_points": len(data),
+            "points_in_window": len(in_window),
+            "track_start": data[0].get("t"),
+            "track_end": data[-1].get("t"),
+            "race_window_start": start_time,
+            "race_window_end": end_time,
+        })
+        boats.append(entry)
+
+    return {"race_id": race_id, "boats": boats}
+
+
+@router.get("/{race_id}/ais")
+def get_race_ais(race_id: str, start: Optional[str] = None, end: Optional[str] = None):
+    """Return non-participant AIS vessel tracks for the race map overlay."""
+    doc = load_json_or_empty(f"races/{race_id}/ais/vessels.json")
+    if not doc or not doc.get("vessels"):
+        return {"vessels": [], "source": None}
+
+    vessels = doc.get("vessels", [])
+    if start and end:
+        clipped = []
+        for vessel in vessels:
+            points = [p for p in vessel.get("positions", []) if _in_window(p.get("t", ""), start, end)]
+            if points:
+                row = {k: v for k, v in vessel.items() if k != "positions"}
+                row["positions"] = points
+                clipped.append(row)
+        vessels = clipped
+
+    return {
+        "vessels": vessels,
+        "source": doc.get("source"),
+        "center": doc.get("center"),
+        "radius_nm": doc.get("radius_nm"),
+        "window": doc.get("window"),
+        "generated_at": doc.get("generated_at"),
     }
 
 
