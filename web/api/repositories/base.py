@@ -87,6 +87,51 @@ class SessionRepo(ABC):
         return session
 
 
+class UserRepo(ABC):
+    """Identity store. Password hashes never leave the repo on a ``User``
+    domain object — they are read only via ``get_password_hash_by_email`` for
+    login and written on ``create``."""
+
+    @abstractmethod
+    def list(self) -> list[domain.User]: ...
+    @abstractmethod
+    def get_by_id(self, user_id: int) -> Optional[domain.User]: ...
+    @abstractmethod
+    def get_by_email(self, email: str) -> Optional[domain.User]: ...
+    @abstractmethod
+    def get_password_hash_by_email(self, email: str) -> Optional[str]: ...
+    @abstractmethod
+    def create(self, user: domain.User, password_hash: Optional[str]) -> domain.User: ...
+
+
+class AuthTokenRepo(ABC):
+    """Refresh-token store for rotation + reuse detection."""
+
+    @abstractmethod
+    def create(self, token: domain.AuthRefreshToken) -> domain.AuthRefreshToken: ...
+    @abstractmethod
+    def get_by_hash(self, token_hash: str) -> Optional[domain.AuthRefreshToken]: ...
+    @abstractmethod
+    def revoke(self, token_id: int, revoked_at: str) -> None: ...
+    @abstractmethod
+    def revoke_family(self, family_id: str, revoked_at: str) -> None: ...
+
+
+class ClubRepo(ABC):
+    @abstractmethod
+    def list(self) -> list[domain.Club]: ...
+    @abstractmethod
+    def get(self, club_id: int) -> Optional[domain.Club]: ...
+    @abstractmethod
+    def save(self, club: domain.Club) -> domain.Club: ...
+    @abstractmethod
+    def add_member(self, club_id: int, member: domain.ClubMember) -> bool: ...
+    @abstractmethod
+    def set_member_status(self, club_id: int, user_id: int, status: str) -> bool: ...
+    @abstractmethod
+    def is_active_member(self, club_id: int, user_id: int) -> bool: ...
+
+
 class Repositories:
     """Facade bundling one repo per aggregate."""
 
@@ -97,9 +142,15 @@ class Repositories:
         races: RaceRepo,
         boats: BoatRepo,
         sessions: SessionRepo,
+        users: UserRepo,
+        auth_tokens: AuthTokenRepo,
+        clubs: ClubRepo,
     ):
         self.regattas = regattas
         self.racedays = racedays
         self.races = races
         self.boats = boats
         self.sessions = sessions
+        self.users = users
+        self.auth_tokens = auth_tokens
+        self.clubs = clubs

@@ -7,6 +7,16 @@ RACES_INDEX_KEY = "races/races.json"
 REGATTAS_INDEX_KEY = "regattas/regattas.json"
 RACEDAYS_INDEX_KEY = "racedays/racedays.json"
 
+# User-system entities (no-DB deploy). One index JSON per aggregate.
+USERS_INDEX_KEY = "meta/users.json"
+AUTH_TOKENS_INDEX_KEY = "meta/auth_tokens.json"
+CLUBS_INDEX_KEY = "meta/clubs.json"
+
+
+def next_int_id(items: list[dict], field: str = "id") -> int:
+    """Next autoincrement-style int id for a JSON index list."""
+    return max((int(it.get(field) or 0) for it in items), default=0) + 1
+
 
 def load_index(blob: BlobStore, key: str) -> dict:
     """Read an index JSON, tolerating missing/corrupt files as ``{}``."""

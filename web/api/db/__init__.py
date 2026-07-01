@@ -64,9 +64,29 @@ def get_sessionmaker():
     return _SessionLocal
 
 
+def run_migrations() -> None:
+    """Run Alembic ``upgrade head`` programmatically, using the packaged
+    ``alembic.ini`` (with an absolute ``script_location`` so CWD doesn't
+    matter). env.py builds the URL from the same env vars as the app."""
+    import pathlib
+
+    from alembic import command
+    from alembic.config import Config
+
+    api_dir = pathlib.Path(__file__).resolve().parent.parent  # web/api
+    cfg = Config(str(api_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(api_dir / "alembic"))
+    command.upgrade(cfg, "head")
+
+
 def init_db() -> None:
-    """Create all tables that don't yet exist."""
-    Base.metadata.create_all(get_engine())
+    """Provision the schema. Alembic-managed when ``SAILFRAMES_USE_ALEMBIC`` is
+    set (recommended once a DB carries data); otherwise ``create_all`` — fine
+    for fresh deployments and unchanged from prior behaviour."""
+    if os.environ.get("SAILFRAMES_USE_ALEMBIC"):
+        run_migrations()
+    else:
+        Base.metadata.create_all(get_engine())
 
 
-__all__ = ["Base", "get_engine", "get_sessionmaker", "init_db"]
+__all__ = ["Base", "get_engine", "get_sessionmaker", "init_db", "run_migrations"]

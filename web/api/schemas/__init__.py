@@ -14,6 +14,8 @@ from .race import (
     RaceCreateModel,
     RaceUpdateModel,
 )
+from .auth import RegisterModel, LoginModel
+from .club import ClubCreateModel, ClubInviteModel, ClubJoinModel
 
 __all__ = [
     "RegattaCreateModel",
@@ -25,4 +27,9 @@ __all__ = [
     "RaceBoatModel",
     "RaceCreateModel",
     "RaceUpdateModel",
+    "RegisterModel",
+    "LoginModel",
+    "ClubCreateModel",
+    "ClubInviteModel",
+    "ClubJoinModel",
 ]

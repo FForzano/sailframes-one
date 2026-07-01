@@ -18,6 +18,7 @@ in Postgres mode comes from a reverse-proxy-injected header
 (``SAILFRAMES_AUTH_EMAIL_HEADER``, default ``X-Auth-Email``).
 """
 
+import hmac
 import os
 from typing import Optional
 
@@ -25,6 +26,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import select
 
 from .cloudflare import cloudflare_admin
+from .tokens import ACCESS_COOKIE, CSRF_COOKIE, decode_access_token
 
 ADMIN_PERMISSION = "admin"
 
@@ -33,9 +35,69 @@ def _is_postgres() -> bool:
     return os.environ.get("SAILFRAMES_METADATA_BACKEND", "object").lower() == "postgres"
 
 
-def _identity_email(request: Request) -> Optional[str]:
+def _header_email(request: Request) -> Optional[str]:
     header = os.environ.get("SAILFRAMES_AUTH_EMAIL_HEADER", "X-Auth-Email")
     return request.headers.get(header)
+
+
+def current_user(request: Request):
+    """Resolve the authenticated user (a ``domain.User``) or ``None``.
+
+    Order: (1) access JWT from the ``sf_access`` cookie; (2) reverse-proxy
+    identity header (self-hosted behind an auth proxy). Reads through the user
+    repo, so it works on both metadata backends. Returns ``None`` for anonymous
+    callers — it does NOT raise; use ``require_user`` when auth is mandatory.
+    """
+    from ..repositories import get_repos
+
+    token = request.cookies.get(ACCESS_COOKIE)
+    if token:
+        uid = decode_access_token(token)
+        if uid is not None:
+            u = get_repos().users.get_by_id(uid)
+            if u is not None:
+                return u
+    email = _header_email(request)
+    if email:
+        return get_repos().users.get_by_email(email)
+    return None
+
+
+def require_user(request: Request):
+    """Like ``current_user`` but 401s when unauthenticated."""
+    u = current_user(request)
+    if u is None:
+        raise HTTPException(401, "Authentication required")
+    return u
+
+
+def verify_csrf(request: Request) -> None:
+    """Double-submit CSRF check, enforced only for cookie-authenticated
+    requests (ambient auth). Header-auth / server-to-server callers (no access
+    cookie) are exempt. Send ``X-SF-CSRF`` equal to the ``sf_csrf`` cookie on
+    every state-changing request."""
+    if not request.cookies.get(ACCESS_COOKIE):
+        return
+    header = request.headers.get("X-SF-CSRF")
+    cookie = request.cookies.get(CSRF_COOKIE)
+    if not header or not cookie or not hmac.compare_digest(header, cookie):
+        raise HTTPException(403, "CSRF check failed")
+
+
+def _identity_email(request: Request) -> Optional[str]:
+    """Email of the caller for RBAC checks: JWT access cookie first, then the
+    reverse-proxy identity header. Keeps ``_check_postgres`` JWT-aware without
+    changing its role/permission logic."""
+    token = request.cookies.get(ACCESS_COOKIE)
+    if token:
+        uid = decode_access_token(token)
+        if uid is not None:
+            from ..repositories import get_repos
+
+            u = get_repos().users.get_by_id(uid)
+            if u is not None:
+                return u.email
+    return _header_email(request)
 
 
 def _resolve_user(session, email: str):

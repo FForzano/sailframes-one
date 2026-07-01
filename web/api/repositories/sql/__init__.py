@@ -13,6 +13,9 @@ from .raceday_repo import SqlRaceDayRepo
 from .race_repo import SqlRaceRepo
 from .boat_repo import SqlBoatRepo
 from .session_repo import SqlSessionRepo
+from .user_repo import SqlUserRepo
+from .auth_token_repo import SqlAuthTokenRepo
+from .club_repo import SqlClubRepo
 
 
 def build_sql_repos(blob: BlobStore, data_prefix: str) -> Repositories:
@@ -24,6 +27,9 @@ def build_sql_repos(blob: BlobStore, data_prefix: str) -> Repositories:
         races=SqlRaceRepo(sf),
         boats=SqlBoatRepo(sf),
         sessions=SqlSessionRepo(sf, blob, data_prefix),
+        users=SqlUserRepo(sf),
+        auth_tokens=SqlAuthTokenRepo(sf),
+        clubs=SqlClubRepo(sf),
     )
 
 
@@ -34,4 +40,7 @@ __all__ = [
     "SqlRaceRepo",
     "SqlBoatRepo",
     "SqlSessionRepo",
+    "SqlUserRepo",
+    "SqlAuthTokenRepo",
+    "SqlClubRepo",
 ]

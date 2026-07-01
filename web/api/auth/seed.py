@@ -45,7 +45,6 @@ def seed_defaults(session_factory) -> None:
         PermissionORM,
         RoleORM,
         RolePermissionORM,
-        UserORM,
     )
 
     with session_factory() as s:
@@ -72,19 +71,32 @@ def seed_defaults(session_factory) -> None:
                 if pid not in existing:
                     s.add(RolePermissionORM(role_id=role.id, permission_id=pid))
 
-        # Optional bootstrap superadmin from env.
-        admin_email = os.environ.get("SAILFRAMES_SUPERADMIN_EMAIL")
-        admin_password = os.environ.get("SAILFRAMES_SUPERADMIN_PASSWORD")
-        if admin_email:
-            user = s.scalars(select(UserORM).where(UserORM.email == admin_email)).first()
-            if user is None:
-                s.add(UserORM(
-                    email=admin_email,
-                    password_hash=hash_password(admin_password) if admin_password else None,
-                    name="Superadmin",
-                    is_active=True,
-                    is_superadmin=True,
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                ))
-
         s.commit()
+
+
+def seed_superadmin(repos) -> None:
+    """Backend-agnostic bootstrap superadmin from env, via the user repo.
+
+    Runs on both metadata backends (the RBAC role/permission seed above is
+    Postgres-only, but a login identity must exist in object mode too).
+    Idempotent: no-op if the user already exists or no email is configured.
+    """
+    admin_email = os.environ.get("SAILFRAMES_SUPERADMIN_EMAIL")
+    if not admin_email:
+        return
+    admin_email = admin_email.strip().lower()
+    if repos.users.get_by_email(admin_email) is not None:
+        return
+    from .. import domain
+
+    admin_password = os.environ.get("SAILFRAMES_SUPERADMIN_PASSWORD")
+    repos.users.create(
+        domain.User(
+            email=admin_email,
+            name="Superadmin",
+            is_active=True,
+            is_superadmin=True,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        ),
+        hash_password(admin_password) if admin_password else None,
+    )

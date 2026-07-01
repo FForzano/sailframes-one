@@ -31,8 +31,13 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-def _seed_rbac():
-    """Seed default RBAC roles/permissions when using the Postgres backend."""
+def _seed():
+    """Seed the bootstrap superadmin (both backends) and, on Postgres, the
+    default RBAC roles/permissions."""
+    from .auth import seed_superadmin
+    from .repositories import get_repos
+
+    seed_superadmin(get_repos())
     if os.environ.get("SAILFRAMES_METADATA_BACKEND", "object").lower() == "postgres":
         from .auth import seed_defaults
         from .db import get_sessionmaker

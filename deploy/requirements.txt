@@ -14,3 +14,9 @@ pandas>=2.0
 # the default object backend, but harmless to install.
 sqlalchemy>=2.0
 psycopg[binary]>=3.1
+alembic>=1.13   # schema migrations (Postgres backend only)
+
+# Auth: Argon2id password hashing + JWT access tokens (native email/password
+# login). Used by both metadata backends.
+argon2-cffi>=23.1
+pyjwt>=2.8

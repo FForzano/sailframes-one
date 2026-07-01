@@ -8,14 +8,24 @@
 ``require_permission`` adds fine-grained, optionally club-scoped checks.
 """
 
-from .permissions import require_admin, require_permission
+from .permissions import (
+    require_admin,
+    require_permission,
+    current_user,
+    require_user,
+    verify_csrf,
+)
 from .passwords import hash_password, verify_password
-from .seed import seed_defaults
+from .seed import seed_defaults, seed_superadmin
 
 __all__ = [
     "require_admin",
     "require_permission",
+    "current_user",
+    "require_user",
+    "verify_csrf",
     "hash_password",
     "verify_password",
     "seed_defaults",
+    "seed_superadmin",
 ]

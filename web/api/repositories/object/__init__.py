@@ -10,6 +10,9 @@ from .raceday_repo import ObjectRaceDayRepo
 from .race_repo import ObjectRaceRepo
 from .boat_repo import ObjectBoatRepo
 from .session_repo import ObjectSessionRepo
+from .user_repo import ObjectUserRepo
+from .auth_token_repo import ObjectAuthTokenRepo
+from .club_repo import ObjectClubRepo
 
 
 def build_object_repos(blob: BlobStore, data_prefix: str) -> Repositories:
@@ -19,6 +22,9 @@ def build_object_repos(blob: BlobStore, data_prefix: str) -> Repositories:
         races=ObjectRaceRepo(blob),
         boats=ObjectBoatRepo(blob, data_prefix),
         sessions=ObjectSessionRepo(blob, data_prefix),
+        users=ObjectUserRepo(blob),
+        auth_tokens=ObjectAuthTokenRepo(blob),
+        clubs=ObjectClubRepo(blob),
     )
 
 
@@ -29,4 +35,7 @@ __all__ = [
     "ObjectRaceRepo",
     "ObjectBoatRepo",
     "ObjectSessionRepo",
+    "ObjectUserRepo",
+    "ObjectAuthTokenRepo",
+    "ObjectClubRepo",
 ]

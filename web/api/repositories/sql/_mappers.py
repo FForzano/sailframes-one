@@ -15,7 +15,56 @@ from ...db.models import (
     RaceResultORM,
     BoatORM,
     SessionORM,
+    UserORM,
+    ClubORM,
+    ClubMemberORM,
+    AuthRefreshTokenORM,
 )
+
+
+# --- User (password_hash intentionally NOT mapped onto the domain object) ---
+
+def user_to_domain(orm: UserORM) -> domain.User:
+    return domain.User(
+        id=orm.id,
+        email=orm.email,
+        name=orm.name,
+        is_active=orm.is_active,
+        is_superadmin=orm.is_superadmin,
+        created_at=orm.created_at,
+    )
+
+
+# --- Club (+ membership) ---
+
+def club_to_domain(orm: ClubORM) -> domain.Club:
+    return domain.Club(
+        id=orm.id,
+        name=orm.name,
+        owner_user_id=orm.owner_user_id,
+        default_session_visibility=orm.default_session_visibility or "private",
+        created_at=orm.created_at,
+        members=[
+            domain.ClubMember(user_id=m.user_id, status=m.status, joined_at=m.joined_at)
+            for m in orm.members
+        ],
+    )
+
+
+# --- AuthRefreshToken ---
+
+def token_to_domain(orm: AuthRefreshTokenORM) -> domain.AuthRefreshToken:
+    return domain.AuthRefreshToken(
+        id=orm.id,
+        user_id=orm.user_id,
+        token_hash=orm.token_hash,
+        family_id=orm.family_id,
+        prev_id=orm.prev_id,
+        issued_at=orm.issued_at,
+        expires_at=orm.expires_at,
+        revoked_at=orm.revoked_at,
+        user_agent=orm.user_agent,
+    )
 
 
 # --- Regatta ---

@@ -12,6 +12,8 @@ from .session import SessionORM
 from .rbac import (
     UserORM,
     ClubORM,
+    ClubMemberORM,
+    AuthRefreshTokenORM,
     RoleORM,
     PermissionORM,
     RolePermissionORM,
@@ -29,6 +31,8 @@ __all__ = [
     "SessionORM",
     "UserORM",
     "ClubORM",
+    "ClubMemberORM",
+    "AuthRefreshTokenORM",
     "RoleORM",
     "PermissionORM",
     "RolePermissionORM",

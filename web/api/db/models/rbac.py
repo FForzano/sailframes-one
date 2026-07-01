@@ -35,7 +35,51 @@ class ClubORM(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # Single owner (distinct from the club_admin RBAC role, of which there can
+    # be several). Nullable so pre-existing clubs / seeds don't require one.
+    owner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Inherited by sessions organised by this club (private|group|club|public).
+    default_session_visibility: Mapped[str] = mapped_column(String, default="private")
     created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    members: Mapped[list["ClubMemberORM"]] = relationship(
+        back_populates="club", cascade="all, delete-orphan"
+    )
+
+
+class ClubMemberORM(Base):
+    """Plain club membership used by the visibility filter — independent of the
+    RBAC roles. ``member`` (a role) grants permissions; this grants visibility."""
+
+    __tablename__ = "club_members"
+    __table_args__ = (UniqueConstraint("club_id", "user_id", name="uq_club_member"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String, default="active")  # invited | active
+    joined_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    club: Mapped["ClubORM"] = relationship(back_populates="members")
+
+
+class AuthRefreshTokenORM(Base):
+    """One row per issued refresh token. Rotation chains via family_id/prev_id;
+    only the hash of the opaque token is stored, never its plaintext value."""
+
+    __tablename__ = "auth_refresh_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    family_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    prev_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    issued_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    expires_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    revoked_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class RoleORM(Base):

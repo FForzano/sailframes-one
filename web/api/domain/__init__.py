@@ -16,6 +16,8 @@ from .race import Race, Mark, RaceBoat, StartFinishLine, RaceResult
 from .boat import Boat
 from .session import Session
 from .user import User
+from .auth_token import AuthRefreshToken
+from .club import Club, ClubMember
 
 __all__ = [
     "DomainModel",
@@ -29,4 +31,7 @@ __all__ = [
     "Boat",
     "Session",
     "User",
+    "AuthRefreshToken",
+    "Club",
+    "ClubMember",
 ]
