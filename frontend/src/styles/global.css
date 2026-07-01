@@ -1,0 +1,456 @@
+/* SailFrames frontend — global stylesheet.
+   Design tokens + the layout/nav/ui primitives the M0 shell needs. Intentionally
+   compact and utility-light: feature milestones add their own scoped styles.
+   The palette echoes the dashboard's dark-navy identity without copying it. */
+
+:root {
+  --sf-bg: #0b1f33;
+  --sf-bg-2: #10283f;
+  --sf-surface: #14324d;
+  --sf-surface-2: #1b3e5e;
+  --sf-border: #26506f;
+  --sf-text: #eaf2f8;
+  --sf-muted: #9fb6c9;
+  --sf-primary: #2f9be0;
+  --sf-primary-ink: #04263c;
+  --sf-danger: #e05a5a;
+  --sf-success: #3fbf7f;
+  --sf-warning: #e0b24a;
+  --sf-radius: 10px;
+  --sf-navbar-h: 60px;
+  --sf-actionbar-h: 62px;
+  --sf-sidebar-w: 240px;
+  --sf-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sf-font);
+  color: var(--sf-text);
+  background: var(--sf-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--sf-primary);
+  text-decoration: none;
+}
+
+.sf-muted {
+  color: var(--sf-muted);
+}
+
+/* ---------- Buttons ---------- */
+.sf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--sf-radius);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.sf-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.sf-btn--primary {
+  background: var(--sf-primary);
+  color: var(--sf-primary-ink);
+}
+.sf-btn--primary:hover:not(:disabled) {
+  background: #47abec;
+}
+.sf-btn--ghost {
+  background: transparent;
+  border-color: var(--sf-border);
+  color: var(--sf-text);
+}
+.sf-btn--ghost:hover:not(:disabled) {
+  background: var(--sf-surface);
+}
+.sf-btn--danger {
+  background: var(--sf-danger);
+  color: #fff;
+}
+
+/* ---------- Public layout (Navbar + Footer) ---------- */
+.sf-public {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.sf-publicmain {
+  flex: 1;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.sf-navbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  height: var(--sf-navbar-h);
+  padding: 0 1.25rem;
+  background: var(--sf-bg-2);
+  border-bottom: 1px solid var(--sf-border);
+}
+.sf-navbar__brand {
+  font-weight: 800;
+  font-size: 1.15rem;
+  color: var(--sf-text);
+}
+.sf-navbar__links {
+  display: flex;
+  gap: 1rem;
+  flex: 1;
+}
+.sf-navlink {
+  color: var(--sf-muted);
+  padding: 0.35rem 0.25rem;
+  border-bottom: 2px solid transparent;
+}
+.sf-navlink.active {
+  color: var(--sf-text);
+  border-bottom-color: var(--sf-primary);
+}
+
+.sf-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  color: var(--sf-muted);
+  font-size: 0.85rem;
+  border-top: 1px solid var(--sf-border);
+}
+
+/* ---------- App shell (Sidebar / ActionBar) ---------- */
+.sf-shell {
+  min-height: 100%;
+}
+.sf-shell--desktop {
+  display: grid;
+  grid-template-columns: var(--sf-sidebar-w) 1fr;
+}
+.sf-appmain {
+  padding: 1.5rem;
+  max-width: 1000px;
+}
+.sf-shell--compact .sf-appmain {
+  /* leave room for the fixed bottom ActionBar */
+  padding-bottom: calc(var(--sf-actionbar-h) + 1.5rem);
+}
+
+.sf-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  padding: 1rem 0.75rem;
+  background: var(--sf-bg-2);
+  border-right: 1px solid var(--sf-border);
+}
+.sf-sidebar__brand {
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--sf-text);
+  padding: 0.25rem 0.5rem 0.75rem;
+}
+.sf-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+.sf-sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: var(--sf-radius);
+  color: var(--sf-muted);
+}
+.sf-sidebar__link:hover {
+  background: var(--sf-surface);
+  color: var(--sf-text);
+}
+.sf-sidebar__link.active {
+  background: var(--sf-surface-2);
+  color: var(--sf-text);
+}
+.sf-sidebar__glyph {
+  width: 1.25rem;
+  text-align: center;
+}
+.sf-sidebar__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.5rem 0;
+  border-top: 1px solid var(--sf-border);
+}
+.sf-sidebar__user {
+  font-size: 0.85rem;
+  color: var(--sf-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-actionbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--sf-actionbar-h);
+  display: flex;
+  justify-content: space-around;
+  align-items: stretch;
+  background: var(--sf-bg-2);
+  border-top: 1px solid var(--sf-border);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 50;
+}
+.sf-actionbar__tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  color: var(--sf-muted);
+  font-size: 0.7rem;
+}
+.sf-actionbar__tab.active {
+  color: var(--sf-primary);
+}
+.sf-actionbar__glyph {
+  font-size: 1.15rem;
+}
+.sf-actionbar__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ---------- Cards / pages ---------- */
+.sf-page__title {
+  margin: 0 0 0.25rem;
+}
+.sf-card {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+.sf-card__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+/* ---------- Hero (Home) ---------- */
+.sf-hero {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+.sf-hero__title {
+  font-size: 2.5rem;
+  margin: 0 0 0.5rem;
+}
+.sf-hero__tagline {
+  color: var(--sf-muted);
+  font-size: 1.15rem;
+  margin: 0 auto 1.75rem;
+  max-width: 32rem;
+}
+.sf-hero__actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ---------- Auth forms ---------- */
+.sf-authpage {
+  display: flex;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+.sf-authform {
+  width: 100%;
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 1.5rem;
+}
+.sf-authform__title {
+  margin: 0;
+  font-size: 1.35rem;
+}
+.sf-authform__error {
+  margin: 0;
+  color: var(--sf-danger);
+  font-size: 0.9rem;
+}
+.sf-authform__alt {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--sf-muted);
+}
+
+/* ---------- Fields ---------- */
+.sf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.sf-field__label {
+  font-size: 0.85rem;
+  color: var(--sf-muted);
+}
+.sf-field__input {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  font: inherit;
+}
+.sf-field__input:focus {
+  outline: 2px solid var(--sf-primary);
+  outline-offset: 1px;
+}
+
+/* ---------- Dashboard ---------- */
+.sf-dash__roles {
+  margin-bottom: 1rem;
+}
+.sf-dash__label {
+  color: var(--sf-muted);
+}
+.sf-chip {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  margin: 0 0.25rem 0.25rem 0;
+  border-radius: 999px;
+  background: var(--sf-surface-2);
+  font-size: 0.8rem;
+}
+.sf-dash__stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+.sf-dash__stats li {
+  background: var(--sf-bg-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: var(--sf-muted);
+  font-size: 0.85rem;
+}
+.sf-dash__num {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--sf-text);
+}
+
+/* ---------- Not found ---------- */
+.sf-notfound {
+  text-align: center;
+  padding: 3rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+/* ---------- Spinner ---------- */
+.sf-spinner {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+}
+.sf-spinner--full {
+  min-height: 60vh;
+  align-items: center;
+}
+.sf-spinner__dot {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--sf-border);
+  border-top-color: var(--sf-primary);
+  border-radius: 50%;
+  animation: sf-spin 0.8s linear infinite;
+}
+@keyframes sf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Toasts ---------- */
+.sf-toasts {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 100;
+}
+.sf-toast {
+  border: 1px solid var(--sf-border);
+  border-left-width: 4px;
+  border-radius: var(--sf-radius);
+  background: var(--sf-surface);
+  color: var(--sf-text);
+  padding: 0.7rem 1rem;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  max-width: 22rem;
+}
+.sf-toast--success {
+  border-left-color: var(--sf-success);
+}
+.sf-toast--error {
+  border-left-color: var(--sf-danger);
+}
+.sf-toast--warning {
+  border-left-color: var(--sf-warning);
+}
+.sf-toast--info {
+  border-left-color: var(--sf-primary);
+}

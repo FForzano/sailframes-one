@@ -1,5 +1,31 @@
 # Frontend rewrite — Vite + React 18 + TypeScript (big-bang)
 
+## Status
+
+| Milestone | State | Notes |
+|---|---|---|
+| **M0 — Scaffold + auth + nav shell** | ✅ **done** (2026-07-01) | Vite+TS app at `frontend/`, providers, `api.ts`+CSRF+refresh, i18n (it/en), responsive MainContent/Navbar/Sidebar/ActionBar/Footer, route table, Login/Register, `RequireAuth`+guards, capability-aware Dashboard. Backend `GET /api/auth/capabilities` + CORS allow-list. `npm run build` (tsc + vite) green; dev server boots. |
+| M1 — Public browse | ⬜ pending | |
+| M2 — Personal area CRUD | ⬜ pending | |
+| M3 — Admin + events | ⬜ pending | |
+| M4 — Race replay dashboard | ⬜ pending | largest slice |
+| M5 — Coach fold-in | ⬜ pending | |
+| M6 — Deploy cutover | ⬜ pending | repoint static mount, delete `frontend/old/` |
+
+### Directory layout (repo reorganized 2026-07-01)
+
+The repo was flattened: what used to live under `web/` is now split.
+
+- **`backend/`** — FastAPI app (was `web/api/`). Run as `backend.main:app`.
+- **`frontend/`** — the **new** Vite+React+TS SPA (this is where we work; was
+  planned as `web/app/`). App source in `frontend/src/`, build to `frontend/dist/`.
+- **`frontend/old/`** — the **legacy** static site being refactored away (was
+  `web/` top level): `*.html`, `assets/`, `coach/`, `config.js`, and the
+  deprecated `frontend/` React stub (now `frontend/old/frontend/`). Deleted at M6.
+
+Path references below predate the move; read `web/app/`→`frontend/`,
+`web/api/`→`backend/`, and `web/<legacy>`→`frontend/old/<legacy>`.
+
 ## Context
 
 The SailFrames web frontend is ~11 static HTML pages of vanilla JS with **no build step**
@@ -97,9 +123,10 @@ Navbar): Home, Races browser, public Race dashboard, public Session, Fleet, BOM,
 - **Dev:** `vite dev` on :5173 proxying `/api` → FastAPI :8000; run backend with
   `SAILFRAMES_COOKIE_SECURE=0` so cookies set over http. Calls stay relative (`/api/...`) → first-party
   cookies; `sf_refresh` path `/api/auth` preserved through the proxy.
-- **Prod:** `vite build` → `web/app/dist`. Repoint `main.py` static mount (`web/api/main.py:58-60`) from
-  `web/` to `web/app/dist`. For the S3/CloudFront path, add a CloudFront `/api/*` behavior (no-cache,
-  forward `Cookie` + `X-SF-CSRF`) and SPA 403/404→`/index.html` fallback.
+- **Prod:** `vite build` → `frontend/dist`. Repoint `backend/main.py` static mount (currently
+  `web_dir = parent.parent / "web"`, ~L71-73 — that dir no longer exists post-move, so the mount is
+  silently skipped today) to `frontend/dist`. For the S3/CloudFront path, add a CloudFront `/api/*`
+  behavior (no-cache, forward `Cookie` + `X-SF-CSRF`) and SPA 403/404→`/index.html` fallback.
 - **`infrastructure/deploy.sh`:** `build_frontend` dir `frontend`→`app`; `dist_dir` →`web/app/dist`;
   remove the legacy `web/*.html` + `web/assets/` sync block and the `config.js` runtime shim (replace
   with build-time `VITE_API_BASE=/api`); invalidate `/*`.
@@ -125,11 +152,11 @@ ref); `boat-classes.js`→`utils/format.ts`+`types/boat.ts`.
 - **M4 — Race replay dashboard.** Sub-slice: (a) tracks+map, (b) charts+cursor, (c) playback+timeline,
   (d) leaderboard/VMG/laylines, (e) wind/polar overlays, (f) discussion+video.
 - **M5 — Coach fold-in.** Port `web/coach/*` → `pages/app/Coach.tsx` + `components/coach/*`.
-- **M6 — Deploy cutover.** Repoint static mount, update `deploy.sh`, add CloudFront `/api/*` behavior,
-  delete `web/frontend/`, `web/coach/`, legacy `*.html` + unused `assets/js/*`; invalidate `/*`.
+- **M6 — Deploy cutover.** Repoint static mount to `frontend/dist`, update `deploy.sh`, add CloudFront
+  `/api/*` behavior, delete the `frontend/old/` tree (legacy `*.html`, `coach/`, `assets/`, stub); invalidate `/*`.
 
 ## Verification
-Local: `SAILFRAMES_COOKIE_SECURE=0 … uvicorn web.api.main:app --port 8000` + `cd web/app && npm run dev`.
+Local: `SAILFRAMES_COOKIE_SECURE=0 … uvicorn backend.main:app --port 8000` + `cd frontend && npm run dev`.
 Confirm DevTools shows `sf_access`/`sf_refresh` (HttpOnly) + `sf_csrf` (readable); a mutation carries
 `X-SF-CSRF==sf_csrf`; deleting `sf_access` triggers exactly one `POST /api/auth/refresh` then a replay.
 Per-milestone smoke:
@@ -146,11 +173,13 @@ Per-milestone smoke:
   no 500s from removed assets.
 
 ## Key files
-- New: everything under `web/app/` (tree above).
-- Backend touch: `web/api/routers/auth.py`, `web/api/auth/permissions.py`, `web/api/schemas/auth.py`
-  (capabilities); `web/api/main.py` (static mount `:58-60`, CORS).
+- New: everything under `frontend/` (tree above; `frontend/src/`).
+- Backend touch (done for M0): `backend/routers/auth.py`, `backend/auth/permissions.py`
+  (`effective_capabilities`), `backend/auth/__init__.py` (export); `backend/main.py` (CORS allow-list
+  done; static mount repoint pending M6).
 - Infra: `infrastructure/deploy.sh` (`build_frontend`, `deploy_website`, drop `config.js` shim), CloudFront `/api/*`.
-- Delete at cutover: `web/frontend/`, `web/coach/`, `web/*.html`, unused `web/assets/js/*`, `web/config.js`.
+- Delete at cutover (M6): the whole `frontend/old/` tree (legacy `*.html`, `assets/`, `coach/`,
+  `config.js`, and the deprecated `frontend/old/frontend/` React stub).
 - Reference to mirror: `…/formandopercorsi-frontend/src/pages/MainContent.tsx`, `…/src/utils/{api.ts,IsAuth.tsx}`.
 - Vanilla to port: `web/assets/js/utils/time-sync.js`, `web/assets/js/components/{map-view,chart-panel,timeline,video-player}.js`, `web/assets/js/boat-classes.js`.
 

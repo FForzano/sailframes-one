@@ -1,0 +1,56 @@
+{
+  "nav": {
+    "home": "Home",
+    "races": "Races",
+    "fleet": "Fleet",
+    "dashboard": "Dashboard",
+    "mySessions": "My sessions",
+    "boats": "Boats",
+    "clubs": "Clubs",
+    "groups": "Groups",
+    "devices": "Devices",
+    "events": "Events",
+    "admin": "Admin",
+    "profile": "Profile",
+    "myArea": "My area"
+  },
+  "auth": {
+    "login": "Log in",
+    "register": "Sign up",
+    "logout": "Log out",
+    "email": "Email",
+    "password": "Password",
+    "name": "Name",
+    "pleaseWait": "Please wait…",
+    "noAccount": "No account yet?",
+    "haveAccount": "Already have an account?",
+    "genericError": "Something went wrong. Please try again."
+  },
+  "home": {
+    "title": "SailFrames",
+    "tagline": "10 Hz GNSS + IMU motion analytics for sailboat racing.",
+    "browseRaces": "Browse races",
+    "openMyArea": "Open my area",
+    "getStarted": "Get started"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Welcome back, {{name}}",
+    "capabilitiesTitle": "Your access",
+    "roles": "Roles",
+    "noRoles": "No special roles",
+    "clubsOwned": "Clubs owned",
+    "clubsMember": "Club memberships",
+    "groups": "Groups",
+    "boats": "Boats"
+  },
+  "common": {
+    "comingSoon": "Coming soon",
+    "comingSoonBody": "This area is being rebuilt as part of the frontend refactor."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "The page you were looking for does not exist.",
+    "back": "Back to home"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "nav": {
+    "home": "Home",
+    "races": "Regate",
+    "fleet": "Flotta",
+    "dashboard": "Dashboard",
+    "mySessions": "Le mie sessioni",
+    "boats": "Barche",
+    "clubs": "Club",
+    "groups": "Gruppi",
+    "devices": "Dispositivi",
+    "events": "Eventi",
+    "admin": "Admin",
+    "profile": "Profilo",
+    "myArea": "Area personale"
+  },
+  "auth": {
+    "login": "Accedi",
+    "register": "Registrati",
+    "logout": "Esci",
+    "email": "Email",
+    "password": "Password",
+    "name": "Nome",
+    "pleaseWait": "Attendere…",
+    "noAccount": "Non hai un account?",
+    "haveAccount": "Hai già un account?",
+    "genericError": "Qualcosa è andato storto. Riprova."
+  },
+  "home": {
+    "title": "SailFrames",
+    "tagline": "Analisi del moto a 10 Hz GNSS + IMU per la regata a vela.",
+    "browseRaces": "Esplora le regate",
+    "openMyArea": "Apri area personale",
+    "getStarted": "Inizia"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Bentornato, {{name}}",
+    "capabilitiesTitle": "I tuoi accessi",
+    "roles": "Ruoli",
+    "noRoles": "Nessun ruolo speciale",
+    "clubsOwned": "Club di proprietà",
+    "clubsMember": "Iscrizioni ai club",
+    "groups": "Gruppi",
+    "boats": "Barche"
+  },
+  "common": {
+    "comingSoon": "In arrivo",
+    "comingSoonBody": "Quest'area è in fase di ricostruzione nel refactor del frontend."
+  },
+  "notFound": {
+    "title": "Pagina non trovata",
+    "body": "La pagina che cercavi non esiste.",
+    "back": "Torna alla home"
+  }
+}
