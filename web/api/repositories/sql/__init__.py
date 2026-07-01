@@ -16,6 +16,7 @@ from .session_repo import SqlSessionRepo
 from .user_repo import SqlUserRepo
 from .auth_token_repo import SqlAuthTokenRepo
 from .club_repo import SqlClubRepo
+from .group_repo import SqlGroupRepo
 
 
 def build_sql_repos(blob: BlobStore, data_prefix: str) -> Repositories:
@@ -30,6 +31,7 @@ def build_sql_repos(blob: BlobStore, data_prefix: str) -> Repositories:
         users=SqlUserRepo(sf),
         auth_tokens=SqlAuthTokenRepo(sf),
         clubs=SqlClubRepo(sf),
+        groups=SqlGroupRepo(sf),
     )
 
 
@@ -43,4 +45,5 @@ __all__ = [
     "SqlUserRepo",
     "SqlAuthTokenRepo",
     "SqlClubRepo",
+    "SqlGroupRepo",
 ]

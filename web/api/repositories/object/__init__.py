@@ -13,6 +13,7 @@ from .session_repo import ObjectSessionRepo
 from .user_repo import ObjectUserRepo
 from .auth_token_repo import ObjectAuthTokenRepo
 from .club_repo import ObjectClubRepo
+from .group_repo import ObjectGroupRepo
 
 
 def build_object_repos(blob: BlobStore, data_prefix: str) -> Repositories:
@@ -25,6 +26,7 @@ def build_object_repos(blob: BlobStore, data_prefix: str) -> Repositories:
         users=ObjectUserRepo(blob),
         auth_tokens=ObjectAuthTokenRepo(blob),
         clubs=ObjectClubRepo(blob),
+        groups=ObjectGroupRepo(blob),
     )
 
 
@@ -38,4 +40,5 @@ __all__ = [
     "ObjectUserRepo",
     "ObjectAuthTokenRepo",
     "ObjectClubRepo",
+    "ObjectGroupRepo",
 ]

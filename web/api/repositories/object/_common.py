@@ -11,6 +11,7 @@ RACEDAYS_INDEX_KEY = "racedays/racedays.json"
 USERS_INDEX_KEY = "meta/users.json"
 AUTH_TOKENS_INDEX_KEY = "meta/auth_tokens.json"
 CLUBS_INDEX_KEY = "meta/clubs.json"
+GROUPS_INDEX_KEY = "meta/groups.json"
 
 
 def next_int_id(items: list[dict], field: str = "id") -> int:

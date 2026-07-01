@@ -16,6 +16,7 @@ from .race import (
 )
 from .auth import RegisterModel, LoginModel
 from .club import ClubCreateModel, ClubInviteModel, ClubJoinModel
+from .group import GroupCreateModel, GroupInviteModel, GroupJoinModel
 from .boat import BoatWriteModel, BoatMemberModel, BoatMemberRoleModel
 
 __all__ = [
@@ -33,6 +34,9 @@ __all__ = [
     "ClubCreateModel",
     "ClubInviteModel",
     "ClubJoinModel",
+    "GroupCreateModel",
+    "GroupInviteModel",
+    "GroupJoinModel",
     "BoatWriteModel",
     "BoatMemberModel",
     "BoatMemberRoleModel",

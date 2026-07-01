@@ -18,6 +18,7 @@ from .session import Session
 from .user import User
 from .auth_token import AuthRefreshToken
 from .club import Club, ClubMember
+from .group import Group, GroupMember
 
 __all__ = [
     "DomainModel",
@@ -35,4 +36,6 @@ __all__ = [
     "AuthRefreshToken",
     "Club",
     "ClubMember",
+    "Group",
+    "GroupMember",
 ]

@@ -8,6 +8,7 @@ from .regatta import RegattaORM
 from .raceday import RaceDayORM
 from .race import RaceORM, MarkORM, RaceBoatORM, RaceResultORM
 from .boat import BoatORM, BoatMemberORM
+from .group import GroupORM, GroupMemberORM
 from .session import SessionORM
 from .rbac import (
     UserORM,
@@ -29,6 +30,8 @@ __all__ = [
     "RaceResultORM",
     "BoatORM",
     "BoatMemberORM",
+    "GroupORM",
+    "GroupMemberORM",
     "SessionORM",
     "UserORM",
     "ClubORM",

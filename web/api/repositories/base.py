@@ -145,6 +145,27 @@ class ClubRepo(ABC):
     def is_active_member(self, club_id: int, user_id: int) -> bool: ...
 
 
+class GroupRepo(ABC):
+    """Free social groups (independent of clubs/boats). Membership carries a
+    ``role`` (admin|member) as well as a ``status`` (invited|active); ``admin``
+    membership — not a single owner column — grants management rights."""
+
+    @abstractmethod
+    def list(self) -> list[domain.Group]: ...
+    @abstractmethod
+    def get(self, group_id: int) -> Optional[domain.Group]: ...
+    @abstractmethod
+    def save(self, group: domain.Group) -> domain.Group: ...
+    @abstractmethod
+    def add_member(self, group_id: int, member: domain.GroupMember) -> bool: ...
+    @abstractmethod
+    def set_member_status(self, group_id: int, user_id: int, status: str) -> bool: ...
+    @abstractmethod
+    def set_member_role(self, group_id: int, user_id: int, role: str) -> bool: ...
+    @abstractmethod
+    def is_member(self, group_id: int, user_id: int) -> bool: ...
+
+
 class Repositories:
     """Facade bundling one repo per aggregate."""
 
@@ -158,6 +179,7 @@ class Repositories:
         users: UserRepo,
         auth_tokens: AuthTokenRepo,
         clubs: ClubRepo,
+        groups: GroupRepo,
     ):
         self.regattas = regattas
         self.racedays = racedays
@@ -167,3 +189,4 @@ class Repositories:
         self.users = users
         self.auth_tokens = auth_tokens
         self.clubs = clubs
+        self.groups = groups

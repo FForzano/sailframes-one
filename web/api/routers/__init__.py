@@ -23,6 +23,7 @@ from . import (
     ingest,
     auth,
     clubs,
+    groups,
 )
 
 # Order is not significant for routing here (no overlapping path patterns
@@ -46,9 +47,10 @@ ALL_ROUTERS = [
     # Self-hosted plumbing (inert on cloud)
     fleet.router,
     ingest.router,
-    # User system (auth + clubs)
+    # User system (auth + clubs + groups)
     auth.router,
     clubs.router,
+    groups.router,
 ]
 
 __all__ = ["ALL_ROUTERS"]

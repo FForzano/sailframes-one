@@ -19,6 +19,8 @@ from ...db.models import (
     UserORM,
     ClubORM,
     ClubMemberORM,
+    GroupORM,
+    GroupMemberORM,
     AuthRefreshTokenORM,
 )
 
@@ -47,6 +49,25 @@ def club_to_domain(orm: ClubORM) -> domain.Club:
         created_at=orm.created_at,
         members=[
             domain.ClubMember(user_id=m.user_id, status=m.status, joined_at=m.joined_at)
+            for m in orm.members
+        ],
+    )
+
+
+# --- Group (+ membership) ---
+
+def group_to_domain(orm: GroupORM) -> domain.Group:
+    return domain.Group(
+        id=orm.id,
+        name=orm.name,
+        description=orm.description,
+        created_by=orm.created_by,
+        default_session_visibility=orm.default_session_visibility or "private",
+        created_at=orm.created_at,
+        members=[
+            domain.GroupMember(
+                user_id=m.user_id, role=m.role, status=m.status, joined_at=m.joined_at
+            )
             for m in orm.members
         ],
     )
