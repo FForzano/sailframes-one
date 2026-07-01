@@ -15,6 +15,7 @@ from .permissions import (
     require_user,
     verify_csrf,
     session_visible_to,
+    effective_capabilities,
 )
 from .passwords import hash_password, verify_password
 from .seed import seed_defaults, seed_superadmin, seed_devices
@@ -26,6 +27,7 @@ __all__ = [
     "require_user",
     "verify_csrf",
     "session_visible_to",
+    "effective_capabilities",
     "hash_password",
     "verify_password",
     "seed_defaults",

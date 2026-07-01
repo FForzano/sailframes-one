@@ -71,6 +71,81 @@ def require_user(request: Request):
     return u
 
 
+def effective_capabilities(user) -> dict:
+    """Capability snapshot for the frontend: roles + effective permissions
+    (global vs per-club, mirroring ``_user_has_permission``) + memberships.
+
+    Backend-agnostic for memberships (walks the repos); RBAC roles/permissions
+    only exist on the Postgres backend, so in object mode those come back empty
+    and the UI leans on ``is_superadmin`` + memberships. The server still
+    authorizes every mutation — this payload only decides what UI to show."""
+    from ..repositories import get_repos
+
+    repos = get_repos()
+
+    clubs_owned, clubs_member = [], []
+    for c in repos.clubs.list():
+        if c.owner_user_id == user.id:
+            clubs_owned.append(c.id)
+        if repos.clubs.is_active_member(c.id, user.id):
+            clubs_member.append(c.id)
+    groups = [g.id for g in repos.groups.list() if repos.groups.is_member(g.id, user.id)]
+    boats_owner, boats_skipper = [], []
+    for b in repos.boats.list():
+        if repos.boats.is_member(b.boat_id, user.id, roles=["owner"]):
+            boats_owner.append(b.boat_id)
+        if repos.boats.is_member(b.boat_id, user.id, roles=["skipper"]):
+            boats_skipper.append(b.boat_id)
+
+    roles: list[dict] = []
+    perm_global: set[str] = set()
+    perm_by_club: dict[str, set[str]] = {}
+    if _is_postgres():
+        from ..db import get_sessionmaker
+        from ..db.models import (
+            UserORM,
+            RoleORM,
+            RolePermissionORM,
+            PermissionORM,
+        )
+
+        with get_sessionmaker()() as s:
+            orm = s.get(UserORM, user.id)
+            if orm is not None:
+                for ur in orm.roles:
+                    role = s.get(RoleORM, ur.role_id)
+                    roles.append({
+                        "role": role.name if role else str(ur.role_id),
+                        "scope_club_id": ur.scope_club_id,
+                    })
+                    keys = [
+                        k for (k,) in s.query(PermissionORM.key)
+                        .join(RolePermissionORM, RolePermissionORM.permission_id == PermissionORM.id)
+                        .filter(RolePermissionORM.role_id == ur.role_id)
+                        .all()
+                    ]
+                    if ur.scope_club_id is None:
+                        perm_global.update(keys)
+                    else:
+                        perm_by_club.setdefault(str(ur.scope_club_id), set()).update(keys)
+
+    return {
+        "user": user.to_dict(),
+        "roles": roles,
+        "permissions": {
+            "global": sorted(perm_global),
+            "byClub": {k: sorted(v) for k, v in perm_by_club.items()},
+        },
+        "memberships": {
+            "clubsOwned": clubs_owned,
+            "clubsMember": clubs_member,
+            "groups": groups,
+            "boatsOwner": boats_owner,
+            "boatsSkipper": boats_skipper,
+        },
+    }
+
+
 def session_visible_to(session, user) -> bool:
     """Phase 5 visibility rule (identical on both backends — operates on the
     domain ``Session`` + ``domain.User`` | None). See docs/user_plan.md →

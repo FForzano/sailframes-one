@@ -22,9 +22,22 @@ app = FastAPI(
     description="Sailboat racing analysis and replay dashboard",
 )
 
+# Credentialed cookie auth (sf_access/sf_csrf) is incompatible with a wildcard
+# origin, so CORS is an explicit allow-list. In production the SPA is served
+# same-origin (no CORS exercised); this list matters for the Vite dev server
+# and any split-origin deploy. Override with SAILFRAMES_CORS_ORIGINS (CSV).
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "SAILFRAMES_CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

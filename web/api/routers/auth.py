@@ -18,7 +18,12 @@ import re
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from .. import domain
-from ..auth import hash_password, require_user, verify_password
+from ..auth import (
+    effective_capabilities,
+    hash_password,
+    require_user,
+    verify_password,
+)
 from ..auth.tokens import (
     ACCESS_COOKIE,
     CSRF_COOKIE,
@@ -185,3 +190,13 @@ def logout(request: Request, response: Response):
 def me(request: Request):
     user = require_user(request)
     return user.to_dict()
+
+
+@router.get("/capabilities")
+def capabilities(request: Request):
+    """Roles + effective permissions (global vs per-club) + memberships, for a
+    capability-aware UI. ``/me`` stays a cheap identity check; this is the
+    heavier joined query the frontend caches. Server still authorizes every
+    mutation — this only decides what UI to show."""
+    user = require_user(request)
+    return effective_capabilities(user)
