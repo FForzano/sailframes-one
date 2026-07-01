@@ -7,7 +7,7 @@ One module per aggregate. Importing this package registers every table on
 from .regatta import RegattaORM
 from .raceday import RaceDayORM
 from .race import RaceORM, MarkORM, RaceBoatORM, RaceResultORM
-from .boat import BoatORM
+from .boat import BoatORM, BoatMemberORM
 from .session import SessionORM
 from .rbac import (
     UserORM,
@@ -28,6 +28,7 @@ __all__ = [
     "RaceBoatORM",
     "RaceResultORM",
     "BoatORM",
+    "BoatMemberORM",
     "SessionORM",
     "UserORM",
     "ClubORM",

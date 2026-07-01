@@ -14,6 +14,7 @@ from ...db.models import (
     RaceBoatORM,
     RaceResultORM,
     BoatORM,
+    BoatMemberORM,
     SessionORM,
     UserORM,
     ClubORM,
@@ -132,8 +133,13 @@ def boat_to_domain(orm: BoatORM) -> domain.Boat:
         type=orm.type or "",
         sail_number=orm.sail_number or "",
         club=orm.club or "",
+        club_id=orm.club_id,
         loa_m=orm.loa_m,
         skippers=list(orm.skippers or []),
+        members=[
+            domain.BoatMember(user_id=m.user_id, role=m.role, created_at=m.created_at)
+            for m in orm.members
+        ],
         photos=dict(orm.photos or {}),
         cert_url=orm.cert_url,
         mbsa_url=orm.mbsa_url,
@@ -146,10 +152,13 @@ def boat_to_domain(orm: BoatORM) -> domain.Boat:
 
 
 def apply_boat(orm: BoatORM, d: domain.Boat) -> None:
+    # Membership is managed through the dedicated member methods (boat_members
+    # table), not rewritten here — so save() never clobbers the roster.
     orm.name = d.name or ""
     orm.type = d.type or ""
     orm.sail_number = d.sail_number or ""
     orm.club = d.club or ""
+    orm.club_id = d.club_id
     orm.loa_m = d.loa_m
     orm.skippers = list(d.skippers or [])
     orm.photos = dict(d.photos or {})

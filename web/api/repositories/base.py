@@ -73,6 +73,19 @@ class BoatRepo(ABC):
     @abstractmethod
     def delete(self, boat_id: str) -> bool: ...
 
+    # Standing-crew membership. Object backend nests these inside the boat
+    # record; SQL uses the ``boat_members`` table. Both no-op on unknown boat.
+    @abstractmethod
+    def add_member(self, boat_id: str, member: domain.BoatMember) -> bool: ...
+    @abstractmethod
+    def remove_member(self, boat_id: str, user_id: int) -> bool: ...
+    @abstractmethod
+    def set_member_role(self, boat_id: str, user_id: int, role: str) -> bool: ...
+    @abstractmethod
+    def list_members(self, boat_id: str) -> "list[domain.BoatMember]": ...
+    @abstractmethod
+    def is_member(self, boat_id: str, user_id: int, roles: "Optional[list[str]]" = None) -> bool: ...
+
 
 class SessionRepo(ABC):
     @abstractmethod

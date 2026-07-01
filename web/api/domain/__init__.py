@@ -13,7 +13,7 @@ from .base import DomainModel
 from .regatta import Regatta
 from .raceday import RaceDay
 from .race import Race, Mark, RaceBoat, StartFinishLine, RaceResult
-from .boat import Boat
+from .boat import Boat, BoatMember
 from .session import Session
 from .user import User
 from .auth_token import AuthRefreshToken
@@ -29,6 +29,7 @@ __all__ = [
     "StartFinishLine",
     "RaceResult",
     "Boat",
+    "BoatMember",
     "Session",
     "User",
     "AuthRefreshToken",
