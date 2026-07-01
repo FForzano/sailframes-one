@@ -13,7 +13,41 @@
     "events": "Eventi",
     "admin": "Admin",
     "profile": "Profilo",
-    "myArea": "Area personale"
+    "myArea": "Area personale",
+    "coach": "Coach",
+    "bom": "Componenti hardware",
+    "battery": "Batteria"
+  },
+  "coach": {
+    "title": "Briefing coach",
+    "notConfigured": "Il servizio coach non è configurato per questo deployment.",
+    "signIn": "Accedi",
+    "signInHint": "Il coach usa un accesso Google separato dal tuo account membro.",
+    "noBriefings": "Ancora nessun briefing."
+  },
+  "bom": {
+    "title": "Tracker di flotta E1 — distinta base",
+    "subtitle": "Tutto il necessario per costruire un tracker E-series. Prezzi indicativi (maggio 2026).",
+    "part": "Componente",
+    "qty": "Qtà",
+    "price": "$ ca.",
+    "source": "Fonte",
+    "totals": "Totali per unità",
+    "configuration": "Configurazione",
+    "hardwareTotal": "Totale hardware",
+    "fleetNote": "La flotta di sei è stata costruita intorno a ~$250/unità (Opzione A con display).",
+    "groups": {
+      "common": "Componenti comuni (entrambe le opzioni)",
+      "optionA": "Opzione A — Quectel LG290P (PPK, ~2 cm)",
+      "optionB": "Opzione B — Quectel LC29H (standalone, sub-metrico)",
+      "optional": "Aggiunte opzionali"
+    }
+  },
+  "battery": {
+    "title": "Batteria della flotta",
+    "subtitle": "Estratta dalle righe batteria (session/alive) del boot.log di ogni barca.",
+    "samples": "Campioni",
+    "noData": "Ancora nessun campione di batteria."
   },
   "races": {
     "title": "Serie e regate",
@@ -62,6 +96,9 @@
     "notFound": "Sessione non trovata.",
     "notFoundHint": "Potrebbe essere privata — accedi per vedere le tue sessioni."
   },
+  "race": {
+    "noData": "Nessun dato GPS ancora abbinato alle barche di questa regata."
+  },
   "auth": {
     "login": "Accedi",
     "register": "Registrati",
@@ -91,6 +128,104 @@
     "clubsMember": "Iscrizioni ai club",
     "groups": "Gruppi",
     "boats": "Barche"
+  },
+  "clubs": {
+    "create": "Nuovo club",
+    "name": "Nome",
+    "created": "Club creato",
+    "join": "Unisciti",
+    "joined": "Iscritto",
+    "invite": "Invita",
+    "invited": "Invito inviato",
+    "userId": "ID utente",
+    "owner": "Proprietario",
+    "member": "Membro",
+    "memberCount": "{{count}} membro",
+    "memberCount_other": "{{count}} membri"
+  },
+  "groups": {
+    "create": "Nuovo gruppo",
+    "created": "Gruppo creato",
+    "description": "Descrizione",
+    "admin": "Admin",
+    "joined": "Iscritto"
+  },
+  "boats": {
+    "create": "Nuova barca",
+    "created": "Barca creata",
+    "edit": "Modifica",
+    "save": "Salva",
+    "saved": "Salvato",
+    "owner": "Proprietario",
+    "boatId": "ID barca",
+    "name": "Nome",
+    "type": "Tipo",
+    "sailNumber": "Numero velico",
+    "club": "Club",
+    "notes": "Note",
+    "crewCount": "{{count}} membro",
+    "crewCount_other": "{{count}} membri equipaggio"
+  },
+  "devices": {
+    "register": "Registra dispositivo",
+    "registered": "Registrato {{id}}",
+    "id": "ID",
+    "name": "Nome",
+    "type": "Tipo",
+    "owner": "Proprietario",
+    "ownerType": "Tipo proprietario",
+    "boat": "Barca",
+    "status": "Stato",
+    "private": "Privato barca",
+    "boatPrivate": "Privato barca (owner/skipper)",
+    "clubDevice": "Dispositivo club / RC"
+  },
+  "mysessions": {
+    "edit": "Modifica",
+    "delete": "Elimina",
+    "deleted": "Sessione eliminata",
+    "saved": "Sessione aggiornata",
+    "confirmDelete": "Eliminare questa sessione e tutti i suoi dati?",
+    "crew": "Equipaggio",
+    "guestName": "Nome ospite",
+    "role": "Ruolo",
+    "addCrew": "Aggiungi membro"
+  },
+  "profile": {
+    "account": "Account",
+    "role": "Ruolo",
+    "language": "Lingua"
+  },
+  "events": {
+    "newRegatta": "Nuova serie",
+    "created": "Serie creata",
+    "deleted": "Eliminato",
+    "confirmDeleteRegatta": "Eliminare questa serie?",
+    "manage": "Gestisci",
+    "hide": "Nascondi",
+    "venue": "Luogo",
+    "boatClass": "Classe",
+    "startDate": "Data inizio",
+    "endDate": "Data fine",
+    "racedays": "Giornate",
+    "addDay": "Aggiungi giornata",
+    "dayCreated": "Giornata creata",
+    "races": "Regate",
+    "raceName": "Nome regata",
+    "addRace": "Aggiungi regata",
+    "raceCreated": "Regata creata"
+  },
+  "admin": {
+    "cleanupTitle": "Pulizia sessioni",
+    "cleanupBody": "Elimina sessioni sotto la soglia di durata o senza barca assegnata.",
+    "maxDuration": "Durata max (min)",
+    "requireBoat": "Richiedi una barca",
+    "preview": "Anteprima",
+    "delete": "Elimina",
+    "dryRun": "solo anteprima",
+    "confirmDelete": "Eliminare definitivamente le sessioni in anteprima?",
+    "cleanupDone": "Pulizia completata",
+    "willDelete": "{{count}} sessione/i corrispondono"
   },
   "common": {
     "comingSoon": "In arrivo",

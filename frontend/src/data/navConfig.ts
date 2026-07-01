@@ -49,6 +49,13 @@ export const appNav: NavEntry[] = [
     glyph: "🛠️",
     visible: (h) => h.isSuperadmin || h.can("admin") || h.can("user.manage"),
   },
+  {
+    // Coach area runs on its own backend; only surface it when configured.
+    to: "/app/coach",
+    labelKey: "nav.coach",
+    glyph: "📋",
+    visible: () => Boolean(import.meta.env.VITE_COACH_API_BASE),
+  },
   { to: "/app/profile", labelKey: "nav.profile", glyph: "👤" },
 ];
 

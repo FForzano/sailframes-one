@@ -5,12 +5,12 @@
 | Milestone | State | Notes |
 |---|---|---|
 | **M0 — Scaffold + auth + nav shell** | ✅ **done** (2026-07-01) | Vite+TS app at `frontend/`, providers, `api.ts`+CSRF+refresh, i18n (it/en), responsive MainContent/Navbar/Sidebar/ActionBar/Footer, route table, Login/Register, `RequireAuth`+guards, capability-aware Dashboard. Backend `GET /api/auth/capabilities` + CORS allow-list. `npm run build` (tsc + vite) green; dev server boots. |
-| **M1 — Public browse** | 🟡 **in progress** (2026-07-01) | Done: `RacesBrowser` (search/sort series + standalone), `RegattaDetail`, `FleetStatus` (per-boat `_health.json` table + filter/refresh), `Sessions` list + read-only `SessionView` (visibility-filtered by the server, private→404 login CTA). Added `useResource`, `utils/format`, `races`/`sessions`/`fleet` services + types, `/sessions` public nav. `npm run build` green. **Removed** superseded legacy files: `old/races.html`, `old/sessions.html`, `old/fleet.html`, `old/assets/js/races-page.js`, `old/assets/css/races.css`. **Remaining:** Bom (static hardware BOM page), Battery (Chart.js fleet-battery analysis), and the **rich** session timeline viewer (`old/session.html` shares the M4 map/chart/timeline components — kept as reference, ported in M4). |
-| M2 — Personal area CRUD | ⬜ pending | |
-| M3 — Admin + events | ⬜ pending | |
-| M4 — Race replay dashboard | ⬜ pending | largest slice |
-| M5 — Coach fold-in | ⬜ pending | |
-| M6 — Deploy cutover | ⬜ pending | repoint static mount, delete `frontend/old/` |
+| **M1 — Public browse** | ✅ **done** (2026-07-01) | `RacesBrowser` (search/sort series + standalone), `RegattaDetail`, `FleetStatus` (per-boat `_health.json` table), `Sessions` + read-only `SessionView` (visibility-filtered, private→404 login CTA), `Bom` (data-driven hardware BOM), `Battery` (boot.log parse + dependency-free SVG trend). Added `useResource`, `utils/format`. **Removed** superseded legacy: `old/{races,sessions,fleet,bom,battery}.html`, `old/assets/js/races-page.js`, `old/assets/css/races.css`. |
+| **M2 — Personal area CRUD** | ✅ **done** (2026-07-01) | `Clubs`/`Groups` (create/join/invite, owner/admin-gated), `Boats` (create/edit, manage-gated), `Devices` (register boat-private/club + list), `MySessions` (crew/visibility edit, delete gated on `session.delete`), `Profile` (account/language/logout). Services + types for each; `refresh()` after membership changes so nav/dashboard update. Modal/Select UI primitives. |
+| **M3 — Admin + events** | ✅ **done** (2026-07-01) | `Events` (regatta create/delete, race-day + race create per series) and `Admin` (session cleanup preview→delete). **Note:** backend gates these on `require_admin` (not the RBAC `regatta.manage`/etc.), so the capability guard only controls UI visibility — the server stays authority and 403s surface as toasts. Advanced race editing (marks/course/start line) is deferred to the M4 dashboard editor. |
+| **M4 — Race replay dashboard** | 🟡 **core done** (2026-07-01) | `RaceView` + `timeController` store (`useSyncExternalStore`, rAF playback), imperative Leaflet `MapView` (tracks + moving markers + marks), `SpeedChart` (SVG multi-line + draggable cursor seek), `Timeline` (play/pause/speed/scrub), `Leaderboard` (distance + live speed/heel). `utils/geo` ported. **Residual (tier-3):** wind rose / polar / laylines overlays, per-boat drawer, legs & maneuvers modals, discussion thread, video (hls.js), AIS, NOAA buoys — `old/race.html` + `race-app.js` + `old/session.html` kept as reference. |
+| **M5 — Coach fold-in** | 🟡 **core done** (2026-07-01) | `/app/coach` with an **isolated** `coach.service` (own base `VITE_COACH_API_BASE`, Google Sign-In → `session/exchange` → Bearer token in localStorage — never unified with member cookie auth) + `GoogleSignIn` (GIS). Briefings list + generate. Nav entry appears only when configured. **Residual:** briefing review/print detail views (`old/coach/{review,print}.html`). |
+| **M6 — Deploy cutover** | 🟡 **core done** (2026-07-01) | Backend static mount repointed to `frontend/dist` with an `SPAStaticFiles` deep-link fallback (`backend/main.py`). `deploy.sh` updated: builds repo-root `frontend/`, syncs `frontend/dist` (hashed assets long-cache, `index.html` short), dropped the `config.js` runtime shim (build-time `VITE_API_BASE`) and the legacy `web/*.html` sync. **Manual/residual:** add the CloudFront `/api/*` behavior (forward `Cookie`+`X-SF-CSRF`, no-cache) + SPA 403/404→`/index.html`; delete `frontend/old/` once M4/M5 residuals are ported (kept now as porting reference). |
 
 ### Directory layout (repo reorganized 2026-07-01)
 
@@ -20,11 +20,36 @@ The repo was flattened: what used to live under `web/` is now split.
 - **`frontend/`** — the **new** Vite+React+TS SPA (this is where we work; was
   planned as `web/app/`). App source in `frontend/src/`, build to `frontend/dist/`.
 - **`frontend/old/`** — the **legacy** static site being refactored away (was
-  `web/` top level): `*.html`, `assets/`, `coach/`, `config.js`, and the
-  deprecated `frontend/` React stub (now `frontend/old/frontend/`). Deleted at M6.
+  `web/` top level). Fully-superseded files were deleted as each milestone
+  landed (M1 removed the races/sessions/fleet/bom/battery pages). **Still
+  present as porting reference** until their residuals land: `race.html` +
+  `assets/js/race-app.js` + `components/` (M4 tier-3), `session.html` (rich
+  session timeline), `events.html`/`events-app.js` + `admin.html` (advanced
+  race editor), `coach/` (review/print detail). Remove the whole tree once
+  those are ported.
 
 Path references below predate the move; read `web/app/`→`frontend/`,
 `web/api/`→`backend/`, and `web/<legacy>`→`frontend/old/<legacy>`.
+
+### Residuals / follow-ups (tracked)
+
+The **core** of every milestone is implemented and the build is green
+(`cd frontend && npm run build`). Deferred, higher-effort slices:
+
+- **M4 tier-3 dashboard:** wind rose / polar / laylines overlays, per-boat
+  detail drawer, legs & maneuvers modals, discussion thread, video (hls.js),
+  AIS layer, NOAA buoy integration. Port from `old/assets/js/race-app.js`
+  (11.4k lines) + `components/{map-view,chart-panel,timeline,video-player}.js`.
+- **M4 session timeline:** the rich single-session viewer (`old/session.html`)
+  — currently only the read-only metadata `SessionView` exists.
+- **M3 advanced race editor:** marks / course / start–finish line editing
+  (from `old/assets/js/events-app.js`); also reconcile the backend so Events
+  writes honor RBAC (`regatta.manage`/`race.*`) instead of `require_admin`.
+- **M5 coach detail:** briefing review + print views (`old/coach/{review,print}.html`).
+- **M6 infra:** CloudFront `/api/*` behavior + SPA fallback; final
+  `frontend/old/` deletion.
+- **Boat roster UI:** boat standing-crew add/remove/role (service methods exist
+  in `boats.service.ts`; no UI yet).
 
 ## Context
 

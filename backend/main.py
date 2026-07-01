@@ -65,9 +65,23 @@ for _router in ALL_ROUTERS:
     app.include_router(_router)
 
 
-# --- Static files (frontend) ---
+# --- Static files (frontend SPA) ---
 # Mounted LAST so the catch-all "/" does not shadow the API routes above.
-# Serves the legacy static web directory (race.html, index.html, assets/).
-web_dir = Path(__file__).resolve().parent.parent / "web"
-if web_dir.exists():
-    app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="frontend")
+# Serves the built Vite SPA (``frontend/dist``). Unknown non-file paths fall
+# back to ``index.html`` so client-side deep links (e.g. ``/races/123``) resolve
+# on reload instead of 404-ing.
+class SPAStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+
+
+dist_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if (dist_dir / "index.html").exists():
+    app.mount("/", SPAStaticFiles(directory=str(dist_dir), html=True), name="frontend")

@@ -23,7 +23,9 @@ DOMAIN="sailframes.com"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 LAMBDA_DIR="$PROJECT_ROOT/lambda"
-WEB_DIR="$PROJECT_ROOT/web"
+# The frontend is the Vite SPA at repo root (was web/frontend before the
+# 2026-07 reorg; the legacy static site now lives inertly under frontend/old/).
+FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
 # Colors
 RED='\033[0;31m'
@@ -202,7 +204,7 @@ deploy_stack() {
 build_frontend() {
     log "Building React frontend..."
 
-    local frontend_dir="$WEB_DIR/frontend"
+    local frontend_dir="$FRONTEND_DIR"
 
     if [ ! -d "$frontend_dir" ]; then
         error "Frontend directory not found: $frontend_dir"
@@ -253,47 +255,25 @@ deploy_website() {
     log "Uploading to: $website_bucket"
     log "API endpoint: $api_endpoint"
 
-    local dist_dir="$WEB_DIR/frontend/dist"
+    local dist_dir="$FRONTEND_DIR/dist"
 
-    # Update config.js with API URL in the built dist
-    mkdir -p "$dist_dir"
-    echo "window.SAILFRAMES_API_URL = '${api_endpoint}';" > "$dist_dir/config.js"
-
-    # Sync website files (excluding HTML and config for cache control)
+    # The SPA reads its API base at build time from VITE_API_BASE (default /api,
+    # same-origin behind CloudFront's /api/* behavior) — no runtime config.js
+    # shim anymore. Hashed assets get a long cache; index.html stays short so a
+    # new deploy is picked up immediately.
     aws s3 sync "$dist_dir" "s3://$website_bucket/" \
         --delete \
         --cache-control "max-age=31536000" \
-        --exclude "*.html" \
-        --exclude "config.js" \
-        --exclude "dashboard/*" \
+        --exclude "index.html" \
         --profile "$AWS_PROFILE" \
         --region "$REGION"
 
-    # Upload HTML and config with shorter cache
-    aws s3 sync "$dist_dir" "s3://$website_bucket/" \
-        --exclude "*" \
-        --include "*.html" \
-        --include "config.js" \
+    aws s3 cp "$dist_dir/index.html" "s3://$website_bucket/index.html" \
         --cache-control "max-age=60" \
         --profile "$AWS_PROFILE" \
         --region "$REGION"
 
-    # Deploy static dashboard (web/*.html and web/assets/) to S3 root
-    log "Deploying static dashboard..."
-
-    # Create config.js for dashboard
-    echo "window.SAILFRAMES_API_URL = '${api_endpoint}';" > "$WEB_DIR/config.js"
-
-    # Sync dashboard static files to S3 root (served at sailframes.com/race.html etc.)
-    aws s3 sync "$WEB_DIR" "s3://$website_bucket/" \
-        --exclude "frontend/*" \
-        --exclude "api/*" \
-        --exclude ".DS_Store" \
-        --cache-control "max-age=60" \
-        --profile "$AWS_PROFILE" \
-        --region "$REGION"
-
-    log "Website deployed"
+    log "Website deployed (SPA)"
 }
 
 # Invalidate CloudFront cache

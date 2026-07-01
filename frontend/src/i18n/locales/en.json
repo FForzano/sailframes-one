@@ -13,7 +13,41 @@
     "events": "Events",
     "admin": "Admin",
     "profile": "Profile",
-    "myArea": "My area"
+    "myArea": "My area",
+    "coach": "Coach",
+    "bom": "Hardware BOM",
+    "battery": "Battery"
+  },
+  "coach": {
+    "title": "Coach briefings",
+    "notConfigured": "The coach service isn't configured for this deployment.",
+    "signIn": "Sign in",
+    "signInHint": "Coach uses a separate Google sign-in from your member account.",
+    "noBriefings": "No briefings yet."
+  },
+  "bom": {
+    "title": "E1 fleet tracker — bill of materials",
+    "subtitle": "Everything needed to build one E-series tracker. Prices approximate (May 2026).",
+    "part": "Part",
+    "qty": "Qty",
+    "price": "Approx. $",
+    "source": "Source",
+    "totals": "Per-unit totals",
+    "configuration": "Configuration",
+    "hardwareTotal": "Hardware total",
+    "fleetNote": "The fleet of six was built around ~$250/unit (Option A with display).",
+    "groups": {
+      "common": "Common parts (both options)",
+      "optionA": "Option A — Quectel LG290P (PPK, ~2 cm)",
+      "optionB": "Option B — Quectel LC29H (standalone, sub-meter)",
+      "optional": "Optional add-ons"
+    }
+  },
+  "battery": {
+    "title": "Fleet battery",
+    "subtitle": "Parsed from each boat's boot.log session/alive battery lines.",
+    "samples": "Samples",
+    "noData": "No battery samples yet."
   },
   "races": {
     "title": "Series & races",
@@ -62,6 +96,9 @@
     "notFound": "Session not found.",
     "notFoundHint": "It may be private — log in to view your own sessions."
   },
+  "race": {
+    "noData": "No GPS track data matched for this race's boats yet."
+  },
   "auth": {
     "login": "Log in",
     "register": "Sign up",
@@ -91,6 +128,104 @@
     "clubsMember": "Club memberships",
     "groups": "Groups",
     "boats": "Boats"
+  },
+  "clubs": {
+    "create": "New club",
+    "name": "Name",
+    "created": "Club created",
+    "join": "Join",
+    "joined": "Joined",
+    "invite": "Invite",
+    "invited": "Invitation sent",
+    "userId": "User ID",
+    "owner": "Owner",
+    "member": "Member",
+    "memberCount": "{{count}} member",
+    "memberCount_other": "{{count}} members"
+  },
+  "groups": {
+    "create": "New group",
+    "created": "Group created",
+    "description": "Description",
+    "admin": "Admin",
+    "joined": "Joined"
+  },
+  "boats": {
+    "create": "New boat",
+    "created": "Boat created",
+    "edit": "Edit",
+    "save": "Save",
+    "saved": "Saved",
+    "owner": "Owner",
+    "boatId": "Boat ID",
+    "name": "Name",
+    "type": "Type",
+    "sailNumber": "Sail number",
+    "club": "Club",
+    "notes": "Notes",
+    "crewCount": "{{count}} crew member",
+    "crewCount_other": "{{count}} crew members"
+  },
+  "devices": {
+    "register": "Register device",
+    "registered": "Registered {{id}}",
+    "id": "ID",
+    "name": "Name",
+    "type": "Type",
+    "owner": "Owner",
+    "ownerType": "Owner type",
+    "boat": "Boat",
+    "status": "Status",
+    "private": "Boat-private",
+    "boatPrivate": "Boat-private (owner/skipper)",
+    "clubDevice": "Club / RC device"
+  },
+  "mysessions": {
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleted": "Session deleted",
+    "saved": "Session updated",
+    "confirmDelete": "Delete this session and all its data?",
+    "crew": "Crew",
+    "guestName": "Guest name",
+    "role": "Role",
+    "addCrew": "Add crew"
+  },
+  "profile": {
+    "account": "Account",
+    "role": "Role",
+    "language": "Language"
+  },
+  "events": {
+    "newRegatta": "New series",
+    "created": "Series created",
+    "deleted": "Deleted",
+    "confirmDeleteRegatta": "Delete this series?",
+    "manage": "Manage",
+    "hide": "Hide",
+    "venue": "Venue",
+    "boatClass": "Boat class",
+    "startDate": "Start date",
+    "endDate": "End date",
+    "racedays": "Race days",
+    "addDay": "Add day",
+    "dayCreated": "Race day created",
+    "races": "Races",
+    "raceName": "Race name",
+    "addRace": "Add race",
+    "raceCreated": "Race created"
+  },
+  "admin": {
+    "cleanupTitle": "Session cleanup",
+    "cleanupBody": "Delete sessions shorter than the threshold or with no boat assigned.",
+    "maxDuration": "Max duration (min)",
+    "requireBoat": "Require a boat",
+    "preview": "Preview",
+    "delete": "Delete",
+    "dryRun": "preview only",
+    "confirmDelete": "Permanently delete the previewed sessions?",
+    "cleanupDone": "Cleanup complete",
+    "willDelete": "{{count}} session(s) match"
   },
   "common": {
     "comingSoon": "Coming soon",

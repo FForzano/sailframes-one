@@ -617,3 +617,241 @@ a {
   font-weight: 600;
   text-align: right;
 }
+
+.sf-footer__links {
+  display: flex;
+  gap: 1rem;
+}
+.sf-batt__pct {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0.25rem 0;
+}
+.sf-spark {
+  color: var(--sf-primary);
+  display: block;
+  margin: 0.5rem 0;
+}
+
+/* ---------- M2 CRUD (modal / forms / cards) ---------- */
+.sf-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+.sf-btnrow {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.sf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.sf-crew {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sf-crew__row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.sf-crew__row .sf-field__input {
+  flex: 1;
+}
+
+.sf-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 12, 20, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 200;
+}
+.sf-modal {
+  background: var(--sf-bg-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  width: 100%;
+  max-width: 26rem;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.sf-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--sf-border);
+}
+.sf-modal__title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.sf-modal__close {
+  background: none;
+  border: none;
+  color: var(--sf-muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.sf-modal__body {
+  padding: 1.25rem;
+}
+
+.sf-plainlist {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--sf-muted);
+  font-size: 0.9rem;
+}
+.sf-plainlist li {
+  padding: 0.15rem 0;
+}
+.sf-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--sf-text);
+  font-size: 0.9rem;
+}
+
+/* ---------- M4 race dashboard ---------- */
+.sf-raceview {
+  padding: 1rem;
+}
+.sf-raceview__head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.sf-raceview__head .sf-page__title {
+  margin: 0;
+}
+.sf-raceview__grid {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  grid-template-rows: minmax(340px, 60vh) auto;
+  grid-template-areas:
+    "map side"
+    "timeline timeline";
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+.sf-raceview__map {
+  grid-area: map;
+  min-height: 340px;
+}
+.sf-raceview__side {
+  grid-area: side;
+  overflow-y: auto;
+}
+.sf-raceview__timeline {
+  grid-area: timeline;
+}
+.sf-map {
+  width: 100%;
+  height: 100%;
+  min-height: 340px;
+  border-radius: var(--sf-radius);
+  overflow: hidden;
+}
+.sf-markicon {
+  color: var(--sf-warning);
+  font-size: 14px;
+  text-shadow: 0 0 3px #000;
+}
+@media (max-width: 860px) {
+  .sf-raceview__grid {
+    grid-template-columns: 1fr;
+    grid-template-areas: "map" "side" "timeline";
+  }
+}
+
+.sf-timeline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+.sf-timeline__speeds {
+  display: flex;
+  gap: 0.25rem;
+}
+.sf-timeline__speeds .is-active {
+  border-color: var(--sf-primary);
+  color: var(--sf-primary);
+}
+.sf-timeline__scrub {
+  flex: 1;
+}
+.sf-timeline__clock {
+  font-family: ui-monospace, Menlo, monospace;
+  color: var(--sf-muted);
+  min-width: 5.5rem;
+  text-align: right;
+}
+
+.sf-speedchart {
+  position: relative;
+  margin-top: 0.5rem;
+}
+.sf-speedchart__svg {
+  width: 100%;
+  height: 180px;
+  background: var(--sf-bg-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  touch-action: none;
+  cursor: crosshair;
+}
+.sf-speedchart__scale {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 0.7rem;
+  color: var(--sf-muted);
+}
+
+.sf-lb {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.sf-lb__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  font-size: 0.85rem;
+}
+.sf-lb__rank {
+  width: 1.2rem;
+  color: var(--sf-muted);
+}
+.sf-lb__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.sf-lb__name {
+  flex: 1;
+  font-weight: 600;
+}
+.sf-lb__stat {
+  font-variant-numeric: tabular-nums;
+}

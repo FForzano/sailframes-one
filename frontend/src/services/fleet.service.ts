@@ -11,6 +11,9 @@ export const fleetService = {
   getHealth: (boat: string) =>
     api.get<FleetHealth>(`/fleet/health/${boat}`),
 
+  // Plain-text boot.log (safeJson falls back to the raw string).
+  getBootlog: (boat: string) => api.get<string>(`/fleet/bootlog/${boat}`),
+
   // Fetch every boat's snapshot in parallel; a missing/never-booted boat
   // surfaces as a row with an error rather than failing the whole table.
   loadAll: async (): Promise<FleetRow[]> =>

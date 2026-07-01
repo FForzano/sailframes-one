@@ -10,13 +10,24 @@ import { Home } from "@/pages/Home";
 import { Login } from "@/pages/Login";
 import { Register } from "@/pages/Register";
 import { NotFound } from "@/pages/NotFound";
-import { Placeholder } from "@/pages/Placeholder";
 import { Dashboard } from "@/pages/app/Dashboard";
 import { RacesBrowser } from "@/pages/public/RacesBrowser";
 import { RegattaDetail } from "@/pages/public/RegattaDetail";
 import { FleetStatus } from "@/pages/public/FleetStatus";
 import { Sessions } from "@/pages/public/Sessions";
 import { SessionView } from "@/pages/public/SessionView";
+import { RaceView } from "@/pages/public/RaceView";
+import { Bom } from "@/pages/public/Bom";
+import { Battery } from "@/pages/public/Battery";
+import { Clubs } from "@/pages/app/Clubs";
+import { Groups } from "@/pages/app/Groups";
+import { Boats } from "@/pages/app/Boats";
+import { Devices } from "@/pages/app/Devices";
+import { MySessions } from "@/pages/app/MySessions";
+import { Profile } from "@/pages/app/Profile";
+import { Events } from "@/pages/app/Events";
+import { Admin } from "@/pages/app/Admin";
+import { Coach } from "@/pages/app/Coach";
 
 // Route table. Every route renders inside MainContent (the layout orchestrator,
 // which swaps Navbar/Sidebar/ActionBar by route + screen size). Personal-area
@@ -33,11 +44,12 @@ export default function App() {
         <Route path="register" element={<Register />} />
         <Route path="races" element={<RacesBrowser />} />
         <Route path="races/:regattaId" element={<RegattaDetail />} />
-        {/* The full race replay dashboard is M4; the link target exists now. */}
-        <Route path="race/:raceId" element={<Placeholder titleKey="races.dashboardSoon" />} />
+        <Route path="race/:raceId" element={<RaceView />} />
         <Route path="fleet" element={<FleetStatus />} />
         <Route path="sessions" element={<Sessions />} />
         <Route path="session/:deviceId/:date" element={<SessionView />} />
+        <Route path="bom" element={<Bom />} />
+        <Route path="battery" element={<Battery />} />
 
         {/* Personal area — single capability-aware shell */}
         <Route
@@ -52,7 +64,7 @@ export default function App() {
           path="app/sessions"
           element={
             <RequireAuth>
-              <Placeholder titleKey="nav.mySessions" />
+              <MySessions />
             </RequireAuth>
           }
         />
@@ -60,7 +72,7 @@ export default function App() {
           path="app/boats"
           element={
             <RequireAuth>
-              <Placeholder titleKey="nav.boats" />
+              <Boats />
             </RequireAuth>
           }
         />
@@ -68,7 +80,7 @@ export default function App() {
           path="app/clubs"
           element={
             <RequireAuth>
-              <Placeholder titleKey="nav.clubs" />
+              <Clubs />
             </RequireAuth>
           }
         />
@@ -76,7 +88,7 @@ export default function App() {
           path="app/groups"
           element={
             <RequireAuth>
-              <Placeholder titleKey="nav.groups" />
+              <Groups />
             </RequireAuth>
           }
         />
@@ -84,7 +96,7 @@ export default function App() {
           path="app/devices"
           element={
             <RequireAuth guard={requireBoatManager}>
-              <Placeholder titleKey="nav.devices" />
+              <Devices />
             </RequireAuth>
           }
         />
@@ -92,7 +104,7 @@ export default function App() {
           path="app/events"
           element={
             <RequireAuth guard={requireEventsAccess}>
-              <Placeholder titleKey="nav.events" />
+              <Events />
             </RequireAuth>
           }
         />
@@ -100,7 +112,15 @@ export default function App() {
           path="app/admin"
           element={
             <RequireAuth guard={requireAdminArea}>
-              <Placeholder titleKey="nav.admin" />
+              <Admin />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="app/coach"
+          element={
+            <RequireAuth>
+              <Coach />
             </RequireAuth>
           }
         />
@@ -108,7 +128,7 @@ export default function App() {
           path="app/profile"
           element={
             <RequireAuth>
-              <Placeholder titleKey="nav.profile" />
+              <Profile />
             </RequireAuth>
           }
         />
