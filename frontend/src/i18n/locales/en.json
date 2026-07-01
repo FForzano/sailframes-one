@@ -3,6 +3,7 @@
     "home": "Home",
     "races": "Races",
     "fleet": "Fleet",
+    "sessions": "Sessions",
     "dashboard": "Dashboard",
     "mySessions": "My sessions",
     "boats": "Boats",
@@ -13,6 +14,53 @@
     "admin": "Admin",
     "profile": "Profile",
     "myArea": "My area"
+  },
+  "races": {
+    "title": "Series & races",
+    "subtitle": "Every regatta and standalone race we've tracked.",
+    "searchPlaceholder": "Search series, venue, boat class…",
+    "sortNewest": "Newest first",
+    "sortOldest": "Oldest first",
+    "sortName": "By name",
+    "seriesTitle": "Series",
+    "seriesRaces": "Races",
+    "standalone": "Standalone races",
+    "noSeries": "No series yet.",
+    "noRaces": "No races yet",
+    "raceCount": "{{count}} race",
+    "raceCount_other": "{{count}} races",
+    "latest": "Latest",
+    "open": "Open",
+    "dashboardSoon": "Race dashboard"
+  },
+  "fleet": {
+    "title": "Fleet health",
+    "filterPlaceholder": "filter (E1, low battery, no fix…)",
+    "refresh": "Refresh",
+    "boat": "Boat",
+    "battery": "Battery",
+    "fix": "Fix",
+    "fw": "Firmware",
+    "role": "Role",
+    "state": "State",
+    "recording": "Recording",
+    "idle": "Idle",
+    "noSnapshot": "No snapshot"
+  },
+  "sessions": {
+    "title": "Sessions",
+    "empty": "No sessions to show.",
+    "visibility": "Visibility"
+  },
+  "session": {
+    "date": "Date",
+    "boat": "Boat",
+    "duration": "Duration",
+    "sensors": "Sensors",
+    "hasAnalysis": "Analysis available",
+    "hasVideo": "Video available",
+    "notFound": "Session not found.",
+    "notFoundHint": "It may be private — log in to view your own sessions."
   },
   "auth": {
     "login": "Log in",

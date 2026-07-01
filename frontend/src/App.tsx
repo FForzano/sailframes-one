@@ -12,6 +12,11 @@ import { Register } from "@/pages/Register";
 import { NotFound } from "@/pages/NotFound";
 import { Placeholder } from "@/pages/Placeholder";
 import { Dashboard } from "@/pages/app/Dashboard";
+import { RacesBrowser } from "@/pages/public/RacesBrowser";
+import { RegattaDetail } from "@/pages/public/RegattaDetail";
+import { FleetStatus } from "@/pages/public/FleetStatus";
+import { Sessions } from "@/pages/public/Sessions";
+import { SessionView } from "@/pages/public/SessionView";
 
 // Route table. Every route renders inside MainContent (the layout orchestrator,
 // which swaps Navbar/Sidebar/ActionBar by route + screen size). Personal-area
@@ -26,8 +31,13 @@ export default function App() {
         <Route index element={<Home />} />
         <Route path="login" element={<Login />} />
         <Route path="register" element={<Register />} />
-        <Route path="races" element={<Placeholder titleKey="nav.races" />} />
-        <Route path="fleet" element={<Placeholder titleKey="nav.fleet" />} />
+        <Route path="races" element={<RacesBrowser />} />
+        <Route path="races/:regattaId" element={<RegattaDetail />} />
+        {/* The full race replay dashboard is M4; the link target exists now. */}
+        <Route path="race/:raceId" element={<Placeholder titleKey="races.dashboardSoon" />} />
+        <Route path="fleet" element={<FleetStatus />} />
+        <Route path="sessions" element={<Sessions />} />
+        <Route path="session/:deviceId/:date" element={<SessionView />} />
 
         {/* Personal area — single capability-aware shell */}
         <Route

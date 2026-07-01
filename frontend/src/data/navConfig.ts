@@ -14,6 +14,7 @@ export interface NavEntry {
 export const publicNav: NavEntry[] = [
   { to: "/", labelKey: "nav.home", glyph: "🏠" },
   { to: "/races", labelKey: "nav.races", glyph: "🏁" },
+  { to: "/sessions", labelKey: "nav.sessions", glyph: "🌊" },
   { to: "/fleet", labelKey: "nav.fleet", glyph: "📡" },
 ];
 

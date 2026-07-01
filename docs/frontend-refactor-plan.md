@@ -5,7 +5,7 @@
 | Milestone | State | Notes |
 |---|---|---|
 | **M0 — Scaffold + auth + nav shell** | ✅ **done** (2026-07-01) | Vite+TS app at `frontend/`, providers, `api.ts`+CSRF+refresh, i18n (it/en), responsive MainContent/Navbar/Sidebar/ActionBar/Footer, route table, Login/Register, `RequireAuth`+guards, capability-aware Dashboard. Backend `GET /api/auth/capabilities` + CORS allow-list. `npm run build` (tsc + vite) green; dev server boots. |
-| M1 — Public browse | ⬜ pending | |
+| **M1 — Public browse** | 🟡 **in progress** (2026-07-01) | Done: `RacesBrowser` (search/sort series + standalone), `RegattaDetail`, `FleetStatus` (per-boat `_health.json` table + filter/refresh), `Sessions` list + read-only `SessionView` (visibility-filtered by the server, private→404 login CTA). Added `useResource`, `utils/format`, `races`/`sessions`/`fleet` services + types, `/sessions` public nav. `npm run build` green. **Removed** superseded legacy files: `old/races.html`, `old/sessions.html`, `old/fleet.html`, `old/assets/js/races-page.js`, `old/assets/css/races.css`. **Remaining:** Bom (static hardware BOM page), Battery (Chart.js fleet-battery analysis), and the **rich** session timeline viewer (`old/session.html` shares the M4 map/chart/timeline components — kept as reference, ported in M4). |
 | M2 — Personal area CRUD | ⬜ pending | |
 | M3 — Admin + events | ⬜ pending | |
 | M4 — Race replay dashboard | ⬜ pending | largest slice |

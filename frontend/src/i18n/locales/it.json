@@ -3,6 +3,7 @@
     "home": "Home",
     "races": "Regate",
     "fleet": "Flotta",
+    "sessions": "Sessioni",
     "dashboard": "Dashboard",
     "mySessions": "Le mie sessioni",
     "boats": "Barche",
@@ -13,6 +14,53 @@
     "admin": "Admin",
     "profile": "Profilo",
     "myArea": "Area personale"
+  },
+  "races": {
+    "title": "Serie e regate",
+    "subtitle": "Tutte le serie e le regate singole che abbiamo tracciato.",
+    "searchPlaceholder": "Cerca serie, luogo, classe…",
+    "sortNewest": "Più recenti",
+    "sortOldest": "Meno recenti",
+    "sortName": "Per nome",
+    "seriesTitle": "Serie",
+    "seriesRaces": "Regate",
+    "standalone": "Regate singole",
+    "noSeries": "Ancora nessuna serie.",
+    "noRaces": "Ancora nessuna regata",
+    "raceCount": "{{count}} regata",
+    "raceCount_other": "{{count}} regate",
+    "latest": "Ultima",
+    "open": "Apri",
+    "dashboardSoon": "Dashboard regata"
+  },
+  "fleet": {
+    "title": "Stato della flotta",
+    "filterPlaceholder": "filtra (E1, batteria bassa, no fix…)",
+    "refresh": "Aggiorna",
+    "boat": "Barca",
+    "battery": "Batteria",
+    "fix": "Fix",
+    "fw": "Firmware",
+    "role": "Ruolo",
+    "state": "Stato",
+    "recording": "In registrazione",
+    "idle": "Inattiva",
+    "noSnapshot": "Nessun dato"
+  },
+  "sessions": {
+    "title": "Sessioni",
+    "empty": "Nessuna sessione da mostrare.",
+    "visibility": "Visibilità"
+  },
+  "session": {
+    "date": "Data",
+    "boat": "Barca",
+    "duration": "Durata",
+    "sensors": "Sensori",
+    "hasAnalysis": "Analisi disponibile",
+    "hasVideo": "Video disponibile",
+    "notFound": "Sessione non trovata.",
+    "notFoundHint": "Potrebbe essere privata — accedi per vedere le tue sessioni."
   },
   "auth": {
     "login": "Accedi",
