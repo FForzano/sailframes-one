@@ -19,7 +19,6 @@ from datetime import datetime
 
 from fastapi import HTTPException
 
-from .. import domain
 from ..storage import get_blob_store, BlobNotFound
 from ..repositories import get_repos
 
@@ -90,7 +89,7 @@ def get_race_dict(race_id: str) -> dict:
 
 def save_race_dict(race_data: dict) -> None:
     """Persist a race dict back through the repository."""
-    repos.races.save(domain.Race.from_dict(race_data))
+    repos.races.save_dict(race_data)
 
 
 # --- Misc -----------------------------------------------------------------

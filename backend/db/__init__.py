@@ -1,8 +1,7 @@
 """Database engine + session factory for the Postgres metadata backend.
 
 Lazily builds a SQLAlchemy engine and exposes a session factory plus
-``init_db()`` (``create_all`` — fits the "new deployments only" scope; Alembic
-can be layered on later).
+``init_db()``, which always runs the Alembic migration chain to head.
 
 The connection URL is built from discrete ``POSTGRES_*`` env vars via
 ``sqlalchemy.engine.URL.create()`` rather than string-concatenating a
@@ -36,7 +35,7 @@ def _build_url():
     database = os.environ.get("POSTGRES_DB")
     if not (user and password and database):
         raise RuntimeError(
-            "SAILFRAMES_METADATA_BACKEND=postgres requires DATABASE_URL, or "
+            "Postgres config required: set DATABASE_URL, or "
             "POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB (+ optional "
             "POSTGRES_HOST/POSTGRES_PORT)"
         )
@@ -80,13 +79,8 @@ def run_migrations() -> None:
 
 
 def init_db() -> None:
-    """Provision the schema. Alembic-managed when ``SAILFRAMES_USE_ALEMBIC`` is
-    set (recommended once a DB carries data); otherwise ``create_all`` — fine
-    for fresh deployments and unchanged from prior behaviour."""
-    if os.environ.get("SAILFRAMES_USE_ALEMBIC"):
-        run_migrations()
-    else:
-        Base.metadata.create_all(get_engine())
+    """Provision the schema by running the Alembic migration chain to head."""
+    run_migrations()
 
 
 __all__ = ["Base", "get_engine", "get_sessionmaker", "init_db", "run_migrations"]

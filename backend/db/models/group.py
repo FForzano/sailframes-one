@@ -16,6 +16,7 @@ from ..base import Base
 
 class GroupORM(Base):
     __tablename__ = "groups"
+    __wire_children__ = {"members": "members"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -29,7 +30,7 @@ class GroupORM(Base):
     created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     members: Mapped[list["GroupMemberORM"]] = relationship(
-        back_populates="group", cascade="all, delete-orphan"
+        back_populates="group", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
@@ -40,6 +41,7 @@ class GroupMemberORM(Base):
 
     __tablename__ = "group_members"
     __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_member"),)
+    __wire_exclude__ = ("id", "group_id")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))

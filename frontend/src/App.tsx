@@ -27,7 +27,6 @@ import { MySessions } from "@/pages/app/MySessions";
 import { Profile } from "@/pages/app/Profile";
 import { Events } from "@/pages/app/Events";
 import { Admin } from "@/pages/app/Admin";
-import { Coach } from "@/pages/app/Coach";
 
 // Route table. Every route renders inside MainContent (the layout orchestrator,
 // which swaps Navbar/Sidebar/ActionBar by route + screen size). Personal-area
@@ -113,14 +112,6 @@ export default function App() {
           element={
             <RequireAuth guard={requireAdminArea}>
               <Admin />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="app/coach"
-          element={
-            <RequireAuth>
-              <Coach />
             </RequireAuth>
           }
         />

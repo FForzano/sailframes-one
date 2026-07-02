@@ -16,6 +16,7 @@ from ..base import Base
 
 class UserORM(Base):
     __tablename__ = "users"
+    __wire_exclude__ = ("password_hash",)  # never leaves the repo on the wire
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
@@ -26,12 +27,13 @@ class UserORM(Base):
     created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     roles: Mapped[list["UserRoleORM"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
+        back_populates="user", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
 class ClubORM(Base):
     __tablename__ = "clubs"
+    __wire_children__ = {"members": "members"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -45,7 +47,7 @@ class ClubORM(Base):
     created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     members: Mapped[list["ClubMemberORM"]] = relationship(
-        back_populates="club", cascade="all, delete-orphan"
+        back_populates="club", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
@@ -55,6 +57,7 @@ class ClubMemberORM(Base):
 
     __tablename__ = "club_members"
     __table_args__ = (UniqueConstraint("club_id", "user_id", name="uq_club_member"),)
+    __wire_exclude__ = ("id", "club_id")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"))

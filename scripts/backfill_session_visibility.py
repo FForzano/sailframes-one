@@ -8,18 +8,16 @@ views. This script does exactly that — it sets ``visibility=public`` on every
 session that does not already carry an explicit non-private visibility.
 
 Design notes (per docs/user_plan.md / user_plan_next_phases.md):
-- **Backend-agnostic.** Runs through ``get_repos()`` (object blob JSON or
-  Postgres) and writes via ``SessionRepo.upsert`` — the authoritative store of
-  the deploy. Pick the backend with ``SAILFRAMES_METADATA_BACKEND``.
+- **Runs through ``get_repos()``** (Postgres) and writes via
+  ``SessionRepo.upsert`` — the authoritative store of the deploy.
 - **Idempotent.** Re-running only touches sessions still at the default
   ``private`` with no owner/crew, so an already-public (or user-claimed private)
   session is never rewritten.
-- On Postgres, run ``SqlSessionRepo.bootstrap_from_blob()`` first (or ensure the
-  table is populated) so historical manifests exist as rows before the flip.
+- Run ``SqlSessionRepo.bootstrap_from_blob()`` first (or ensure the table is
+  populated) so historical manifests exist as rows before the flip.
 
 Usage:
-    SAILFRAMES_METADATA_BACKEND=object   python scripts/backfill_session_visibility.py [--dry-run]
-    SAILFRAMES_METADATA_BACKEND=postgres python scripts/backfill_session_visibility.py [--dry-run]
+    python scripts/backfill_session_visibility.py [--dry-run]
 """
 
 import argparse
@@ -31,10 +29,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 
 def backfill(dry_run: bool = False) -> None:
-    from backend.repositories import get_repos, select_metadata_backend
+    from backend.repositories import get_repos
 
     repos = get_repos()
-    print(f"Backend: {select_metadata_backend()}")
 
     # On Postgres, make sure historical manifests are present as rows first.
     boot = getattr(repos.sessions, "bootstrap_from_blob", None)

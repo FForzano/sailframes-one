@@ -86,22 +86,44 @@ Where the original project includes hardware, firmware, edge devices, and AWS-or
 - **Maintainable** — clear boundaries between frontend, backend, storage, and processing
 - **Extensible** — new integrations should not require rewriting the core platform
 
-## Development
+## Quick start (self-host)
 
-Project structure and local setup documentation will be expanded as the repository is stabilized.
+Everything runs as containers. From the repo root:
 
-Planned top-level areas include:
+```bash
+docker compose up --build
+```
 
-- `backend/`
-- `frontend/`
-- `workers/`
-- `docs/`
-- `examples/`
-- `scripts/`
+Then open **http://localhost:8080**. That's the whole stack:
 
-Current migration note:
+| Service | Port | What it is |
+|---|---|---|
+| `frontend` | 8080 | The SPA (nginx). Serves the app and proxies `/api` → backend, so it's all one origin. |
+| `backend` | 8000 | The REST API (FastAPI). Also reachable directly for debugging. |
+| `postgres` | 5432 | Metadata (users, boats, sessions, races, RBAC). |
+| `minio` | 9000 / 9001 | S3-compatible blob storage (sensor data, video, manifests) + console. |
+| `process_upload`, `video` | — | Heavy-processing workers (see below). |
 
-- `infrastructure/` remains temporary and is planned for removal only after backend/worker migration is complete.
+No `.env` is required — every value has a dev default. Copy `.env.example` to
+`.env` to override secrets for a real deployment.
+
+## Architecture
+
+- **One API.** The FastAPI `backend/` is the only API surface. Metadata lives in
+  Postgres; large files (CSV sensor data, video, JSON results) live in S3/MinIO.
+- **Auth.** Native email/password (Argon2id) → JWT access cookie + rotating
+  refresh token, with double-submit CSRF and per-club RBAC.
+- **Workers as microservices.** `workers/process_upload` (GPS tracks + analysis)
+  and `workers/video` (MP4 → HLS via ffmpeg) are built on the AWS Lambda base
+  image. The **same image** runs on AWS Lambda and locally: in compose it runs
+  via the Lambda Runtime Interface Emulator that ships in the base image, and the
+  backend invokes it over HTTP on a MinIO upload event (`/hooks/minio`). On AWS
+  the identical image sits behind an S3 → Lambda trigger. No code changes to move
+  between the two.
+
+Repo layout: `backend/` · `frontend/` · `workers/{process_upload,video}/` ·
+`deploy/` (Dockerfile + MinIO init) · `scripts/` (migrations, image build) ·
+`docs/`.
 
 ## License
 

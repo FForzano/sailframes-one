@@ -1,15 +1,9 @@
 """Storage-backend-agnostic blob interface for SailFrames.
 
 A ``BlobStore`` is the single abstraction every part of the web API uses to
-read/write objects, replacing the ad-hoc ``if LOCAL_DATA_DIR``/S3 branches that
-used to live in main.py, race.py and ingest.py. Implementations:
-
-- ``ObjectBlobStore`` — AWS S3 *or* MinIO (path-style), in object_store.py
-- ``LocalBlobStore`` — local filesystem, in local_store.py
-
-Selected at startup by ``get_blob_store()`` (see ``__init__.py``) based on
-``SAILFRAMES_STORAGE_BACKEND`` (s3 | minio | local), falling back to the legacy
-``SAILFRAMES_LOCAL_DATA`` / ``SAILFRAMES_S3_ENDPOINT`` vars.
+read/write objects. The implementation is ``ObjectBlobStore`` — AWS S3, or a
+MinIO/S3-compatible endpoint (path-style) when ``SAILFRAMES_S3_ENDPOINT`` is
+set — built at startup by ``get_blob_store()`` (see ``__init__.py``).
 """
 
 from abc import ABC, abstractmethod

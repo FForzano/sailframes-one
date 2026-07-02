@@ -1,37 +1,59 @@
-"""SQL boat catalog repository (+ standing crew membership)."""
+"""SQL boat catalog repository (+ standing crew membership). Reads return
+``BoatORM``; ``create``/``update`` take dicts (membership is managed via the
+dedicated member methods so a boat edit never clobbers the roster)."""
 
 from typing import Optional
 
 from sqlalchemy import select, update
 
-from ... import domain
 from ...db.models import BoatORM, BoatMemberORM
-from ..base import BoatRepo
-from . import _mappers as M
+
+_SCALARS = ("name", "type", "sail_number", "club", "notes")
 
 
-class SqlBoatRepo(BoatRepo):
+class SqlBoatRepo:
     def __init__(self, session_factory):
         self.Session = session_factory
 
-    def list(self) -> list[domain.Boat]:
+    def list(self) -> list[BoatORM]:
         with self.Session() as s:
-            return [M.boat_to_domain(b) for b in s.scalars(select(BoatORM)).all()]
+            return list(s.scalars(select(BoatORM)).all())
 
-    def get(self, boat_id: str) -> Optional[domain.Boat]:
+    def get(self, boat_id: str) -> Optional[BoatORM]:
+        with self.Session() as s:
+            return s.get(BoatORM, boat_id)
+
+    def create(self, data: dict) -> BoatORM:
+        with self.Session() as s:
+            orm = BoatORM(boat_id=data["boat_id"])
+            for k in _SCALARS:
+                setattr(orm, k, data.get(k) or "")
+            orm.club_id = data.get("club_id")
+            orm.loa_m = data.get("loa_m")
+            orm.skippers = list(data.get("skippers") or [])
+            orm.photos = dict(data.get("photos") or {})
+            orm.cert_url = data.get("cert_url")
+            orm.mbsa_url = data.get("mbsa_url")
+            orm.links = list(data.get("links") or [])
+            orm.polar = data.get("polar")
+            orm.created_at = data.get("created_at")
+            orm.updated_at = data.get("updated_at")
+            s.add(orm)
+            s.commit()
+        return self.get(data["boat_id"])
+
+    def update(self, boat_id: str, changes: dict) -> Optional[BoatORM]:
         with self.Session() as s:
             orm = s.get(BoatORM, boat_id)
-            return M.boat_to_domain(orm) if orm else None
-
-    def save(self, boat: domain.Boat) -> domain.Boat:
-        with self.Session() as s:
-            orm = s.get(BoatORM, boat.boat_id)
             if orm is None:
-                orm = BoatORM(boat_id=boat.boat_id)
-                s.add(orm)
-            M.apply_boat(orm, boat)
+                return None
+            # Membership is never rewritten here (dedicated member methods do that).
+            for k, v in changes.items():
+                if k == "members":
+                    continue
+                setattr(orm, k, v)
             s.commit()
-        return boat
+        return self.get(boat_id)
 
     def delete(self, boat_id: str) -> bool:
         with self.Session() as s:
@@ -44,24 +66,19 @@ class SqlBoatRepo(BoatRepo):
 
     # --- standing crew ---
 
-    def add_member(self, boat_id: str, member: domain.BoatMember) -> bool:
+    def add_member(self, boat_id: str, *, user_id: int, role: str = "crew",
+                   created_at: Optional[str] = None) -> bool:
         with self.Session() as s:
             if s.get(BoatORM, boat_id) is None:
                 return False
             exists = s.scalars(
                 select(BoatMemberORM).where(
-                    BoatMemberORM.boat_id == boat_id,
-                    BoatMemberORM.user_id == member.user_id,
+                    BoatMemberORM.boat_id == boat_id, BoatMemberORM.user_id == user_id
                 )
             ).first()
             if exists is not None:
                 return False
-            s.add(BoatMemberORM(
-                boat_id=boat_id,
-                user_id=member.user_id,
-                role=member.role,
-                created_at=member.created_at,
-            ))
+            s.add(BoatMemberORM(boat_id=boat_id, user_id=user_id, role=role, created_at=created_at))
             s.commit()
             return True
 
@@ -69,8 +86,7 @@ class SqlBoatRepo(BoatRepo):
         with self.Session() as s:
             orm = s.scalars(
                 select(BoatMemberORM).where(
-                    BoatMemberORM.boat_id == boat_id,
-                    BoatMemberORM.user_id == user_id,
+                    BoatMemberORM.boat_id == boat_id, BoatMemberORM.user_id == user_id
                 )
             ).first()
             if orm is None:
@@ -83,30 +99,22 @@ class SqlBoatRepo(BoatRepo):
         with self.Session() as s:
             res = s.execute(
                 update(BoatMemberORM)
-                .where(
-                    BoatMemberORM.boat_id == boat_id,
-                    BoatMemberORM.user_id == user_id,
-                )
+                .where(BoatMemberORM.boat_id == boat_id, BoatMemberORM.user_id == user_id)
                 .values(role=role)
             )
             s.commit()
             return res.rowcount > 0
 
-    def list_members(self, boat_id: str) -> "list[domain.BoatMember]":
+    def list_members(self, boat_id: str) -> "list[BoatMemberORM]":
         with self.Session() as s:
-            rows = s.scalars(
+            return list(s.scalars(
                 select(BoatMemberORM).where(BoatMemberORM.boat_id == boat_id)
-            ).all()
-            return [
-                domain.BoatMember(user_id=m.user_id, role=m.role, created_at=m.created_at)
-                for m in rows
-            ]
+            ).all())
 
-    def is_member(self, boat_id: str, user_id: int, roles: "Optional[list[str]]" = None) -> bool:
+    def is_member(self, boat_id: str, user_id: int, roles: "Optional[list]" = None) -> bool:
         with self.Session() as s:
             q = select(BoatMemberORM).where(
-                BoatMemberORM.boat_id == boat_id,
-                BoatMemberORM.user_id == user_id,
+                BoatMemberORM.boat_id == boat_id, BoatMemberORM.user_id == user_id
             )
             if roles is not None:
                 q = q.where(BoatMemberORM.role.in_(roles))

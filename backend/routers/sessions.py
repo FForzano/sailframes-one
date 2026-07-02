@@ -7,7 +7,6 @@ deletion, and the bulk cleanup of short/unassigned sessions.
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from .. import domain
 from ..auth import (
     current_user,
     require_admin,
@@ -77,7 +76,7 @@ def get_session(device_id: str, date: str, request: Request):
     return session.to_dict()
 
 
-def _can_edit_session(session: domain.Session, device_id: str, user) -> bool:
+def _can_edit_session(session, device_id: str, user) -> bool:
     """Owner/skipper of the attributed boat, whoever registered the device (for
     an unclaimed session), the session owner, or a superadmin."""
     if user.is_superadmin:
@@ -111,24 +110,12 @@ def edit_session_crew(device_id: str, date: str, body: SessionCrewModel, request
     for slot in body.crew:
         if (slot.user_id is None) == (slot.guest_name is None):
             raise HTTPException(422, "Each crew slot needs exactly one of user_id / guest_name")
-        crew.append(domain.SessionCrew(
-            user_id=slot.user_id, guest_name=slot.guest_name, boat_role=slot.boat_role,
-        ))
-    session.crew = crew
-    if body.boat_id is not None:
-        session.boat_id = body.boat_id
-    if body.visibility is not None:
-        session.visibility = body.visibility
-    if body.club_id is not None:
-        session.club_id = body.club_id
-    if body.group_id is not None:
-        session.group_id = body.group_id
-    # Claim an unclaimed session for the editor.
-    if session.owner_user_id is None:
-        session.owner_user_id = user.id
-
-    repos.sessions.upsert(session)
-    return repos.sessions.get(device_id, date).to_dict()
+        crew.append({"user_id": slot.user_id, "guest_name": slot.guest_name, "boat_role": slot.boat_role})
+    updated = repos.sessions.edit(
+        device_id, date, crew=crew, boat_id=body.boat_id, visibility=body.visibility,
+        club_id=body.club_id, group_id=body.group_id, claim_owner_id=user.id,
+    )
+    return updated.to_dict()
 
 
 @router.delete("/{device_id}/{date}")

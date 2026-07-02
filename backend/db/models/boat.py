@@ -10,6 +10,7 @@ from ..base import Base
 
 class BoatORM(Base):
     __tablename__ = "boats"
+    __wire_children__ = {"members": "members"}
 
     boat_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, default="")
@@ -35,7 +36,7 @@ class BoatORM(Base):
     updated_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     members: Mapped[list["BoatMemberORM"]] = relationship(
-        back_populates="boat", cascade="all, delete-orphan"
+        back_populates="boat", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
@@ -47,6 +48,7 @@ class BoatMemberORM(Base):
 
     __tablename__ = "boat_members"
     __table_args__ = (UniqueConstraint("boat_id", "user_id", name="uq_boat_member"),)
+    __wire_exclude__ = ("id", "boat_id")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     boat_id: Mapped[str] = mapped_column(ForeignKey("boats.boat_id", ondelete="CASCADE"))

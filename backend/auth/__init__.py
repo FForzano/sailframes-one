@@ -1,7 +1,7 @@
 """Authentication & authorization for the SailFrames API.
 
-- ``require_admin`` / ``require_permission`` — endpoint guards (permissions.py)
-- Cloudflare cookie gate (cloudflare.py) — the non-Postgres path
+- ``require_admin`` / ``require_permission`` — endpoint guards (permissions.py),
+  resolving identity from the ``sf_access`` JWT cookie against Postgres RBAC
 - RBAC seed (seed.py) and password hashing (passwords.py)
 
 ``require_admin`` is kept as the broad gate existing endpoints already call;

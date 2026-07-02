@@ -1,18 +1,16 @@
-"""FastAPI backend for SailFrames analysis dashboard.
+"""FastAPI backend for SailFrames — the single REST API.
 
-Composition root only: builds the app, wires middleware + the RBAC startup
-seed, includes every router from ``backend/routers`` (one module per resource),
-and mounts the static frontend last. All endpoint logic lives in the router
-modules; shared HTTP helpers live in ``routers/_common.py``. Designed to run
-locally or behind API Gateway in AWS.
+Composition root only: builds the app, wires CORS + the RBAC startup seed, and
+includes every router from ``backend/routers`` (one module per resource). All
+endpoint logic lives in the router modules; shared HTTP helpers live in
+``routers/_common.py``. The SPA is served by its own container, so this app is
+API-only (no static mount).
 """
 
 import os
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from .routers import ALL_ROUTERS
 
@@ -45,43 +43,19 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _seed():
-    """Seed the bootstrap superadmin + the physical E1–E6 device registry (both
-    backends) and, on Postgres, the default RBAC roles/permissions."""
-    from .auth import seed_superadmin, seed_devices
+    """Run migrations (via repo build) then seed the bootstrap superadmin, the
+    physical E1–E6 device registry, and the default RBAC roles/permissions."""
+    from .auth import seed_defaults, seed_superadmin, seed_devices
+    from .db import get_sessionmaker
     from .repositories import get_repos
 
-    repos = get_repos()
+    repos = get_repos()  # building the SQL repos runs alembic upgrade head
     seed_superadmin(repos)
     seed_devices(repos)
-    if os.environ.get("SAILFRAMES_METADATA_BACKEND", "object").lower() == "postgres":
-        from .auth import seed_defaults
-        from .db import get_sessionmaker
-        seed_defaults(get_sessionmaker())
+    seed_defaults(get_sessionmaker())
 
 
 # Include every resource router (E1 fleet, sessions, data, analysis, boats,
 # leaderboard, video, buoys, races/regattas/racedays, fleet status, ingest).
 for _router in ALL_ROUTERS:
     app.include_router(_router)
-
-
-# --- Static files (frontend SPA) ---
-# Mounted LAST so the catch-all "/" does not shadow the API routes above.
-# Serves the built Vite SPA (``frontend/dist``). Unknown non-file paths fall
-# back to ``index.html`` so client-side deep links (e.g. ``/races/123``) resolve
-# on reload instead of 404-ing.
-class SPAStaticFiles(StaticFiles):
-    async def get_response(self, path: str, scope):
-        from starlette.exceptions import HTTPException as StarletteHTTPException
-
-        try:
-            return await super().get_response(path, scope)
-        except StarletteHTTPException as exc:
-            if exc.status_code == 404:
-                return await super().get_response("index.html", scope)
-            raise
-
-
-dist_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-if (dist_dir / "index.html").exists():
-    app.mount("/", SPAStaticFiles(directory=str(dist_dir), html=True), name="frontend")

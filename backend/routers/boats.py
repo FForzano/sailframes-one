@@ -9,7 +9,6 @@ regatta router style. Mutations are CSRF-protected and gated on boat membership
 
 from fastapi import APIRouter, HTTPException, Request
 
-from .. import domain
 from ..auth import require_permission, require_user, verify_csrf
 from ..schemas import BoatMemberModel, BoatMemberRoleModel, BoatWriteModel
 from ._common import now_iso, repos
@@ -22,7 +21,7 @@ MANAGE_ROLES = ["owner", "skipper"]
 
 def _has_boat_edit_permission(request: Request) -> bool:
     """True if the caller holds the ``boat.edit`` RBAC permission (or is an
-    admin via bypass/Cloudflare/superadmin). Non-raising wrapper around
+    admin via bypass/superadmin). Non-raising wrapper around
     ``require_permission`` so it composes with the membership check."""
     try:
         return require_permission(request, "boat.edit")
@@ -63,21 +62,19 @@ def create_boat(body: BoatWriteModel, request: Request):
     if repos.boats.get(body.boat_id) is not None:
         raise HTTPException(409, f"Boat already exists: {body.boat_id}")
     now = now_iso()
-    boat = repos.boats.save(domain.Boat(
-        boat_id=body.boat_id,
-        name=body.name or "",
-        type=body.type or "",
-        sail_number=body.sail_number or "",
-        club=body.club or "",
-        club_id=body.club_id,
-        loa_m=body.loa_m,
-        notes=body.notes or "",
-        created_at=now,
-        updated_at=now,
-    ))
-    repos.boats.add_member(boat.boat_id, domain.BoatMember(
-        user_id=user.id, role="owner", created_at=now,
-    ))
+    boat = repos.boats.create({
+        "boat_id": body.boat_id,
+        "name": body.name or "",
+        "type": body.type or "",
+        "sail_number": body.sail_number or "",
+        "club": body.club or "",
+        "club_id": body.club_id,
+        "loa_m": body.loa_m,
+        "notes": body.notes or "",
+        "created_at": now,
+        "updated_at": now,
+    })
+    repos.boats.add_member(boat.boat_id, user_id=user.id, role="owner", created_at=now)
     return repos.boats.get(boat.boat_id).to_dict()
 
 
@@ -93,10 +90,8 @@ def update_boat(boat_id: str, body: BoatWriteModel, request: Request):
     if not _can_manage(boat_id, user, request):
         raise HTTPException(403, "Not allowed to manage this boat")
     fields = body.model_dump(exclude_unset=True, exclude={"boat_id"})
-    for key, value in fields.items():
-        setattr(boat, key, value)
-    boat.updated_at = now_iso()
-    return repos.boats.save(boat).to_dict()
+    fields["updated_at"] = now_iso()
+    return repos.boats.update(boat_id, fields).to_dict()
 
 
 @router.get("/{boat_id}/members")
@@ -119,9 +114,7 @@ def add_member(boat_id: str, body: BoatMemberModel, request: Request):
         raise HTTPException(403, "Not allowed to manage this boat")
     if repos.users.get_by_id(body.user_id) is None:
         raise HTTPException(404, f"User not found: {body.user_id}")
-    added = repos.boats.add_member(boat_id, domain.BoatMember(
-        user_id=body.user_id, role=body.role, created_at=now_iso(),
-    ))
+    added = repos.boats.add_member(boat_id, user_id=body.user_id, role=body.role, created_at=now_iso())
     if not added:
         raise HTTPException(409, "Already a member")
     return repos.boats.get(boat_id).to_dict()

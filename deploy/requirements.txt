@@ -1,22 +1,18 @@
-# Python deps for the self-hosted SailFrames API service (Docker).
-# numpy/pandas are required by the processing pipeline; slim/Debian base
-# pulls precompiled wheels (do not switch to alpine — see deploy/README.md).
+# Python deps for the SailFrames REST API (backend/). Debian-slim base.
+# Heavy data-processing deps (numpy/pandas/ffmpeg) live in the worker images,
+# not here — the API only serves precomputed results.
 
 fastapi>=0.110
 uvicorn[standard]>=0.29
-boto3>=1.28
-requests>=2.31
-python-multipart>=0.0.9   # GPX UploadFile endpoint in backend/routers/races.py
-numpy>=1.24
-pandas>=2.0
+boto3>=1.28               # S3 / MinIO blob store
+requests>=2.31           # dispatch ingest events to the worker RIE endpoints
+python-multipart>=0.0.9  # GPX UploadFile endpoint in backend/routers/races.py
 
-# Postgres metadata backend (SAILFRAMES_METADATA_BACKEND=postgres). Unused by
-# the default object backend, but harmless to install.
+# Postgres metadata backend
 sqlalchemy>=2.0
 psycopg[binary]>=3.1
-alembic>=1.13   # schema migrations (Postgres backend only)
+alembic>=1.13            # schema migrations
 
-# Auth: Argon2id password hashing + JWT access tokens (native email/password
-# login). Used by both metadata backends.
+# Auth: Argon2id password hashing + JWT access tokens
 argon2-cffi>=23.1
 pyjwt>=2.8

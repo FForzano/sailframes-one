@@ -31,7 +31,11 @@ target_metadata = Base.metadata
 
 
 def _url() -> str:
-    return str(_build_url())
+    # _build_url() returns a plain str (DATABASE_URL) or a SQLAlchemy URL built
+    # from the POSTGRES_* vars. str(URL) MASKS the password as "***", so render
+    # it explicitly with the password intact for the migration connection.
+    u = _build_url()
+    return u if isinstance(u, str) else u.render_as_string(hide_password=False)
 
 
 def run_migrations_offline() -> None:

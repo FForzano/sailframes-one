@@ -1,0 +1,298 @@
+Date : 2026-07-02 11:19:11
+Directory : /Users/federico/Documents/Personal-DEV/core
+Total : 210 files,  15631 codes, 1955 comments, 2595 blanks, all 20181 lines
+
+Languages
++--------------------+------------+------------+------------+------------+------------+
+| language           | files      | code       | comment    | blank      | total      |
++--------------------+------------+------------+------------+------------+------------+
+| Python             |        102 |      7,172 |      1,693 |      1,773 |     10,638 |
+| TypeScript JSX     |         47 |      2,804 |         85 |        283 |      3,172 |
+| JSON               |          4 |      2,382 |          0 |          4 |      2,386 |
+| Markdown           |          4 |      1,081 |          0 |        267 |      1,348 |
+| TypeScript         |         38 |      1,071 |         86 |        175 |      1,332 |
+| PostCSS            |          1 |        803 |         19 |         36 |        858 |
+| YAML               |          1 |        121 |         19 |         10 |        150 |
+| Shell Script       |          2 |         51 |         25 |         12 |         88 |
+| Ini                |          1 |         39 |          0 |         10 |         49 |
+| Docker             |          3 |         29 |         19 |         12 |         60 |
+| JSON with Comments |          1 |         25 |          0 |          1 |         26 |
+| Properties         |          1 |         20 |          4 |          4 |         28 |
+| pip requirements   |          3 |         14 |          5 |          6 |         25 |
+| HTML               |          1 |         13 |          0 |          1 |         14 |
+| Ignore             |          1 |          6 |          0 |          1 |          7 |
++--------------------+------------+------------+------------+------------+------------+
+
+Directories
++-------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                                            | files      | code       | comment    | blank      | total      |
++-------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                               |        210 |     15,631 |      1,955 |      2,595 |     20,181 |
+| . (Files)                                                                                       |          3 |        948 |         19 |        226 |      1,193 |
+| backend                                                                                         |         90 |      5,077 |      1,001 |      1,298 |      7,376 |
+| backend (Files)                                                                                 |          4 |        292 |         70 |         76 |        438 |
+| backend/alembic                                                                                 |          6 |        450 |         80 |         56 |        586 |
+| backend/alembic (Files)                                                                         |          1 |         43 |         11 |         15 |         69 |
+| backend/alembic/versions                                                                        |          5 |        407 |         69 |         41 |        517 |
+| backend/auth                                                                                    |          5 |        336 |         84 |         96 |        516 |
+| backend/db                                                                                      |         11 |        418 |         94 |        150 |        662 |
+| backend/db (Files)                                                                              |          2 |         53 |         19 |         24 |         96 |
+| backend/db/models                                                                               |          9 |        365 |         75 |        126 |        566 |
+| backend/domain                                                                                  |         12 |        254 |        107 |         90 |        451 |
+| backend/repositories                                                                            |         15 |      1,035 |         79 |        193 |      1,307 |
+| backend/repositories (Files)                                                                    |          2 |         38 |         19 |         14 |         71 |
+| backend/repositories/sql                                                                        |         13 |        997 |         60 |        179 |      1,236 |
+| backend/routers                                                                                 |         20 |      1,708 |        382 |        441 |      2,531 |
+| backend/schemas                                                                                 |         10 |        182 |         28 |         81 |        291 |
+| backend/services                                                                                |          4 |        233 |         28 |         57 |        318 |
+| backend/storage                                                                                 |          3 |        169 |         49 |         58 |        276 |
+| deploy                                                                                          |          3 |        112 |         19 |         33 |        164 |
+| docs                                                                                            |          1 |        189 |          0 |         29 |        218 |
+| frontend                                                                                        |         95 |      7,136 |        199 |        508 |      7,843 |
+| frontend (Files)                                                                                |          8 |      2,013 |         12 |         14 |      2,039 |
+| frontend/src                                                                                    |         87 |      5,123 |        187 |        494 |      5,804 |
+| frontend/src (Files)                                                                            |          3 |        154 |         11 |         10 |        175 |
+| frontend/src/components                                                                         |         19 |        674 |         31 |         72 |        777 |
+| frontend/src/components/auth                                                                    |          2 |        129 |          0 |          8 |        137 |
+| frontend/src/components/layout                                                                  |          5 |        151 |         10 |         16 |        177 |
+| frontend/src/components/race                                                                    |          5 |        278 |         19 |         33 |        330 |
+| frontend/src/components/ui                                                                      |          7 |        116 |          2 |         15 |        133 |
+| frontend/src/contexts                                                                           |          4 |        182 |          6 |         30 |        218 |
+| frontend/src/data                                                                               |          2 |        109 |          9 |         12 |        130 |
+| frontend/src/hooks                                                                              |          5 |        127 |         12 |         21 |        160 |
+| frontend/src/i18n                                                                               |          3 |        477 |          3 |          6 |        486 |
+| frontend/src/i18n (Files)                                                                       |          1 |         15 |          3 |          4 |         22 |
+| frontend/src/i18n/locales                                                                       |          2 |        462 |          0 |          2 |        464 |
+| frontend/src/pages                                                                              |         22 |      1,853 |         41 |        175 |      2,069 |
+| frontend/src/pages (Files)                                                                      |          5 |         71 |          3 |         11 |         85 |
+| frontend/src/pages/app                                                                          |          9 |      1,136 |         20 |        101 |      1,257 |
+| frontend/src/pages/public                                                                       |          8 |        646 |         18 |         63 |        727 |
+| frontend/src/services                                                                           |         11 |        213 |         14 |         43 |        270 |
+| frontend/src/stores                                                                             |          1 |         73 |          6 |         14 |         93 |
+| frontend/src/styles                                                                             |          1 |        803 |         19 |         36 |        858 |
+| frontend/src/types                                                                              |         10 |        253 |         13 |         36 |        302 |
+| frontend/src/utils                                                                              |          6 |        205 |         22 |         39 |        266 |
+| scripts                                                                                         |          3 |        109 |         60 |         32 |        201 |
+| workers                                                                                         |         15 |      2,060 |        657 |        469 |      3,186 |
+| workers/process_upload                                                                          |         12 |      1,962 |        632 |        443 |      3,037 |
+| workers/process_upload (Files)                                                                  |          4 |      1,063 |        434 |        197 |      1,694 |
+| workers/process_upload/processing                                                               |          8 |        899 |        198 |        246 |      1,343 |
+| workers/video                                                                                   |          3 |         98 |         25 |         26 |        149 |
++-------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| filename                                                                                        | language           | code       | comment    | blank      | total      |
++-------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+
+| /Users/federico/Documents/Personal-DEV/core/CLAUDE.md                                           | Markdown           |        736 |          0 |        177 |        913 |
+| /Users/federico/Documents/Personal-DEV/core/README.md                                           | Markdown           |         91 |          0 |         39 |        130 |
+| /Users/federico/Documents/Personal-DEV/core/backend/__init__.py                                 | Python             |          0 |          1 |          1 |          2 |
+| /Users/federico/Documents/Personal-DEV/core/backend/alembic.ini                                 | Ini                |         39 |          0 |         10 |         49 |
+| /Users/federico/Documents/Personal-DEV/core/backend/alembic/env.py                              | Python             |         43 |         11 |         15 |         69 |
+| /Users/federico/Documents/Personal-DEV/core/backend/alembic/versions/0001_baseline.py           | Python             |        242 |         21 |          8 |        271 |
+| /Users/federico/Documents/Personal-DEV/core/backend/alembic/versions/0002_boat_members.py       | Python             |         30 |         14 |          8 |         52 |
+| /Users/federico/Documents/Personal-DEV/core/backend/alembic/versions/0003_groups.py             | Python             |         35 |         11 |          8 |         54 |
+| /Users/federico/Documents/Personal-DEV/core/backend/alembic/versions/0004_devices.py            | Python             |         46 |         10 |          8 |         64 |
+| /Users/federico/Documents/Personal-DEV/core/backend/alembic/versions/0005_session_privacy.py    | Python             |         54 |         13 |          9 |         76 |
+| /Users/federico/Documents/Personal-DEV/core/backend/auth/__init__.py                            | Python             |         25 |          9 |          3 |         37 |
+| /Users/federico/Documents/Personal-DEV/core/backend/auth/passwords.py                           | Python             |         11 |          8 |          7 |         26 |
+| /Users/federico/Documents/Personal-DEV/core/backend/auth/permissions.py                         | Python             |        154 |         34 |         35 |        223 |
+| /Users/federico/Documents/Personal-DEV/core/backend/auth/seed.py                                | Python             |         88 |         16 |         19 |        123 |
+| /Users/federico/Documents/Personal-DEV/core/backend/auth/tokens.py                              | Python             |         58 |         17 |         32 |        107 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/__init__.py                              | Python             |         50 |         17 |         20 |         87 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/base.py                                  | Python             |          3 |          2 |          4 |          9 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/__init__.py                       | Python             |         41 |          5 |          3 |         49 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/boat.py                           | Python             |         36 |          9 |         13 |         58 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/device.py                         | Python             |         39 |         10 |         13 |         62 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/group.py                          | Python             |         27 |         12 |         13 |         52 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/race.py                           | Python             |         59 |          6 |         20 |         85 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/raceday.py                        | Python             |         14 |          2 |          7 |         23 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/rbac.py                           | Python             |         77 |         15 |         36 |        128 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/regatta.py                        | Python             |         17 |          2 |          7 |         26 |
+| /Users/federico/Documents/Personal-DEV/core/backend/db/models/session.py                        | Python             |         55 |         14 |         14 |         83 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/__init__.py                          | Python             |         33 |          8 |          3 |         44 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/auth_token.py                        | Python             |         12 |          7 |          5 |         24 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/base.py                              | Python             |          8 |          6 |          6 |         20 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/boat.py                              | Python             |         25 |          8 |          8 |         41 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/club.py                              | Python             |         13 |          8 |          7 |         28 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/device.py                            | Python             |         42 |         33 |         14 |         89 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/group.py                             | Python             |         15 |         10 |          7 |         32 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/race.py                              | Python             |         43 |          5 |         14 |         62 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/raceday.py                           | Python             |         12 |          1 |          6 |         19 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/regatta.py                           | Python             |         15 |          1 |          6 |         22 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/session.py                           | Python             |         27 |         18 |          9 |         54 |
+| /Users/federico/Documents/Personal-DEV/core/backend/domain/user.py                              | Python             |          9 |          2 |          5 |         16 |
+| /Users/federico/Documents/Personal-DEV/core/backend/main.py                                     | Python             |         35 |         16 |         11 |         62 |
+| /Users/federico/Documents/Personal-DEV/core/backend/noaa_buoys.py                               | Python             |        218 |         53 |         54 |        325 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/__init__.py                    | Python             |         14 |          6 |         10 |         30 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/base.py                        | Python             |         24 |         13 |          4 |         41 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/__init__.py                | Python             |         41 |          6 |          6 |         53 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/_blob_sessions.py          | Python             |         52 |          7 |         11 |         70 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/_mappers.py                | Python             |        296 |         19 |         45 |        360 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/auth_token_repo.py         | Python             |         53 |          1 |         10 |         64 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/boat_repo.py               | Python             |         95 |          2 |         16 |        113 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/club_repo.py               | Python             |         67 |          1 |         12 |         80 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/device_repo.py             | Python             |         81 |          1 |         13 |         95 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/group_repo.py              | Python             |         81 |          1 |         13 |         95 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/race_repo.py               | Python             |         39 |          1 |         10 |         50 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/raceday_repo.py            | Python             |         32 |          1 |         10 |         43 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/regatta_repo.py            | Python             |         32 |          1 |         10 |         43 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/session_repo.py            | Python             |         84 |         18 |         11 |        113 |
+| /Users/federico/Documents/Personal-DEV/core/backend/repositories/sql/user_repo.py               | Python             |         44 |          1 |         12 |         57 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/__init__.py                         | Python             |         41 |         14 |          4 |         59 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/_common.py                          | Python             |         56 |         35 |         34 |        125 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/analysis.py                         | Python             |         34 |         11 |         14 |         59 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/auth.py                             | Python             |        144 |         27 |         32 |        203 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/boats.py                            | Python             |        112 |         21 |         25 |        158 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/buoys.py                            | Python             |         72 |         17 |         18 |        107 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/clubs.py                            | Python             |         60 |          9 |         16 |         85 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/data.py                             | Python             |         45 |         24 |         13 |         82 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/devices.py                          | Python             |        108 |         23 |         24 |        155 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/download.py                         | Python             |         22 |         16 |         10 |         48 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/e1.py                               | Python             |        130 |         17 |         28 |        175 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/fleet.py                            | Python             |         26 |         10 |         15 |         51 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/groups.py                           | Python             |         72 |         12 |         18 |        102 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/ingest.py                           | Python             |         82 |         29 |         20 |        131 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/leaderboard.py                      | Python             |         19 |          7 |         10 |         36 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/racedays.py                         | Python             |         58 |          5 |         15 |         78 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/races.py                            | Python             |        388 |         60 |         89 |        537 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/regattas.py                         | Python             |         55 |         11 |         15 |         81 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/sessions.py                         | Python             |        167 |         29 |         33 |        229 |
+| /Users/federico/Documents/Personal-DEV/core/backend/routers/video.py                            | Python             |         17 |          5 |          8 |         30 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/__init__.py                         | Python             |         41 |          6 |          3 |         50 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/auth.py                             | Python             |          9 |          5 |          7 |         21 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/boat.py                             | Python             |         16 |          4 |         11 |         31 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/club.py                             | Python             |         10 |          1 |          9 |         20 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/device.py                           | Python             |         14 |          3 |          7 |         24 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/group.py                            | Python             |         12 |          1 |          9 |         22 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/race.py                             | Python             |         43 |          1 |         13 |         57 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/raceday.py                          | Python             |         12 |          1 |          7 |         20 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/regatta.py                          | Python             |         13 |          1 |          7 |         21 |
+| /Users/federico/Documents/Personal-DEV/core/backend/schemas/session.py                          | Python             |         12 |          5 |          8 |         25 |
+| /Users/federico/Documents/Personal-DEV/core/backend/services/__init__.py                        | Python             |          0 |          2 |          1 |          3 |
+| /Users/federico/Documents/Personal-DEV/core/backend/services/course.py                          | Python             |        125 |         12 |         22 |        159 |
+| /Users/federico/Documents/Personal-DEV/core/backend/services/geo.py                             | Python             |         53 |         11 |         21 |         85 |
+| /Users/federico/Documents/Personal-DEV/core/backend/services/gpx.py                             | Python             |         55 |          3 |         13 |         71 |
+| /Users/federico/Documents/Personal-DEV/core/backend/storage/__init__.py                         | Python             |         21 |          7 |         10 |         38 |
+| /Users/federico/Documents/Personal-DEV/core/backend/storage/base.py                             | Python             |         33 |         25 |         23 |         81 |
+| /Users/federico/Documents/Personal-DEV/core/backend/storage/object_store.py                     | Python             |        115 |         17 |         25 |        157 |
+| /Users/federico/Documents/Personal-DEV/core/deploy/README.md                                    | Markdown           |         65 |          0 |         22 |         87 |
+| /Users/federico/Documents/Personal-DEV/core/deploy/minio-init.sh                                | Shell Script       |         37 |         14 |          7 |         58 |
+| /Users/federico/Documents/Personal-DEV/core/deploy/requirements.txt                             | pip requirements   |         10 |          5 |          4 |         19 |
+| /Users/federico/Documents/Personal-DEV/core/docker-compose.yml                                  | YAML               |        121 |         19 |         10 |        150 |
+| /Users/federico/Documents/Personal-DEV/core/docs/frontend-refactor-plan.md                      | Markdown           |        189 |          0 |         29 |        218 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/.dockerignore                              | Ignore             |          6 |          0 |          1 |          7 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/Dockerfile                                 | Docker             |         12 |          5 |          3 |         20 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/index.html                                 | HTML               |         13 |          0 |          1 |         14 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/nginx.conf                                 | Properties         |         20 |          4 |          4 |         28 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/package-lock.json                          | JSON               |      1,891 |          0 |          1 |      1,892 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/package.json                               | JSON               |         29 |          0 |          1 |         30 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/App.tsx                                | TypeScript JSX     |        121 |          7 |          4 |        132 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/auth/LoginForm.tsx          | TypeScript JSX     |         61 |          0 |          4 |         65 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/auth/RegisterForm.tsx       | TypeScript JSX     |         68 |          0 |          4 |         72 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/layout/ActionBar.tsx        | TypeScript JSX     |         27 |          3 |          4 |         34 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/layout/Footer.tsx           | TypeScript JSX     |         18 |          0 |          2 |         20 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/layout/MainContent.tsx      | TypeScript JSX     |         34 |          3 |          4 |         41 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/layout/Navbar.tsx           | TypeScript JSX     |         33 |          2 |          3 |         38 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/layout/Sidebar.tsx          | TypeScript JSX     |         39 |          2 |          3 |         44 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/race/Leaderboard.tsx        | TypeScript JSX     |         46 |          3 |          5 |         54 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/race/MapView.tsx            | TypeScript JSX     |         63 |          6 |          9 |         78 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/race/SpeedChart.tsx         | TypeScript JSX     |         54 |          2 |          7 |         63 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/race/Timeline.tsx           | TypeScript JSX     |         37 |          1 |          5 |         43 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/race/raceModel.ts           | TypeScript         |         78 |          7 |          7 |         92 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/ui/Button.tsx               | TypeScript JSX     |         11 |          0 |          3 |         14 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/ui/Card.tsx                 | TypeScript JSX     |         17 |          0 |          2 |         19 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/ui/InputField.tsx           | TypeScript JSX     |         13 |          0 |          2 |         15 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/ui/Modal.tsx                | TypeScript JSX     |         34 |          2 |          3 |         39 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/ui/Select.tsx               | TypeScript JSX     |         16 |          0 |          2 |         18 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/ui/Spinner.tsx              | TypeScript JSX     |          7 |          0 |          1 |          8 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/components/ui/ToastViewport.tsx        | TypeScript JSX     |         18 |          0 |          2 |         20 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/contexts/AuthContext.tsx               | TypeScript JSX     |         99 |          2 |         12 |        113 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/contexts/ErrorContext.tsx              | TypeScript JSX     |         24 |          2 |          5 |         31 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/contexts/LoadingContext.tsx            | TypeScript JSX     |         23 |          2 |          4 |         29 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/contexts/ToastContext.tsx              | TypeScript JSX     |         36 |          0 |          9 |         45 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/data/bom.ts                            | TypeScript         |         63 |          2 |          7 |         72 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/data/navConfig.ts                      | TypeScript         |         46 |          7 |          5 |         58 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/hooks/useAuth.ts                       | TypeScript         |          7 |          0 |          2 |          9 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/hooks/useCapabilities.ts               | TypeScript         |         49 |          5 |          5 |         59 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/hooks/useResource.ts                   | TypeScript         |         38 |          4 |          6 |         48 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/hooks/useScreenWidth.ts                | TypeScript         |         26 |          3 |          6 |         35 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/hooks/useToast.ts                      | TypeScript         |          7 |          0 |          2 |          9 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/i18n/index.ts                          | TypeScript         |         15 |          3 |          4 |         22 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/i18n/locales/en.json                   | JSON               |        231 |          0 |          1 |        232 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/i18n/locales/it.json                   | JSON               |        231 |          0 |          1 |        232 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/main.tsx                               | TypeScript JSX     |         27 |          3 |          3 |         33 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/Home.tsx                         | TypeScript JSX     |         27 |          0 |          3 |         30 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/Login.tsx                        | TypeScript JSX     |          8 |          0 |          2 |         10 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/NotFound.tsx                     | TypeScript JSX     |         14 |          0 |          2 |         16 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/Placeholder.tsx                  | TypeScript JSX     |         14 |          3 |          2 |         19 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/Register.tsx                     | TypeScript JSX     |          8 |          0 |          2 |         10 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Admin.tsx                    | TypeScript JSX     |         78 |          3 |          6 |         87 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Boats.tsx                    | TypeScript JSX     |        151 |          1 |         12 |        164 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Clubs.tsx                    | TypeScript JSX     |        165 |          2 |         15 |        182 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Dashboard.tsx                | TypeScript JSX     |         51 |          4 |          5 |         60 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Devices.tsx                  | TypeScript JSX     |        143 |          0 |          9 |        152 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Events.tsx                   | TypeScript JSX     |        194 |          5 |         19 |        218 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Groups.tsx                   | TypeScript JSX     |        162 |          0 |         15 |        177 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/MySessions.tsx               | TypeScript JSX     |        145 |          5 |         14 |        164 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/app/Profile.tsx                  | TypeScript JSX     |         47 |          0 |          6 |         53 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/Battery.tsx               | TypeScript JSX     |        111 |          4 |         11 |        126 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/Bom.tsx                   | TypeScript JSX     |         77 |          1 |          5 |         83 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/FleetStatus.tsx           | TypeScript JSX     |        109 |          3 |          9 |        121 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/RaceView.tsx              | TypeScript JSX     |         66 |          4 |          8 |         78 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/RacesBrowser.tsx          | TypeScript JSX     |        143 |          0 |         13 |        156 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/RegattaDetail.tsx         | TypeScript JSX     |         42 |          0 |          6 |         48 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/SessionView.tsx           | TypeScript JSX     |         58 |          3 |          6 |         67 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/pages/public/Sessions.tsx              | TypeScript JSX     |         40 |          3 |          5 |         48 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/admin.service.ts              | TypeScript         |         28 |          2 |          3 |         33 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/auth.service.ts               | TypeScript         |         11 |          0 |          6 |         17 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/boats.service.ts              | TypeScript         |         16 |          0 |          2 |         18 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/clubs.service.ts              | TypeScript         |         11 |          0 |          2 |         13 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/devices.service.ts            | TypeScript         |         21 |          0 |          2 |         23 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/events.service.ts             | TypeScript         |         39 |          3 |          7 |         49 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/fleet.service.ts              | TypeScript         |         26 |          6 |          5 |         37 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/groups.service.ts             | TypeScript         |         13 |          0 |          2 |         15 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/racedata.service.ts           | TypeScript         |          7 |          0 |          3 |         10 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/races.service.ts              | TypeScript         |         15 |          0 |          4 |         19 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/services/sessions.service.ts           | TypeScript         |         26 |          3 |          7 |         36 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/stores/timeController.ts               | TypeScript         |         73 |          6 |         14 |         93 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/styles/global.css                      | PostCSS            |        803 |         19 |         36 |        858 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/auth.ts                          | TypeScript         |         12 |          2 |          3 |         17 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/boat.ts                          | TypeScript         |         29 |          0 |          4 |         33 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/capabilities.ts                  | TypeScript         |         30 |          3 |          5 |         38 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/club.ts                          | TypeScript         |         28 |          0 |          4 |         32 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/device.ts                        | TypeScript         |         33 |          0 |          4 |         37 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/fleet.ts                         | TypeScript         |         21 |          3 |          2 |         26 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/index.ts                         | TypeScript         |         18 |          0 |          1 |         19 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/race.ts                          | TypeScript         |         20 |          2 |          3 |         25 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/racedata.ts                      | TypeScript         |         42 |          1 |          7 |         50 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/types/session.ts                       | TypeScript         |         20 |          2 |          3 |         25 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/utils/IsAuth.tsx                       | TypeScript JSX     |         25 |          4 |          6 |         35 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/utils/api.ts                           | TypeScript         |         87 |          8 |         14 |        109 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/utils/csrf.ts                          | TypeScript         |         10 |          2 |          2 |         14 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/utils/format.ts                        | TypeScript         |         33 |          3 |          5 |         41 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/utils/geo.ts                           | TypeScript         |         34 |          2 |          4 |         40 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/utils/guards.ts                        | TypeScript         |         16 |          3 |          8 |         27 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/src/vite-env.d.ts                          | TypeScript         |          6 |          1 |          3 |         10 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/tsconfig.json                              | JSON with Comments |         25 |          0 |          1 |         26 |
+| /Users/federico/Documents/Personal-DEV/core/frontend/vite.config.ts                             | TypeScript         |         17 |          3 |          2 |         22 |
+| /Users/federico/Documents/Personal-DEV/core/scripts/backfill_session_visibility.py              | Python             |         33 |         25 |         11 |         69 |
+| /Users/federico/Documents/Personal-DEV/core/scripts/build-images.sh                             | Shell Script       |         14 |         11 |          5 |         30 |
+| /Users/federico/Documents/Personal-DEV/core/scripts/migrate_boat_members.py                     | Python             |         62 |         24 |         16 |        102 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/Dockerfile                   | Docker             |          5 |          7 |          4 |         16 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/analyzer.py                  | Python             |        112 |         26 |         35 |        173 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/handler.py                   | Python             |        943 |        401 |        157 |      1,501 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/__init__.py       | Python             |          0 |          1 |          1 |          2 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/maneuvers.py      | Python             |        168 |         38 |         47 |        253 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/models.py         | Python             |        204 |         18 |         49 |        271 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/polar.py          | Python             |         85 |         26 |         29 |        140 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/stats.py          | Python             |        137 |         20 |         28 |        185 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/straight_lines.py | Python             |        132 |         34 |         32 |        198 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/vmg.py            | Python             |         69 |         24 |         24 |        117 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/processing/wind.py           | Python             |        104 |         37 |         36 |        177 |
+| /Users/federico/Documents/Personal-DEV/core/workers/process_upload/requirements.txt             | pip requirements   |          3 |          0 |          1 |          4 |
+| /Users/federico/Documents/Personal-DEV/core/workers/video/Dockerfile                            | Docker             |         12 |          7 |          5 |         24 |
+| /Users/federico/Documents/Personal-DEV/core/workers/video/handler.py                            | Python             |         85 |         18 |         20 |        123 |
+| /Users/federico/Documents/Personal-DEV/core/workers/video/requirements.txt                      | pip requirements   |          1 |          0 |          1 |          2 |
+| Total                                                                                           |                    |     15,631 |      1,955 |      2,595 |     20,181 |
++-------------------------------------------------------------------------------------------------+--------------------+------------+------------+------------+------------+

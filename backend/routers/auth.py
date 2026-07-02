@@ -17,7 +17,6 @@ import re
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from .. import domain
 from ..auth import (
     effective_capabilities,
     hash_password,
@@ -62,13 +61,13 @@ def _set_auth_cookies(response: Response, user_id: int) -> str:
     )
 
     refresh = new_refresh_token()
-    repos.auth_tokens.create(domain.AuthRefreshToken(
+    repos.auth_tokens.create(
         user_id=user_id,
         token_hash=hash_refresh(refresh),
         family_id=new_family_id(),
         issued_at=now_iso(),
         expires_at=refresh_expiry_iso(),
-    ))
+    )
     response.set_cookie(
         REFRESH_COOKIE, refresh, httponly=True, secure=secure,
         samesite="lax", max_age=refresh_max_age(), path=REFRESH_COOKIE_PATH,
@@ -93,14 +92,14 @@ def _rotate_refresh(response: Response, user_id: int, family_id: str, prev_id: i
     )
 
     refresh = new_refresh_token()
-    repos.auth_tokens.create(domain.AuthRefreshToken(
+    repos.auth_tokens.create(
         user_id=user_id,
         token_hash=hash_refresh(refresh),
         family_id=family_id,
         prev_id=prev_id,
         issued_at=now_iso(),
         expires_at=refresh_expiry_iso(),
-    ))
+    )
     response.set_cookie(
         REFRESH_COOKIE, refresh, httponly=True, secure=secure,
         samesite="lax", max_age=refresh_max_age(), path=REFRESH_COOKIE_PATH,
@@ -132,8 +131,8 @@ def register(body: RegisterModel):
         raise HTTPException(422, "Password must be at least 8 characters")
     try:
         user = repos.users.create(
-            domain.User(email=email, name=body.name, created_at=now_iso()),
-            hash_password(body.password),
+            email=email, password_hash=hash_password(body.password),
+            name=body.name, created_at=now_iso(),
         )
     except ValueError:
         raise HTTPException(409, "Email already registered")

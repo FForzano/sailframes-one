@@ -1,7 +1,7 @@
 """SQL (Postgres) repository backend.
 
-``build_sql_repos`` initialises the schema (``create_all``) and wires the
-per-entity SQL repositories. Sessions retain access to the blob store for
+``build_sql_repos`` initialises the schema (Alembic ``upgrade head``) and wires
+the per-entity SQL repositories. Sessions retain access to the blob store for
 manifest backfill (the processing pipeline writes manifests there).
 """
 

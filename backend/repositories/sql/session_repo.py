@@ -1,112 +1,105 @@
 """SQL session repository.
 
-Phase 5: the **DB is the source of truth** for session metadata (owner,
-crew, visibility, boat_id snapshot). The ingest pipeline writes rows via
-``upsert``; reads serve straight from the table and must NOT reconcile from the
-blob manifests on every call — that would clobber the user-driven privacy
-fields. The blob→DB import is now a **one-shot** ``bootstrap_from_blob`` (run at
-migration/bootstrap), plus a read-only fallback in ``get`` for a historical
-session not yet imported (it does not write back).
+The DB is the source of truth for session metadata (owner, crew, visibility,
+boat_id). Reads return ``SessionORM`` rows; a historical manifest not yet imported
+is surfaced as a transient ``SessionORM`` (``get``) and promoted to a real row the
+first time it is attributed/edited. Writes are the ingest boat-attribution
+(``attribute_boat``) and the crew/privacy edit (``edit``).
 """
 
 from typing import Optional
 
 from sqlalchemy import select
 
-from ... import domain
 from ...db.models import SessionORM, SessionCrewORM
-from ..base import SessionRepo
-from ..object.session_repo import ObjectSessionRepo
-from . import _mappers as M
+from ._blob_sessions import get_blob_session, list_blob_sessions
 
 
-class SqlSessionRepo(SessionRepo):
+class SqlSessionRepo:
     def __init__(self, session_factory, blob, data_prefix: str):
         self.Session = session_factory
-        self._blob_repo = ObjectSessionRepo(blob, data_prefix)
+        self._blob = blob
+        self._data_prefix = data_prefix
 
-    def _write(self, s, session: domain.Session) -> None:
-        orm = s.scalars(
-            select(SessionORM).where(
-                SessionORM.device_id == session.device_id,
-                SessionORM.date == session.date,
-            )
+    @staticmethod
+    def _by_key(s, device_id: str, date: str) -> Optional[SessionORM]:
+        return s.scalars(
+            select(SessionORM).where(SessionORM.device_id == device_id, SessionORM.date == date)
         ).first()
-        if orm is None:
-            orm = SessionORM(device_id=session.device_id, date=session.date)
-            s.add(orm)
-        orm.session_id = session.session_id
-        orm.start_time = session.start_time
-        orm.end_time = session.end_time
-        orm.duration_sec = session.duration_sec
-        orm.boat = session.boat
-        orm.name = session.name
-        orm.sensors = session.sensors
-        orm.has_video = session.has_video
-        orm.has_analysis = session.has_analysis
-        orm.trim = session.trim
-        # Phase 5 privacy/attribution fields.
-        orm.owner_user_id = session.owner_user_id
-        orm.boat_id = session.boat_id
-        orm.visibility = session.visibility or "private"
-        orm.club_id = session.club_id
-        orm.group_id = session.group_id
-        orm.regatta_id = session.regatta_id
-        orm.race_id = session.race_id
-        # Crew is replaced wholesale from the domain object (the PATCH endpoint
-        # reads-modifies-writes the full list; ingest creates with none).
-        s.flush()  # ensure orm.id for the crew rows
-        for c in list(orm.crew):
-            s.delete(c)
-        orm.crew = [
-            SessionCrewORM(
-                session_id=orm.id,
-                user_id=c.user_id,
-                guest_name=c.guest_name,
-                boat_role=c.boat_role,
-            )
-            for c in session.crew
-        ]
 
-    def upsert(self, session: domain.Session) -> domain.Session:
+    def list(self) -> list[SessionORM]:
         with self.Session() as s:
-            self._write(s, session)
+            return list(s.scalars(select(SessionORM)).all())
+
+    def get(self, device_id: str, date: str) -> Optional[SessionORM]:
+        with self.Session() as s:
+            orm = self._by_key(s, device_id, date)
+            if orm is not None:
+                return orm
+        # Historical manifest not yet imported: return it as a transient row.
+        return get_blob_session(self._blob, self._data_prefix, device_id, date)
+
+    def attribute_boat(self, device_id: str, date: str, boat_id: str) -> None:
+        """Ingest hook: snapshot the device->boat attribution onto the session.
+        Idempotent; never overwrites a user-claimed session. Imports the blob
+        manifest as a new row if the session isn't in the table yet."""
+        with self.Session() as s:
+            orm = self._by_key(s, device_id, date)
+            if orm is not None:
+                if orm.owner_user_id is None and boat_id and orm.boat_id != boat_id:
+                    orm.boat_id = boat_id
+                    if not orm.boat:
+                        orm.boat = boat_id
+                    s.commit()
+                return
+            transient = get_blob_session(self._blob, self._data_prefix, device_id, date)
+            if transient is None:
+                return
+            transient.boat_id = boat_id
+            if not transient.boat:
+                transient.boat = boat_id
+            s.add(transient)
             s.commit()
-        return session
+
+    def edit(self, device_id: str, date: str, *, crew: list, boat_id=None, visibility=None,
+             club_id=None, group_id=None, claim_owner_id=None) -> Optional[SessionORM]:
+        """Crew/privacy edit. Replaces the crew wholesale; sets the provided
+        fields; claims the session for ``claim_owner_id`` if unowned. Imports a
+        blob-only session first so the edit has a row to write to."""
+        with self.Session() as s:
+            orm = self._by_key(s, device_id, date)
+            if orm is None:
+                orm = get_blob_session(self._blob, self._data_prefix, device_id, date)
+                if orm is None:
+                    return None
+                s.add(orm)
+                s.flush()
+            orm.crew = [
+                SessionCrewORM(user_id=c.get("user_id"), guest_name=c.get("guest_name"),
+                               boat_role=c.get("boat_role"))
+                for c in crew
+            ]
+            if boat_id is not None:
+                orm.boat_id = boat_id
+            if visibility is not None:
+                orm.visibility = visibility
+            if club_id is not None:
+                orm.club_id = club_id
+            if group_id is not None:
+                orm.group_id = group_id
+            if orm.owner_user_id is None and claim_owner_id is not None:
+                orm.owner_user_id = claim_owner_id
+            s.commit()
+        return self.get(device_id, date)
 
     def bootstrap_from_blob(self) -> int:
-        """One-shot import of blob manifests into the table (migration/bootstrap
-        helper). Only inserts rows that do not exist yet, so it never overwrites
-        DB-authoritative privacy fields. Returns the number imported."""
+        """One-shot import of blob manifests into the table (migration helper).
+        Only inserts rows that do not exist yet."""
         imported = 0
         with self.Session() as s:
-            for sess in self._blob_repo.list():
-                exists = s.scalars(
-                    select(SessionORM).where(
-                        SessionORM.device_id == sess.device_id,
-                        SessionORM.date == sess.date,
-                    )
-                ).first()
-                if exists is None:
-                    self._write(s, sess)
+            for orm in list_blob_sessions(self._blob, self._data_prefix):
+                if self._by_key(s, orm.device_id, orm.date) is None:
+                    s.add(orm)
                     imported += 1
             s.commit()
         return imported
-
-    def list(self) -> list[domain.Session]:
-        with self.Session() as s:
-            return [M.session_to_domain(r) for r in s.scalars(select(SessionORM)).all()]
-
-    def get(self, device_id: str, date: str) -> Optional[domain.Session]:
-        with self.Session() as s:
-            orm = s.scalars(
-                select(SessionORM).where(
-                    SessionORM.device_id == device_id,
-                    SessionORM.date == date,
-                )
-            ).first()
-            if orm is not None:
-                return M.session_to_domain(orm)
-        # Read-only fallback for a historical session not yet imported. Does NOT
-        # write back — bootstrap_from_blob() is the one place that populates.
-        return self._blob_repo.get(device_id, date)

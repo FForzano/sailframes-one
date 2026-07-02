@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models (Postgres mapping of the domain objects).
 
 One module per aggregate. Importing this package registers every table on
-``Base.metadata`` so ``init_db()`` / ``create_all`` sees them.
+``Base.metadata`` so Alembic autogenerate (and ``init_db()``) sees them.
 """
 
 from .regatta import RegattaORM

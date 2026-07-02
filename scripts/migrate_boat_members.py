@@ -11,15 +11,13 @@ Design notes (per docs/user_plan.md / user_plan_next_phases.md):
   (and optional photo); one is resolvable only if it carries an ``email`` (or a
   ``name`` that is itself an email) matching an existing user. Unresolvable
   entries are left untouched in ``skippers`` (kept in dual-read) and skipped.
-- **Backend-agnostic.** Runs through ``get_repos()`` so it behaves identically
-  on the object (blob JSON) and Postgres backends — pick the backend via
-  ``SAILFRAMES_METADATA_BACKEND`` exactly as the API does.
+- **Runs through ``get_repos()``** so it uses the same Postgres store as the API
+  (reads ``POSTGRES_*`` from the environment).
 - **Idempotent.** ``add_member`` is a no-op when the user is already a member,
   so re-running is safe.
 
 Usage:
-    SAILFRAMES_METADATA_BACKEND=object   python scripts/migrate_boat_members.py [--dry-run]
-    SAILFRAMES_METADATA_BACKEND=postgres python scripts/migrate_boat_members.py [--dry-run]
+    python scripts/migrate_boat_members.py [--dry-run]
 """
 
 import argparse
@@ -53,12 +51,11 @@ def migrate(dry_run: bool = False) -> None:
     from datetime import datetime, timezone
 
     from backend import domain
-    from backend.repositories import get_repos, select_metadata_backend
+    from backend.repositories import get_repos
 
     repos = get_repos()
     now = datetime.now(timezone.utc).isoformat()
 
-    print(f"Backend: {select_metadata_backend()}")
     added = skipped_unresolved = skipped_existing = 0
 
     for boat in repos.boats.list():

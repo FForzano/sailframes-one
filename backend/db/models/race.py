@@ -15,6 +15,7 @@ from ..base import Base
 
 class MarkORM(Base):
     __tablename__ = "marks"
+    __wire_exclude__ = ("id", "race_id")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     race_id: Mapped[str] = mapped_column(ForeignKey("races.race_id", ondelete="CASCADE"))
@@ -29,6 +30,7 @@ class MarkORM(Base):
 
 class RaceBoatORM(Base):
     __tablename__ = "race_boats"
+    __wire_exclude__ = ("id", "race_id")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     race_id: Mapped[str] = mapped_column(ForeignKey("races.race_id", ondelete="CASCADE"))
@@ -45,6 +47,7 @@ class RaceBoatORM(Base):
 
 class RaceResultORM(Base):
     __tablename__ = "race_results"
+    __wire_exclude__ = ("race_id",)
 
     race_id: Mapped[str] = mapped_column(
         ForeignKey("races.race_id", ondelete="CASCADE"), primary_key=True
@@ -58,6 +61,7 @@ class RaceResultORM(Base):
 
 class RaceORM(Base):
     __tablename__ = "races"
+    __wire_children__ = {"marks": "marks", "boats": "boats", "result": "results"}
 
     race_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -74,11 +78,11 @@ class RaceORM(Base):
     updated_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     marks: Mapped[list[MarkORM]] = relationship(
-        back_populates="race", cascade="all, delete-orphan"
+        back_populates="race", cascade="all, delete-orphan", lazy="selectin"
     )
     boats: Mapped[list[RaceBoatORM]] = relationship(
-        back_populates="race", cascade="all, delete-orphan"
+        back_populates="race", cascade="all, delete-orphan", lazy="selectin"
     )
     result: Mapped[Optional[RaceResultORM]] = relationship(
-        back_populates="race", cascade="all, delete-orphan", uselist=False
+        back_populates="race", cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )

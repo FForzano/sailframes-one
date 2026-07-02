@@ -6,16 +6,9 @@ Two imperative guards, mirroring how endpoints already call
 - ``require_admin(request)`` — broad admin gate.
 - ``require_permission(request, key, club_id=...)`` — fine-grained RBAC check.
 
-Behaviour by mode:
-- ``SAILFRAMES_ADMIN_BYPASS`` set → always allowed (self-hosted dev).
-- metadata backend != postgres → no RBAC store, fall back to the Cloudflare
-  cookie gate (preserves today's protection level).
-- metadata backend == postgres → resolve the user from a trusted identity
-  header and evaluate roles/permissions (with club scope).
-
-Until the login/token flow ships (the documented follow-up), the user identity
-in Postgres mode comes from a reverse-proxy-injected header
-(``SAILFRAMES_AUTH_EMAIL_HEADER``, default ``X-Auth-Email``).
+Identity comes from the ``sf_access`` JWT cookie; roles/permissions live in
+Postgres (with optional per-club scope). ``SAILFRAMES_ADMIN_BYPASS``, when set,
+short-circuits every check — a dev-only escape hatch.
 """
 
 import hmac
@@ -25,42 +18,24 @@ from typing import Optional
 from fastapi import HTTPException, Request
 from sqlalchemy import select
 
-from .cloudflare import cloudflare_admin
 from .tokens import ACCESS_COOKIE, CSRF_COOKIE, decode_access_token
 
 ADMIN_PERMISSION = "admin"
 
 
-def _is_postgres() -> bool:
-    return os.environ.get("SAILFRAMES_METADATA_BACKEND", "object").lower() == "postgres"
-
-
-def _header_email(request: Request) -> Optional[str]:
-    header = os.environ.get("SAILFRAMES_AUTH_EMAIL_HEADER", "X-Auth-Email")
-    return request.headers.get(header)
-
-
 def current_user(request: Request):
-    """Resolve the authenticated user (a ``domain.User``) or ``None``.
-
-    Order: (1) access JWT from the ``sf_access`` cookie; (2) reverse-proxy
-    identity header (self-hosted behind an auth proxy). Reads through the user
-    repo, so it works on both metadata backends. Returns ``None`` for anonymous
-    callers — it does NOT raise; use ``require_user`` when auth is mandatory.
-    """
+    """Resolve the authenticated user (a ``UserORM``) from the access JWT
+    cookie, or ``None`` for anonymous callers. Does NOT raise — use
+    ``require_user`` when auth is mandatory."""
     from ..repositories import get_repos
 
     token = request.cookies.get(ACCESS_COOKIE)
-    if token:
-        uid = decode_access_token(token)
-        if uid is not None:
-            u = get_repos().users.get_by_id(uid)
-            if u is not None:
-                return u
-    email = _header_email(request)
-    if email:
-        return get_repos().users.get_by_email(email)
-    return None
+    if not token:
+        return None
+    uid = decode_access_token(token)
+    if uid is None:
+        return None
+    return get_repos().users.get_by_id(uid)
 
 
 def require_user(request: Request):
@@ -75,10 +50,8 @@ def effective_capabilities(user) -> dict:
     """Capability snapshot for the frontend: roles + effective permissions
     (global vs per-club, mirroring ``_user_has_permission``) + memberships.
 
-    Backend-agnostic for memberships (walks the repos); RBAC roles/permissions
-    only exist on the Postgres backend, so in object mode those come back empty
-    and the UI leans on ``is_superadmin`` + memberships. The server still
-    authorizes every mutation — this payload only decides what UI to show."""
+    The server still authorizes every mutation — this payload only decides what
+    UI to show."""
     from ..repositories import get_repos
 
     repos = get_repos()
@@ -100,34 +73,33 @@ def effective_capabilities(user) -> dict:
     roles: list[dict] = []
     perm_global: set[str] = set()
     perm_by_club: dict[str, set[str]] = {}
-    if _is_postgres():
-        from ..db import get_sessionmaker
-        from ..db.models import (
-            UserORM,
-            RoleORM,
-            RolePermissionORM,
-            PermissionORM,
-        )
+    from ..db import get_sessionmaker
+    from ..db.models import (
+        UserORM,
+        RoleORM,
+        RolePermissionORM,
+        PermissionORM,
+    )
 
-        with get_sessionmaker()() as s:
-            orm = s.get(UserORM, user.id)
-            if orm is not None:
-                for ur in orm.roles:
-                    role = s.get(RoleORM, ur.role_id)
-                    roles.append({
-                        "role": role.name if role else str(ur.role_id),
-                        "scope_club_id": ur.scope_club_id,
-                    })
-                    keys = [
-                        k for (k,) in s.query(PermissionORM.key)
-                        .join(RolePermissionORM, RolePermissionORM.permission_id == PermissionORM.id)
-                        .filter(RolePermissionORM.role_id == ur.role_id)
-                        .all()
-                    ]
-                    if ur.scope_club_id is None:
-                        perm_global.update(keys)
-                    else:
-                        perm_by_club.setdefault(str(ur.scope_club_id), set()).update(keys)
+    with get_sessionmaker()() as s:
+        orm = s.get(UserORM, user.id)
+        if orm is not None:
+            for ur in orm.roles:
+                role = s.get(RoleORM, ur.role_id)
+                roles.append({
+                    "role": role.name if role else str(ur.role_id),
+                    "scope_club_id": ur.scope_club_id,
+                })
+                keys = [
+                    k for (k,) in s.query(PermissionORM.key)
+                    .join(RolePermissionORM, RolePermissionORM.permission_id == PermissionORM.id)
+                    .filter(RolePermissionORM.role_id == ur.role_id)
+                    .all()
+                ]
+                if ur.scope_club_id is None:
+                    perm_global.update(keys)
+                else:
+                    perm_by_club.setdefault(str(ur.scope_club_id), set()).update(keys)
 
     return {
         "user": user.to_dict(),
@@ -147,9 +119,8 @@ def effective_capabilities(user) -> dict:
 
 
 def session_visible_to(session, user) -> bool:
-    """Phase 5 visibility rule (identical on both backends — operates on the
-    domain ``Session`` + ``domain.User`` | None). See docs/user_plan.md →
-    "Controllo accessi".
+    """Phase 5 visibility rule (operates on the domain ``Session`` +
+    ``domain.User`` | None). See docs/user_plan.md → "Controllo accessi".
 
     Visible when: public; OR the caller owns it / is in its crew; OR the caller
     is standing crew of the attributed boat; OR visibility=club and the caller
@@ -183,31 +154,14 @@ def session_visible_to(session, user) -> bool:
 
 def verify_csrf(request: Request) -> None:
     """Double-submit CSRF check, enforced only for cookie-authenticated
-    requests (ambient auth). Header-auth / server-to-server callers (no access
-    cookie) are exempt. Send ``X-SF-CSRF`` equal to the ``sf_csrf`` cookie on
-    every state-changing request."""
+    requests. Send ``X-SF-CSRF`` equal to the ``sf_csrf`` cookie on every
+    state-changing request."""
     if not request.cookies.get(ACCESS_COOKIE):
         return
     header = request.headers.get("X-SF-CSRF")
     cookie = request.cookies.get(CSRF_COOKIE)
     if not header or not cookie or not hmac.compare_digest(header, cookie):
         raise HTTPException(403, "CSRF check failed")
-
-
-def _identity_email(request: Request) -> Optional[str]:
-    """Email of the caller for RBAC checks: JWT access cookie first, then the
-    reverse-proxy identity header. Keeps ``_check_postgres`` JWT-aware without
-    changing its role/permission logic."""
-    token = request.cookies.get(ACCESS_COOKIE)
-    if token:
-        uid = decode_access_token(token)
-        if uid is not None:
-            from ..repositories import get_repos
-
-            u = get_repos().users.get_by_id(uid)
-            if u is not None:
-                return u.email
-    return _header_email(request)
 
 
 def _resolve_user(session, email: str):
@@ -241,17 +195,17 @@ def _user_has_permission(session, user, key: str, club_id: Optional[int]) -> boo
     return False
 
 
-def _check_postgres(request: Request, key: str, club_id: Optional[int]) -> bool:
+def _check_permission(request: Request, key: str, club_id: Optional[int]) -> bool:
     from ..db import get_sessionmaker
 
-    email = _identity_email(request)
-    if not email:
+    user = current_user(request)
+    if user is None:
         raise HTTPException(403, "Authentication required")
     with get_sessionmaker()() as session:
-        user = _resolve_user(session, email)
-        if user is None:
+        orm = _resolve_user(session, user.email)
+        if orm is None:
             raise HTTPException(403, "Unknown user")
-        if _user_has_permission(session, user, key, club_id):
+        if _user_has_permission(session, orm, key, club_id):
             return True
     raise HTTPException(403, f"Permission denied: {key}")
 
@@ -259,14 +213,10 @@ def _check_postgres(request: Request, key: str, club_id: Optional[int]) -> bool:
 def require_permission(request: Request, key: str, *, club_id: Optional[int] = None) -> bool:
     if os.environ.get("SAILFRAMES_ADMIN_BYPASS"):
         return True
-    if not _is_postgres():
-        return cloudflare_admin(request)
-    return _check_postgres(request, key, club_id)
+    return _check_permission(request, key, club_id)
 
 
 def require_admin(request: Request) -> bool:
     if os.environ.get("SAILFRAMES_ADMIN_BYPASS"):
         return True
-    if not _is_postgres():
-        return cloudflare_admin(request)
-    return _check_postgres(request, ADMIN_PERMISSION, None)
+    return _check_permission(request, ADMIN_PERMISSION, None)

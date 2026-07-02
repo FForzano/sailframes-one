@@ -14,16 +14,8 @@
     "admin": "Admin",
     "profile": "Profilo",
     "myArea": "Area personale",
-    "coach": "Coach",
     "bom": "Componenti hardware",
     "battery": "Batteria"
-  },
-  "coach": {
-    "title": "Briefing coach",
-    "notConfigured": "Il servizio coach non è configurato per questo deployment.",
-    "signIn": "Accedi",
-    "signInHint": "Il coach usa un accesso Google separato dal tuo account membro.",
-    "noBriefings": "Ancora nessun briefing."
   },
   "bom": {
     "title": "Tracker di flotta E1 — distinta base",

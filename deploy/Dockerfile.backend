@@ -1,0 +1,24 @@
+# SailFrames REST API (backend/) — the single API service.
+# Debian-slim base: SQLAlchemy/psycopg ship precompiled wheels here.
+# Build from the repo root:  docker build -f deploy/Dockerfile.backend .
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Deps first for layer caching.
+COPY deploy/requirements.txt /app/deploy/requirements.txt
+RUN pip install --no-cache-dir -r /app/deploy/requirements.txt
+
+# API code only — no static frontend, no processing pipeline (those are their
+# own containers).
+COPY backend/ /app/backend/
+
+ENV PYTHONUNBUFFERED=1
+
+# Run as non-root.
+RUN useradd --create-home --uid 10001 sailframes \
+    && chown -R sailframes:sailframes /app
+USER sailframes
+
+EXPOSE 8000
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -28,6 +28,8 @@ from ..base import Base
 class SessionORM(Base):
     __tablename__ = "sessions"
     __table_args__ = (UniqueConstraint("device_id", "date", name="uq_session_device_date"),)
+    __wire_exclude__ = ("id",)
+    __wire_children__ = {"crew": "crew"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String, nullable=False)
@@ -59,8 +61,14 @@ class SessionORM(Base):
     race_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     crew: Mapped[list["SessionCrewORM"]] = relationship(
-        back_populates="session", cascade="all, delete-orphan"
+        back_populates="session", cascade="all, delete-orphan", lazy="selectin"
     )
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        if d.get("sensors") is None:
+            d["sensors"] = []  # wire expects a list, never null
+        return d
 
 
 class SessionCrewORM(Base):
@@ -68,6 +76,7 @@ class SessionCrewORM(Base):
     is set (a registered user, or a guest without an account)."""
 
     __tablename__ = "session_crew"
+    __wire_exclude__ = ("id", "session_id")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[int] = mapped_column(

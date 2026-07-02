@@ -1,58 +1,50 @@
-"""SQL club repository (+ membership)."""
+"""SQL club repository (+ membership). Reads return ``ClubORM`` (members
+embedded via ``to_dict``); membership ops take explicit ids."""
 
 from typing import Optional
 
 from sqlalchemy import select, update
 
-from ... import domain
 from ...db.models import ClubORM, ClubMemberORM
-from ..base import ClubRepo
-from . import _mappers as M
 
 
-class SqlClubRepo(ClubRepo):
+class SqlClubRepo:
     def __init__(self, session_factory):
         self.Session = session_factory
 
-    def list(self) -> list[domain.Club]:
+    def list(self) -> list[ClubORM]:
         with self.Session() as s:
-            return [M.club_to_domain(c) for c in s.scalars(select(ClubORM)).all()]
+            return list(s.scalars(select(ClubORM)).all())
 
-    def get(self, club_id: int) -> Optional[domain.Club]:
+    def get(self, club_id: int) -> Optional[ClubORM]:
         with self.Session() as s:
-            orm = s.get(ClubORM, club_id)
-            return M.club_to_domain(orm) if orm else None
+            return s.get(ClubORM, club_id)
 
-    def save(self, club: domain.Club) -> domain.Club:
+    def create(self, data: dict) -> ClubORM:
         with self.Session() as s:
-            orm = s.get(ClubORM, club.id) if club.id is not None else None
-            if orm is None:
-                orm = ClubORM(name=club.name)
-                s.add(orm)
-            orm.name = club.name
-            orm.owner_user_id = club.owner_user_id
-            orm.default_session_visibility = club.default_session_visibility
-            orm.created_at = club.created_at
+            orm = ClubORM(
+                name=data["name"],
+                owner_user_id=data.get("owner_user_id"),
+                default_session_visibility=data.get("default_session_visibility") or "private",
+                created_at=data.get("created_at"),
+            )
+            s.add(orm)
             s.commit()
-            club.id = orm.id
-            return club
+            new_id = orm.id
+        return self.get(new_id)
 
-    def add_member(self, club_id: int, member: domain.ClubMember) -> bool:
+    def add_member(self, club_id: int, *, user_id: int, status: str = "active",
+                   joined_at: Optional[str] = None) -> bool:
         with self.Session() as s:
             exists = s.scalars(
                 select(ClubMemberORM).where(
                     ClubMemberORM.club_id == club_id,
-                    ClubMemberORM.user_id == member.user_id,
+                    ClubMemberORM.user_id == user_id,
                 )
             ).first()
             if exists is not None:
                 return False
-            s.add(ClubMemberORM(
-                club_id=club_id,
-                user_id=member.user_id,
-                status=member.status,
-                joined_at=member.joined_at,
-            ))
+            s.add(ClubMemberORM(club_id=club_id, user_id=user_id, status=status, joined_at=joined_at))
             s.commit()
             return True
 
@@ -60,10 +52,7 @@ class SqlClubRepo(ClubRepo):
         with self.Session() as s:
             res = s.execute(
                 update(ClubMemberORM)
-                .where(
-                    ClubMemberORM.club_id == club_id,
-                    ClubMemberORM.user_id == user_id,
-                )
+                .where(ClubMemberORM.club_id == club_id, ClubMemberORM.user_id == user_id)
                 .values(status=status)
             )
             s.commit()

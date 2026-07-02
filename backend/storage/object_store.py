@@ -12,8 +12,8 @@ from typing import Any, Iterator, Optional, Tuple
 
 from .base import BlobStore, BlobNotFound
 
-# boto3 is imported lazily (inside the functions) so importing this package —
-# and using LocalBlobStore — does not require boto3 to be installed.
+# boto3 is imported lazily (inside the functions) so importing this package
+# does not require boto3 to be installed until a call actually needs it.
 
 
 def make_s3_client(endpoint: Optional[str] = None):

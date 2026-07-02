@@ -1,60 +1,51 @@
-"""SQL group repository (+ membership). Clone of ``SqlClubRepo``."""
+"""SQL group repository (+ membership). Speculare to ``SqlClubRepo``."""
 
 from typing import Optional
 
 from sqlalchemy import select, update
 
-from ... import domain
 from ...db.models import GroupORM, GroupMemberORM
-from ..base import GroupRepo
-from . import _mappers as M
 
 
-class SqlGroupRepo(GroupRepo):
+class SqlGroupRepo:
     def __init__(self, session_factory):
         self.Session = session_factory
 
-    def list(self) -> list[domain.Group]:
+    def list(self) -> list[GroupORM]:
         with self.Session() as s:
-            return [M.group_to_domain(g) for g in s.scalars(select(GroupORM)).all()]
+            return list(s.scalars(select(GroupORM)).all())
 
-    def get(self, group_id: int) -> Optional[domain.Group]:
+    def get(self, group_id: int) -> Optional[GroupORM]:
         with self.Session() as s:
-            orm = s.get(GroupORM, group_id)
-            return M.group_to_domain(orm) if orm else None
+            return s.get(GroupORM, group_id)
 
-    def save(self, group: domain.Group) -> domain.Group:
+    def create(self, data: dict) -> GroupORM:
         with self.Session() as s:
-            orm = s.get(GroupORM, group.id) if group.id is not None else None
-            if orm is None:
-                orm = GroupORM(name=group.name)
-                s.add(orm)
-            orm.name = group.name
-            orm.description = group.description
-            orm.created_by = group.created_by
-            orm.default_session_visibility = group.default_session_visibility
-            orm.created_at = group.created_at
+            orm = GroupORM(
+                name=data["name"],
+                description=data.get("description"),
+                created_by=data.get("created_by"),
+                default_session_visibility=data.get("default_session_visibility") or "private",
+                created_at=data.get("created_at"),
+            )
+            s.add(orm)
             s.commit()
-            group.id = orm.id
-            return group
+            new_id = orm.id
+        return self.get(new_id)
 
-    def add_member(self, group_id: int, member: domain.GroupMember) -> bool:
+    def add_member(self, group_id: int, *, user_id: int, role: str = "member",
+                   status: str = "active", joined_at: Optional[str] = None) -> bool:
         with self.Session() as s:
             exists = s.scalars(
                 select(GroupMemberORM).where(
                     GroupMemberORM.group_id == group_id,
-                    GroupMemberORM.user_id == member.user_id,
+                    GroupMemberORM.user_id == user_id,
                 )
             ).first()
             if exists is not None:
                 return False
-            s.add(GroupMemberORM(
-                group_id=group_id,
-                user_id=member.user_id,
-                role=member.role,
-                status=member.status,
-                joined_at=member.joined_at,
-            ))
+            s.add(GroupMemberORM(group_id=group_id, user_id=user_id, role=role,
+                                 status=status, joined_at=joined_at))
             s.commit()
             return True
 
@@ -62,10 +53,7 @@ class SqlGroupRepo(GroupRepo):
         with self.Session() as s:
             res = s.execute(
                 update(GroupMemberORM)
-                .where(
-                    GroupMemberORM.group_id == group_id,
-                    GroupMemberORM.user_id == user_id,
-                )
+                .where(GroupMemberORM.group_id == group_id, GroupMemberORM.user_id == user_id)
                 .values(status=status)
             )
             s.commit()
@@ -75,10 +63,7 @@ class SqlGroupRepo(GroupRepo):
         with self.Session() as s:
             res = s.execute(
                 update(GroupMemberORM)
-                .where(
-                    GroupMemberORM.group_id == group_id,
-                    GroupMemberORM.user_id == user_id,
-                )
+                .where(GroupMemberORM.group_id == group_id, GroupMemberORM.user_id == user_id)
                 .values(role=role)
             )
             s.commit()

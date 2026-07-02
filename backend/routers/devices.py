@@ -20,7 +20,6 @@ import secrets
 
 from fastapi import APIRouter, HTTPException, Request
 
-from .. import domain
 from ..auth import require_permission, require_user, verify_csrf
 from ..schemas import DeviceAssignmentModel, DeviceRegisterModel
 from ._common import now_iso, repos
@@ -95,21 +94,21 @@ def register_device(body: DeviceRegisterModel, request: Request):
     else:
         raise HTTPException(422, "owner_type must be 'user' or 'club'")
 
-    device = repos.devices.register(domain.Device(
-        device_id=_new_device_slug(),
-        name=body.name,
-        device_type=body.device_type,
-        default_boat_id=body.default_boat_id if body.owner_type == "user" else None,
-        owner_type=body.owner_type,
-        registered_by=user.id,
-        owned_by_club_id=owned_by_club_id,
-        status="active",
-        created_at=now_iso(),
-    ))
+    device = repos.devices.register({
+        "device_id": _new_device_slug(),
+        "name": body.name,
+        "device_type": body.device_type,
+        "default_boat_id": body.default_boat_id if body.owner_type == "user" else None,
+        "owner_type": body.owner_type,
+        "registered_by": user.id,
+        "owned_by_club_id": owned_by_club_id,
+        "status": "active",
+        "created_at": now_iso(),
+    })
     return device.to_dict()
 
 
-def _can_manage_device(device: domain.Device, user, request: Request) -> bool:
+def _can_manage_device(device, user, request: Request) -> bool:
     if user.is_superadmin or device.registered_by == user.id:
         return True
     if device.owned_by_club_id is not None:
@@ -132,7 +131,7 @@ def add_assignment(device_id: str, body: DeviceAssignmentModel, request: Request
     if repos.boats.get(body.boat_id) is None:
         raise HTTPException(404, f"Boat not found: {body.boat_id}")
     try:
-        assignment = repos.devices.add_assignment(domain.DeviceAssignment(
+        assignment = repos.devices.add_assignment(
             device_id=device_id,
             boat_id=body.boat_id,
             regatta_id=body.regatta_id,
@@ -141,7 +140,7 @@ def add_assignment(device_id: str, body: DeviceAssignmentModel, request: Request
             valid_to=body.valid_to,
             created_by=user.id,
             created_at=now_iso(),
-        ))
+        )
     except ValueError as e:
         raise HTTPException(409, str(e))
     return assignment.to_dict()

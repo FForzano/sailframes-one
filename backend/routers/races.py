@@ -13,7 +13,6 @@ from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 
-from .. import domain
 from ..auth import require_admin
 from ..schemas import RaceCreateModel, RaceUpdateModel
 from ..services import course, geo, gpx
@@ -114,42 +113,38 @@ def create_race(race: RaceCreateModel, request: Request):
     """Create a new race."""
     require_admin(request)
     now = now_iso()
-    new_race = domain.Race(
-        race_id=str(uuid.uuid4())[:8],
-        name=race.name,
-        date=race.date,
-        start_time=race.start_time,
-        end_time=race.end_time,
-        regatta_id=race.regatta_id,
-        raceday_id=race.raceday_id,
-        boats=[domain.RaceBoat.from_dict(b.model_dump()) for b in race.boats],
-        start_line=domain.StartFinishLine.from_dict(race.start_line.model_dump()) if race.start_line else None,
-        finish_line=domain.StartFinishLine.from_dict(race.finish_line.model_dump()) if race.finish_line else None,
-        marks=[domain.Mark.from_dict(m.model_dump()) for m in race.marks],
-        course=race.course,
-        finish_order=race.finish_order,
-        results=None,
-        created_at=now,
-        updated_at=now,
-    )
-    repos.races.save(new_race)
+    rid = str(uuid.uuid4())[:8]
+    repos.races.save_dict({
+        "race_id": rid,
+        "name": race.name,
+        "date": race.date,
+        "start_time": race.start_time,
+        "end_time": race.end_time,
+        "regatta_id": race.regatta_id,
+        "raceday_id": race.raceday_id,
+        "boats": [b.model_dump() for b in race.boats],
+        "start_line": race.start_line.model_dump() if race.start_line else None,
+        "finish_line": race.finish_line.model_dump() if race.finish_line else None,
+        "marks": [m.model_dump() for m in race.marks],
+        "course": race.course,
+        "finish_order": race.finish_order,
+        "results": None,
+        "created_at": now,
+        "updated_at": now,
+    })
 
     # Link race into its race day / regatta (cross-entity bookkeeping).
     if race.raceday_id:
         day = repos.racedays.get(race.raceday_id)
-        if day and new_race.race_id not in day.race_ids:
-            day.race_ids.append(new_race.race_id)
-            day.updated_at = now
-            repos.racedays.save(day)
+        if day and rid not in day.race_ids:
+            repos.racedays.update(race.raceday_id, {"race_ids": list(day.race_ids) + [rid], "updated_at": now})
 
     if race.regatta_id:
         regatta = repos.regattas.get(race.regatta_id)
-        if regatta and new_race.race_id not in regatta.race_ids:
-            regatta.race_ids.append(new_race.race_id)
-            regatta.updated_at = now
-            repos.regattas.save(regatta)
+        if regatta and rid not in regatta.race_ids:
+            repos.regattas.update(race.regatta_id, {"race_ids": list(regatta.race_ids) + [rid], "updated_at": now})
 
-    return new_race.to_dict()
+    return repos.races.get(rid).to_dict()
 
 
 @router.patch("/{race_id}")
@@ -159,31 +154,32 @@ def update_race(race_id: str, update: RaceUpdateModel, request: Request):
     race = repos.races.get(race_id)
     if race is None:
         raise HTTPException(404, f"Race not found: {race_id}")
+    d = race.to_dict()
 
     if update.name is not None:
-        race.name = update.name
+        d["name"] = update.name
     if update.start_time is not None:
-        race.start_time = update.start_time
+        d["start_time"] = update.start_time
     if update.end_time is not None:
-        race.end_time = update.end_time
+        d["end_time"] = update.end_time
     if update.boats is not None:
-        race.boats = [domain.RaceBoat.from_dict(b.model_dump()) for b in update.boats]
+        d["boats"] = [b.model_dump() for b in update.boats]
     if update.start_line is not None:
-        race.start_line = domain.StartFinishLine.from_dict(update.start_line.model_dump())
+        d["start_line"] = update.start_line.model_dump()
     if update.finish_line is not None:
-        race.finish_line = domain.StartFinishLine.from_dict(update.finish_line.model_dump())
+        d["finish_line"] = update.finish_line.model_dump()
     if update.marks is not None:
-        race.marks = [domain.Mark.from_dict(m.model_dump()) for m in update.marks]
+        d["marks"] = [m.model_dump() for m in update.marks]
     if update.course is not None:
-        race.course = update.course
+        d["course"] = update.course
     if update.finish_order is not None:
-        race.finish_order = update.finish_order
+        d["finish_order"] = update.finish_order
     if update.raceday_id is not None:
-        race.raceday_id = update.raceday_id or None
+        d["raceday_id"] = update.raceday_id or None
 
-    race.updated_at = now_iso()
-    repos.races.save(race)
-    return race.to_dict()
+    d["updated_at"] = now_iso()
+    repos.races.save_dict(d)
+    return repos.races.get(race_id).to_dict()
 
 
 @router.delete("/{race_id}")
@@ -200,9 +196,10 @@ def delete_race(race_id: str, request: Request):
     if race.regatta_id:
         regatta = repos.regattas.get(race.regatta_id)
         if regatta:
-            regatta.race_ids = [rid for rid in regatta.race_ids if rid != race_id]
-            regatta.updated_at = now_iso()
-            repos.regattas.save(regatta)
+            repos.regattas.update(race.regatta_id, {
+                "race_ids": [r for r in regatta.race_ids if r != race_id],
+                "updated_at": now_iso(),
+            })
 
     return {"deleted": race_id}
 

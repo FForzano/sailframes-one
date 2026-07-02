@@ -14,16 +14,8 @@
     "admin": "Admin",
     "profile": "Profile",
     "myArea": "My area",
-    "coach": "Coach",
     "bom": "Hardware BOM",
     "battery": "Battery"
-  },
-  "coach": {
-    "title": "Coach briefings",
-    "notConfigured": "The coach service isn't configured for this deployment.",
-    "signIn": "Sign in",
-    "signInHint": "Coach uses a separate Google sign-in from your member account.",
-    "noBriefings": "No briefings yet."
   },
   "bom": {
     "title": "E1 fleet tracker — bill of materials",

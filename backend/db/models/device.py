@@ -17,6 +17,7 @@ from ..base import Base
 
 class DeviceORM(Base):
     __tablename__ = "devices"
+    __wire_children__ = {"assignments": "assignments"}
 
     device_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -36,7 +37,7 @@ class DeviceORM(Base):
     last_seen_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     assignments: Mapped[list["DeviceAssignmentORM"]] = relationship(
-        back_populates="device", cascade="all, delete-orphan"
+        back_populates="device", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
