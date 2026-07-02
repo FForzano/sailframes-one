@@ -27,6 +27,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+.VSCodeCounter
 
 # Logs
 *.log
