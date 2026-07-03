@@ -1,42 +1,50 @@
-"""Default RBAC seed: permissions, roles, and an optional bootstrap superadmin.
+"""Default seeds: RBAC permissions/roles, device types, bootstrap superadmin.
 
 Idempotent — safe to run on every startup. Roles and their permission sets are
 data, so deployments can add/adjust roles afterwards without code changes.
+
+Superadmin is a flag on ``users`` (``is_superadmin``, bypasses every check in
+``_user_has_permission``), NOT a role row — only the two club-scoped
+institutional roles from docs/api-project.md are seeded.
 """
 
 import os
-from datetime import datetime, timezone
 
 from sqlalchemy import select
 
 from .passwords import hash_password
 
-# permission key -> human description
+# permission key -> human description (see docs/api-project.md, "Ruoli e
+# permessi per classe di API")
 DEFAULT_PERMISSIONS = {
-    "admin": "Full administrative access",
-    "regatta.manage": "Create/edit/delete regattas",
-    "raceday.manage": "Create/edit/delete race days",
-    "race.create": "Create races",
-    "race.edit": "Edit races",
-    "race.delete": "Delete races",
-    "boat.edit": "Edit the boat catalog",
-    "session.delete": "Delete sessions",
-    "user.manage": "Manage users and roles",
+    "club.manage": "Update/deactivate a club",
+    "user_club.manage": "Approve/remove club memberships",
+    "user_role.manage_scoped": "Grant club-scoped roles (never superadmin)",
+    "regatta.manage": "CRUD regattas",
+    "raceday.manage": "CRUD race days",
+    "race.manage": "CRUD races",
+    "result.manage": "CRUD race results",
+    "mark.manage": "CRUD marks for race activities",
 }
+
+_RACE_OFFICER_KEYS = [
+    "regatta.manage",
+    "raceday.manage",
+    "race.manage",
+    "result.manage",
+    "mark.manage",
+]
 
 # role name -> (description, [permission keys])
 DEFAULT_ROLES = {
-    "software_admin": ("Global software administrator", list(DEFAULT_PERMISSIONS.keys())),
-    "club_admin": (
-        "Administrator within a club",
-        ["regatta.manage", "raceday.manage", "race.create", "race.edit",
-         "race.delete", "boat.edit", "session.delete"],
-    ),
-    "race_officer": (
-        "Runs races for a club",
-        ["raceday.manage", "race.create", "race.edit"],
-    ),
-    "member": ("Regular member (read-only)", []),
+    "club_admin": ("Administrator within a club", list(DEFAULT_PERMISSIONS)),
+    "race_officer": ("Runs regattas/races for a club", _RACE_OFFICER_KEYS),
+}
+
+# name -> (category, parser_key)
+DEFAULT_DEVICE_TYPES = {
+    "SailFrames E1": ("boat_tracker", "sailframes_e1_csv"),
+    "Generic GPX": ("boat_tracker", "generic_gpx"),
 }
 
 
@@ -74,26 +82,19 @@ def seed_defaults(session_factory) -> None:
         s.commit()
 
 
-# The real physical fleet (the only concrete devices we have). Mirrors the
-# `const BOATS` list in web/fleet.html. No fictional B* units.
-FLEET_DEVICE_IDS = ["E1", "E2", "E3", "E4", "E5", "E6"]
+def seed_device_types(session_factory) -> None:
+    """Seed the device-type catalog the claim flow picks from. Idempotent —
+    matches on unique name, never touches existing rows."""
+    from ..db.models import DeviceTypeORM
 
-
-def seed_devices(repos) -> None:
-    """Register the physical E1–E6 fleet in the device registry on both
-    metadata backends. Idempotent — skips devices that already exist, so it
-    never clobbers a hand-edited default_boat_id / assignment."""
-    for device_id in FLEET_DEVICE_IDS:
-        if repos.devices.get(device_id) is not None:
-            continue
-        repos.devices.register({
-            "device_id": device_id,
-            "name": device_id,
-            "device_type": "sailframes_e",
-            "owner_type": "club",
-            "status": "active",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+    with session_factory() as s:
+        for name, (category, parser_key) in DEFAULT_DEVICE_TYPES.items():
+            existing = s.scalars(
+                select(DeviceTypeORM).where(DeviceTypeORM.name == name)
+            ).first()
+            if existing is None:
+                s.add(DeviceTypeORM(name=name, category=category, parser_key=parser_key))
+        s.commit()
 
 
 def seed_superadmin(repos) -> None:
@@ -109,8 +110,9 @@ def seed_superadmin(repos) -> None:
     repos.users.create(
         email=admin_email,
         password_hash=hash_password(admin_password) if admin_password else None,
-        name="Superadmin",
+        first_name="Super",
+        last_name="Admin",
+        terms_and_conditions=True,
         is_active=True,
         is_superadmin=True,
-        created_at=datetime.now(timezone.utc).isoformat(),
     )

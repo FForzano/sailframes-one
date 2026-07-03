@@ -14,6 +14,8 @@ Cookies set:
 """
 
 import re
+import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -36,11 +38,11 @@ from ..auth.tokens import (
     new_csrf_token,
     new_family_id,
     new_refresh_token,
-    refresh_expiry_iso,
+    refresh_expiry,
     refresh_max_age,
 )
 from ..schemas import LoginModel, RegisterModel
-from ._common import now_iso, repos
+from ._common import repos
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -49,7 +51,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # --- cookie helpers -------------------------------------------------------
 
-def _set_auth_cookies(response: Response, user_id: int) -> str:
+def _set_auth_cookies(response: Response, user_id: uuid.UUID) -> str:
     """Issue access+refresh+csrf cookies and persist the refresh token row.
     Returns the csrf token (also returned in the body for SPA convenience)."""
     secure = cookie_secure()
@@ -65,8 +67,8 @@ def _set_auth_cookies(response: Response, user_id: int) -> str:
         user_id=user_id,
         token_hash=hash_refresh(refresh),
         family_id=new_family_id(),
-        issued_at=now_iso(),
-        expires_at=refresh_expiry_iso(),
+        issued_at=datetime.now(timezone.utc),
+        expires_at=refresh_expiry(),
     )
     response.set_cookie(
         REFRESH_COOKIE, refresh, httponly=True, secure=secure,
@@ -81,7 +83,9 @@ def _set_auth_cookies(response: Response, user_id: int) -> str:
     return csrf
 
 
-def _rotate_refresh(response: Response, user_id: int, family_id: str, prev_id: int) -> str:
+def _rotate_refresh(
+    response: Response, user_id: uuid.UUID, family_id: str, prev_id: uuid.UUID
+) -> str:
     """Issue a fresh access + rotated refresh in the same family."""
     secure = cookie_secure()
 
@@ -97,8 +101,8 @@ def _rotate_refresh(response: Response, user_id: int, family_id: str, prev_id: i
         token_hash=hash_refresh(refresh),
         family_id=family_id,
         prev_id=prev_id,
-        issued_at=now_iso(),
-        expires_at=refresh_expiry_iso(),
+        issued_at=datetime.now(timezone.utc),
+        expires_at=refresh_expiry(),
     )
     response.set_cookie(
         REFRESH_COOKIE, refresh, httponly=True, secure=secure,
@@ -132,7 +136,8 @@ def register(body: RegisterModel):
     try:
         user = repos.users.create(
             email=email, password_hash=hash_password(body.password),
-            name=body.name, created_at=now_iso(),
+            first_name=body.first_name, last_name=body.last_name,
+            terms_and_conditions=body.terms_and_conditions,
         )
     except ValueError:
         raise HTTPException(409, "Email already registered")
@@ -162,7 +167,7 @@ def refresh(request: Request, response: Response):
         raise HTTPException(401, "Invalid refresh token")
     # Reuse of an already-rotated/revoked token → compromise: nuke the family.
     if row.revoked_at:
-        repos.auth_tokens.revoke_family(row.family_id, now_iso())
+        repos.auth_tokens.revoke_family(row.family_id, datetime.now(timezone.utc))
         _clear_auth_cookies(response)
         raise HTTPException(401, "Refresh token reuse detected")
     if is_expired(row.expires_at):
@@ -170,7 +175,7 @@ def refresh(request: Request, response: Response):
         raise HTTPException(401, "Refresh token expired")
     # Rotate: mint a successor in the same family, revoke the presented one.
     csrf = _rotate_refresh(response, row.user_id, row.family_id, row.id)
-    repos.auth_tokens.revoke(row.id, now_iso())
+    repos.auth_tokens.revoke(row.id, datetime.now(timezone.utc))
     return {"csrf_token": csrf}
 
 
@@ -180,7 +185,7 @@ def logout(request: Request, response: Response):
     if presented:
         row = repos.auth_tokens.get_by_hash(hash_refresh(presented))
         if row is not None:
-            repos.auth_tokens.revoke_family(row.family_id, now_iso())
+            repos.auth_tokens.revoke_family(row.family_id, datetime.now(timezone.utc))
     _clear_auth_cookies(response)
     return {"ok": True}
 

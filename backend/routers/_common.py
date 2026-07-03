@@ -80,6 +80,8 @@ def delete_prefix(prefix: str) -> int:
 
 
 # --- Race dict helpers (repository-backed) --------------------------------
+# TODO(api-project): repos.races is None in the er-project phase (only the
+# disabled races router calls these; rebuild them with the new schema).
 
 def get_race_dict(race_id: str) -> dict:
     """Load a race as a plain dict via the repository ({} if missing)."""

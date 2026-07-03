@@ -12,7 +12,9 @@ from pydantic import BaseModel
 class RegisterModel(BaseModel):
     email: str
     password: str
-    name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    terms_and_conditions: bool = False
 
 
 class LoginModel(BaseModel):

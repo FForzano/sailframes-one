@@ -18,7 +18,7 @@ from .permissions import (
     effective_capabilities,
 )
 from .passwords import hash_password, verify_password
-from .seed import seed_defaults, seed_superadmin, seed_devices
+from .seed import seed_defaults, seed_superadmin, seed_device_types
 
 __all__ = [
     "require_admin",
@@ -32,5 +32,5 @@ __all__ = [
     "verify_password",
     "seed_defaults",
     "seed_superadmin",
-    "seed_devices",
+    "seed_device_types",
 ]

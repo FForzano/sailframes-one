@@ -1,62 +1,76 @@
-"""Device tables: tracker registry (``devices``) + attribution windows
-(``device_assignments``).
+"""Device tables: ``device_types`` (catalog) + ``devices`` (registry).
 
-``device_id`` is the natural primary key (the string the firmware uploads
-under, ``raw/{device_id}/…``). Assignment windows attribute a club/RC device to
-a boat for a bounded period; boat-private devices use ``default_boat_id``
-instead. See ``domain/device.py`` for the resolution order.
+Registration is self-service via claim code (see docs/api-project.md,
+"Registrazione device e ingestion dati"): a user generates a ``claim_code``,
+the device confirms it with its ``external_id`` and receives a one-time
+``device_api_key`` (stored here only as ``api_key_hash``, rotatable without
+re-claiming). ``owner_user_id``/``owner_boat_id``/``owner_club_id`` are the
+CURRENT assignment (mutually exclusive, all NULL = unclaimed);
+``claimed_at``/``claimed_by`` keep the first-association event for audit.
 """
 
+import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, func
+from sqlalchemy.orm import Mapped, mapped_column
 
-from ..base import Base
+from ..base import Base, UUIDPKMixin, enum_check
+
+DEVICE_CATEGORIES = ("boat_tracker", "wearable")
+DEVICE_STATUSES = ("unclaimed", "claimed", "revoked")
 
 
-class DeviceORM(Base):
+class DeviceTypeORM(UUIDPKMixin, Base):
+    __tablename__ = "device_types"
+    __table_args__ = (enum_check("category", DEVICE_CATEGORIES),)
+
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    # Typical sensor list, informational for the UI only.
+    default_sensors: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Ingestion adapter id, e.g. "sailframes_e1_csv", "garmin_fit", "generic_gpx".
+    parser_key: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class DeviceORM(UUIDPKMixin, Base):
     __tablename__ = "devices"
-    __wire_children__ = {"assignments": "assignments"}
-
-    device_id: Mapped[str] = mapped_column(String, primary_key=True)
-    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    device_type: Mapped[str] = mapped_column(String, default="sailframes_e")
-    default_boat_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("boats.boat_id", ondelete="SET NULL"), nullable=True
+    __table_args__ = (
+        enum_check("status", DEVICE_STATUSES),
+        CheckConstraint(
+            "num_nonnulls(owner_user_id, owner_boat_id, owner_club_id) <= 1",
+            name="owner_at_most_one",
+        ),
     )
-    owner_type: Mapped[str] = mapped_column(String, default="user")  # user | club
-    registered_by: Mapped[Optional[int]] = mapped_column(
+    __wire_exclude__ = ("api_key_hash", "claim_code")
+
+    device_type_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("device_types.id", ondelete="RESTRICT"), nullable=False
+    )
+    # Hardware serial / BLE UUID / MAC — set by the device at claim confirm.
+    external_id: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)
+    owner_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    owned_by_club_id: Mapped[Optional[int]] = mapped_column(
+    owner_boat_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("boats.id", ondelete="SET NULL"), nullable=True
+    )
+    owner_club_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("clubs.id", ondelete="SET NULL"), nullable=True
     )
-    status: Mapped[str] = mapped_column(String, default="active")  # active | revoked
-    created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    last_seen_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-
-    assignments: Mapped[list["DeviceAssignmentORM"]] = relationship(
-        back_populates="device", cascade="all, delete-orphan", lazy="selectin"
+    nickname: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    registered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-
-
-class DeviceAssignmentORM(Base):
-    """A bounded [valid_from, valid_to) attribution of a device to a boat.
-    Windows for one device must not overlap (enforced in the repo, 409)."""
-
-    __tablename__ = "device_assignments"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    device_id: Mapped[str] = mapped_column(
-        ForeignKey("devices.device_id", ondelete="CASCADE"), index=True
+    status: Mapped[str] = mapped_column(String, nullable=False, default="unclaimed")
+    claim_code: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)
+    claim_code_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
-    boat_id: Mapped[str] = mapped_column(String, nullable=False)
-    regatta_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    race_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    valid_from: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    valid_to: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-
-    device: Mapped["DeviceORM"] = relationship(back_populates="assignments")
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Hash of the device_api_key issued at claim; rotatable via rotate-key.
+    api_key_hash: Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)

@@ -98,7 +98,7 @@ services:
     ports:
       - "8000:8000"   # direct API access (the SPA uses :8080/api instead)
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/sessions')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 5s
       timeout: 3s
       retries: 30

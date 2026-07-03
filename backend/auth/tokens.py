@@ -45,7 +45,7 @@ def cookie_secure() -> bool:
 
 # --- Access JWT ---
 
-def issue_access_token(user_id: int) -> str:
+def issue_access_token(user_id: uuid.UUID) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -55,11 +55,11 @@ def issue_access_token(user_id: int) -> str:
     return jwt.encode(payload, _secret(), algorithm="HS256")
 
 
-def decode_access_token(token: str) -> Optional[int]:
+def decode_access_token(token: str) -> Optional[uuid.UUID]:
     """Return the user id from a valid, unexpired access token, else None."""
     try:
         payload = jwt.decode(token, _secret(), algorithms=["HS256"])
-        return int(payload["sub"])
+        return uuid.UUID(payload["sub"])
     except Exception:
         return None
 
@@ -82,8 +82,8 @@ def new_family_id() -> str:
     return uuid.uuid4().hex
 
 
-def refresh_expiry_iso() -> str:
-    return (datetime.now(timezone.utc) + timedelta(days=_REFRESH_TTL_DAYS)).isoformat()
+def refresh_expiry() -> datetime:
+    return datetime.now(timezone.utc) + timedelta(days=_REFRESH_TTL_DAYS)
 
 
 def refresh_max_age() -> int:
@@ -94,13 +94,8 @@ def new_csrf_token() -> str:
     return secrets.token_urlsafe(24)
 
 
-def is_expired(expires_at: Optional[str]) -> bool:
-    if not expires_at:
+def is_expired(expires_at: Optional[datetime]) -> bool:
+    """Rows are TIMESTAMPTZ, so psycopg hands back aware datetimes."""
+    if expires_at is None:
         return False
-    try:
-        exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=timezone.utc)
-        return datetime.now(timezone.utc) >= exp
-    except Exception:
-        return False
+    return datetime.now(timezone.utc) >= expires_at

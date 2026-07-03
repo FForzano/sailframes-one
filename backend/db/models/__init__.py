@@ -1,48 +1,63 @@
-"""SQLAlchemy ORM models (Postgres mapping of the domain objects).
+"""SQLAlchemy ORM models — er-project schema (see docs/er-project.md).
 
 One module per aggregate. Importing this package registers every table on
 ``Base.metadata`` so Alembic autogenerate (and ``init_db()``) sees them.
 """
 
-from .regatta import RegattaORM
-from .raceday import RaceDayORM
-from .race import RaceORM, MarkORM, RaceBoatORM, RaceResultORM
-from .boat import BoatORM, BoatMemberORM
-from .group import GroupORM, GroupMemberORM
-from .device import DeviceORM, DeviceAssignmentORM
-from .session import SessionORM, SessionCrewORM
-from .rbac import (
-    UserORM,
-    ClubORM,
-    ClubMemberORM,
-    AuthRefreshTokenORM,
-    RoleORM,
-    PermissionORM,
-    RolePermissionORM,
-    UserRoleORM,
+from .media import ImageORM, FileORM
+from .user import UserORM, AuthRefreshTokenORM
+from .rbac import RoleORM, PermissionORM, RolePermissionORM, UserRoleORM
+from .club import ClubORM, UserClubORM
+from .group import GroupORM, UserGroupORM
+from .boat import BoatClassORM, BoatORM, UserBoatORM, BoatPhotoORM
+from .polar import PolarPointORM
+from .device import DeviceTypeORM, DeviceORM
+from .race import RegattaORM, RaceDayORM, RaceORM, ResultORM
+from .activity import ActivityORM, MarkORM
+from .session import (
+    SessionORM,
+    SessionCrewORM,
+    SessionPhotoORM,
+    SessionVideoORM,
+    SessionStatsORM,
 )
+from .ingest import ImportORM, SessionUploadORM, SessionStreamORM
+from .wind import WindStationORM, WindObservationORM
 
 __all__ = [
-    "RegattaORM",
-    "RaceDayORM",
-    "RaceORM",
-    "MarkORM",
-    "RaceBoatORM",
-    "RaceResultORM",
-    "BoatORM",
-    "BoatMemberORM",
-    "GroupORM",
-    "GroupMemberORM",
-    "DeviceORM",
-    "DeviceAssignmentORM",
-    "SessionORM",
-    "SessionCrewORM",
+    "ImageORM",
+    "FileORM",
     "UserORM",
-    "ClubORM",
-    "ClubMemberORM",
     "AuthRefreshTokenORM",
     "RoleORM",
     "PermissionORM",
     "RolePermissionORM",
     "UserRoleORM",
+    "ClubORM",
+    "UserClubORM",
+    "GroupORM",
+    "UserGroupORM",
+    "BoatClassORM",
+    "BoatORM",
+    "UserBoatORM",
+    "BoatPhotoORM",
+    "PolarPointORM",
+    "DeviceTypeORM",
+    "DeviceORM",
+    "RegattaORM",
+    "RaceDayORM",
+    "RaceORM",
+    "ResultORM",
+    "ActivityORM",
+    "MarkORM",
+    "SessionORM",
+    "SessionCrewORM",
+    "SessionPhotoORM",
+    "SessionVideoORM",
+    "SessionStatsORM",
+    "ImportORM",
+    "SessionUploadORM",
+    "SessionStreamORM",
+    "WindStationORM",
+    "WindObservationORM",
 ]

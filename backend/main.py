@@ -44,18 +44,24 @@ app.add_middleware(
 @app.on_event("startup")
 def _seed():
     """Run migrations (via repo build) then seed the bootstrap superadmin, the
-    physical E1–E6 device registry, and the default RBAC roles/permissions."""
-    from .auth import seed_defaults, seed_superadmin, seed_devices
+    device-type catalog, and the default RBAC roles/permissions."""
+    from .auth import seed_defaults, seed_superadmin, seed_device_types
     from .db import get_sessionmaker
     from .repositories import get_repos
 
     repos = get_repos()  # building the SQL repos runs alembic upgrade head
     seed_superadmin(repos)
-    seed_devices(repos)
+    seed_device_types(get_sessionmaker())
     seed_defaults(get_sessionmaker())
 
 
-# Include every resource router (E1 fleet, sessions, data, analysis, boats,
-# leaderboard, video, buoys, races/regattas/racedays, fleet status, ingest).
+@app.get("/api/health")
+def health():
+    """Liveness probe (docker-compose healthcheck) — no DB/blob access."""
+    return {"ok": True}
+
+
+# Include every resource router (see routers/__init__.py for the er-project
+# enable/disable list).
 for _router in ALL_ROUTERS:
     app.include_router(_router)

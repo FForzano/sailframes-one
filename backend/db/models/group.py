@@ -1,53 +1,59 @@
-"""Group tables: free social groupings, independent of clubs and boats.
+"""Groups and group membership (``groups``, ``user_groups``).
 
-Speculare to ``ClubORM``/``ClubMemberORM`` in ``rbac.py``. Plain membership
-(``group_members``) feeds the visibility filter; ``role`` on the membership
-(``admin|member``) governs who may manage the group — there is no single-owner
-column (a group can have several admins). ``created_by`` records the author.
+Informal training/social circles, unlike clubs (institutional). ``visibility``
+public = discoverable and readable by anyone, private = members only; join is
+invite-only in both cases. Ownership is per-resource (``user_groups.role``),
+not RBAC.
 """
 
+import uuid
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from ..base import Base
+from ..base import Base, CreatedAtMixin, UUIDPKMixin, enum_check
+
+GROUP_VISIBILITIES = ("public", "private")
+USER_GROUP_ROLES = ("owner", "admin", "member")
 
 
-class GroupORM(Base):
+class GroupORM(UUIDPKMixin, CreatedAtMixin, Base):
     __tablename__ = "groups"
+    __table_args__ = (enum_check("visibility", GROUP_VISIBILITIES),)
     __wire_children__ = {"members": "members"}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    # Author of the group (informational; management is by admin membership).
-    created_by: Mapped[Optional[int]] = mapped_column(
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    profile_image_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
+    visibility: Mapped[str] = mapped_column(String, nullable=False, default="private")
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    # Inherited by sessions shared with this group (private|group|club|public).
-    default_session_visibility: Mapped[str] = mapped_column(String, default="private")
-    created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    deleted_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    members: Mapped[list["GroupMemberORM"]] = relationship(
+    members: Mapped[list["UserGroupORM"]] = relationship(
         back_populates="group", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
-class GroupMemberORM(Base):
-    """Plain group membership used by the visibility filter. ``role`` (admin|
-    member) governs management rights; ``status`` (invited|active) the join
-    lifecycle."""
-
-    __tablename__ = "group_members"
-    __table_args__ = (UniqueConstraint("group_id", "user_id", name="uq_group_member"),)
+class UserGroupORM(UUIDPKMixin, CreatedAtMixin, Base):
+    __tablename__ = "user_groups"
+    __table_args__ = (
+        UniqueConstraint("user_id", "group_id"),
+        enum_check("role", USER_GROUP_ROLES),
+    )
     __wire_exclude__ = ("id", "group_id")
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    role: Mapped[str] = mapped_column(String, default="member")  # admin | member
-    status: Mapped[str] = mapped_column(String, default="active")  # invited | active
-    joined_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    group_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String, nullable=False, default="member")
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     group: Mapped["GroupORM"] = relationship(back_populates="members")

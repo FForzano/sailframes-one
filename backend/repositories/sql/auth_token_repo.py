@@ -1,6 +1,8 @@
 """SQL refresh-token repository (rotation + reuse detection). Returns
 ``AuthRefreshTokenORM`` rows; auth logic reads their attributes directly."""
 
+import uuid
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select, update
@@ -12,9 +14,11 @@ class SqlAuthTokenRepo:
     def __init__(self, session_factory):
         self.Session = session_factory
 
-    def create(self, *, user_id: int, token_hash: str, family_id: str,
-               prev_id: Optional[int] = None, issued_at: Optional[str] = None,
-               expires_at: Optional[str] = None, revoked_at: Optional[str] = None,
+    def create(self, *, user_id: uuid.UUID, token_hash: str, family_id: str,
+               prev_id: Optional[uuid.UUID] = None,
+               issued_at: Optional[datetime] = None,
+               expires_at: Optional[datetime] = None,
+               revoked_at: Optional[datetime] = None,
                user_agent: Optional[str] = None) -> AuthRefreshTokenORM:
         with self.Session() as s:
             orm = AuthRefreshTokenORM(
@@ -34,7 +38,7 @@ class SqlAuthTokenRepo:
                 select(AuthRefreshTokenORM).where(AuthRefreshTokenORM.token_hash == token_hash)
             ).first()
 
-    def revoke(self, token_id: int, revoked_at: str) -> None:
+    def revoke(self, token_id: uuid.UUID, revoked_at: datetime) -> None:
         with self.Session() as s:
             s.execute(
                 update(AuthRefreshTokenORM)
@@ -43,7 +47,7 @@ class SqlAuthTokenRepo:
             )
             s.commit()
 
-    def revoke_family(self, family_id: str, revoked_at: str) -> None:
+    def revoke_family(self, family_id: str, revoked_at: datetime) -> None:
         with self.Session() as s:
             s.execute(
                 update(AuthRefreshTokenORM)

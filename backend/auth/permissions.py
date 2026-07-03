@@ -13,6 +13,7 @@ short-circuits every check — a dev-only escape hatch.
 
 import hmac
 import os
+import uuid
 from typing import Optional
 
 from fastapi import HTTPException, Request
@@ -56,19 +57,14 @@ def effective_capabilities(user) -> dict:
 
     repos = get_repos()
 
-    clubs_owned, clubs_member = [], []
-    for c in repos.clubs.list():
-        if c.owner_user_id == user.id:
-            clubs_owned.append(c.id)
-        if repos.clubs.is_active_member(c.id, user.id):
-            clubs_member.append(c.id)
+    clubs_member = [c.id for c in repos.clubs.list() if repos.clubs.is_active_member(c.id, user.id)]
     groups = [g.id for g in repos.groups.list() if repos.groups.is_member(g.id, user.id)]
-    boats_owner, boats_skipper = [], []
+    boats_owner, boats_admin = [], []
     for b in repos.boats.list():
-        if repos.boats.is_member(b.boat_id, user.id, roles=["owner"]):
-            boats_owner.append(b.boat_id)
-        if repos.boats.is_member(b.boat_id, user.id, roles=["skipper"]):
-            boats_skipper.append(b.boat_id)
+        if repos.boats.is_member(b.id, user.id, roles=["owner"]):
+            boats_owner.append(b.id)
+        if repos.boats.is_member(b.id, user.id, roles=["admin"]):
+            boats_admin.append(b.id)
 
     roles: list[dict] = []
     perm_global: set[str] = set()
@@ -101,6 +97,13 @@ def effective_capabilities(user) -> dict:
                 else:
                     perm_by_club.setdefault(str(ur.scope_club_id), set()).update(keys)
 
+    # Club "ownership" is no longer a column (clubs.owner_user_id is gone):
+    # it's the club_admin role scoped to that club.
+    clubs_owned = [
+        r["scope_club_id"] for r in roles
+        if r["role"] == "club_admin" and r["scope_club_id"] is not None
+    ]
+
     return {
         "user": user.to_dict(),
         "roles": roles,
@@ -113,43 +116,18 @@ def effective_capabilities(user) -> dict:
             "clubsMember": clubs_member,
             "groups": groups,
             "boatsOwner": boats_owner,
-            "boatsSkipper": boats_skipper,
+            "boatsAdmin": boats_admin,
         },
     }
 
 
 def session_visible_to(session, user) -> bool:
-    """Phase 5 visibility rule (operates on the domain ``Session`` +
-    ``domain.User`` | None). See docs/user_plan.md → "Controllo accessi".
-
-    Visible when: public; OR the caller owns it / is in its crew; OR the caller
-    is standing crew of the attributed boat; OR visibility=club and the caller
-    is an active club member; OR visibility=group and the caller is a group
-    member; OR the caller is a superadmin. Anonymous callers see only public.
-    """
-    from ..repositories import get_repos
-
-    if session.visibility == "public":
-        return True
-    if user is None:
-        return False
-    if user.is_superadmin:
-        return True
-    if session.owner_user_id is not None and session.owner_user_id == user.id:
-        return True
-    if any(c.user_id == user.id for c in (session.crew or [])):
-        return True
-    repos = get_repos()
-    # Standing crew of the attributed boat always sees its own boat's data.
-    if session.boat_id is not None and repos.boats.is_member(session.boat_id, user.id):
-        return True
-    if session.visibility == "club" and session.club_id is not None:
-        if repos.clubs.is_active_member(session.club_id, user.id):
-            return True
-    if session.visibility == "group" and session.group_id is not None:
-        if repos.groups.is_member(session.group_id, user.id):
-            return True
-    return False
+    """TODO(api-project): visibility now lives on the parent activity
+    (``activities.visibility`` public|club|group|private crossed with
+    session_crew / user_boats / user_clubs / user_groups), so this needs the
+    activity join once the sessions API is rebuilt. No enabled router calls
+    this in the er-project phase — superadmin-only until then."""
+    return user is not None and user.is_superadmin
 
 
 def verify_csrf(request: Request) -> None:
@@ -172,7 +150,7 @@ def _resolve_user(session, email: str):
     ).first()
 
 
-def _user_has_permission(session, user, key: str, club_id: Optional[int]) -> bool:
+def _user_has_permission(session, user, key: str, club_id: Optional[uuid.UUID]) -> bool:
     from ..db.models import PermissionORM, RolePermissionORM
 
     if user.is_superadmin:
@@ -195,7 +173,7 @@ def _user_has_permission(session, user, key: str, club_id: Optional[int]) -> boo
     return False
 
 
-def _check_permission(request: Request, key: str, club_id: Optional[int]) -> bool:
+def _check_permission(request: Request, key: str, club_id: Optional[uuid.UUID]) -> bool:
     from ..db import get_sessionmaker
 
     user = current_user(request)
@@ -210,7 +188,7 @@ def _check_permission(request: Request, key: str, club_id: Optional[int]) -> boo
     raise HTTPException(403, f"Permission denied: {key}")
 
 
-def require_permission(request: Request, key: str, *, club_id: Optional[int] = None) -> bool:
+def require_permission(request: Request, key: str, *, club_id: Optional[uuid.UUID] = None) -> bool:
     if os.environ.get("SAILFRAMES_ADMIN_BYPASS"):
         return True
     return _check_permission(request, key, club_id)
