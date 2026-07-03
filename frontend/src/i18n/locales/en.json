@@ -181,7 +181,26 @@
     "crew": "Crew",
     "guestName": "Guest name",
     "role": "Role",
-    "addCrew": "Add crew"
+    "addCrew": "Add crew",
+    "create": "Create session",
+    "created": "Session created",
+    "boat": "Boat",
+    "date": "Date",
+    "device": "Tracking device",
+    "deviceNone": "No device (upload GPX manually)",
+    "selectBoat": "Select a boat",
+    "addMember": "Add crew member",
+    "selectMember": "Select a member",
+    "uploadGpx": "Upload GPX track",
+    "uploadGpxHint": "Upload the GPX file recorded during the outing to compute the analysis.",
+    "uploadLater": "Upload later",
+    "upload": "Upload",
+    "gpxUploaded": "GPX uploaded: analysis is processing.",
+    "statusPending": "Waiting for GPX upload",
+    "statusProcessing": "Processing…",
+    "statusReady": "Ready",
+    "statusFailed": "Processing failed",
+    "refresh": "Refresh"
   },
   "profile": {
     "account": "Account",
@@ -221,7 +240,8 @@
   },
   "common": {
     "comingSoon": "Coming soon",
-    "comingSoonBody": "This area is being rebuilt as part of the frontend refactor."
+    "comingSoonBody": "This area is being rebuilt as part of the frontend refactor.",
+    "close": "Close"
   },
   "notFound": {
     "title": "Page not found",

@@ -62,6 +62,11 @@ def list_blob_sessions(blob: BlobStore, data_prefix: str) -> list[SessionORM]:
             parts = key.split("/")
             device_id = parts[1] if len(parts) > 2 else "unknown"
             date = parts[2] if len(parts) > 2 else "unknown"
+            if device_id == "manual":
+                # Manual/GPX sessions live under processed/manual/{session.id}/
+                # and are already DB rows (created directly, not via ingest) —
+                # not a device+date pair to import.
+                continue
             out.append(_to_orm(manifest, device_id, date))
         except Exception:
             continue

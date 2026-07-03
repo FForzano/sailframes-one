@@ -78,3 +78,8 @@ class BlobStore(ABC):
     def download_ref(self, key: str, expiry: int = 3600) -> str:
         """A URL/path the browser can fetch the object from: an S3 presigned
         URL (AWS), or an API proxy path (MinIO / local)."""
+
+    @abstractmethod
+    def upload_ref(self, key: str, content_type: str = "application/octet-stream", expiry: int = 3600) -> str:
+        """A URL/path the browser can PUT raw bytes to: an S3 presigned PUT
+        URL (AWS), or an API proxy path (MinIO / local)."""

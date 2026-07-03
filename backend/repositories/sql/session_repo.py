@@ -31,6 +31,68 @@ class SqlSessionRepo:
         with self.Session() as s:
             return list(s.scalars(select(SessionORM)).all())
 
+    def get_by_id(self, session_id: int) -> Optional[SessionORM]:
+        with self.Session() as s:
+            return s.get(SessionORM, session_id)
+
+    def create_manual(self, *, boat_id: str, date: str, name: Optional[str],
+                       crew: list, owner_user_id: int) -> SessionORM:
+        """Register a device-less outing (``source="manual"``). Starts life with
+        no data/analysis — ``processing_status="pending"`` until a GPX track is
+        uploaded and processed (see ``services/gpx_processing.py``)."""
+        with self.Session() as s:
+            orm = SessionORM(
+                device_id=None,
+                date=date,
+                boat=boat_id,
+                boat_id=boat_id,
+                name=name,
+                source="manual",
+                processing_status="pending",
+                visibility="private",
+                owner_user_id=owner_user_id,
+                sensors=[],
+            )
+            orm.crew = [
+                SessionCrewORM(user_id=c.get("user_id"), guest_name=c.get("guest_name"),
+                               boat_role=c.get("boat_role"))
+                for c in crew
+            ]
+            s.add(orm)
+            s.commit()
+            s.refresh(orm)
+            return orm
+
+    def set_processing_status(self, session_id: int, status: str, error: Optional[str] = None) -> None:
+        with self.Session() as s:
+            orm = s.get(SessionORM, session_id)
+            if orm is None:
+                return
+            orm.processing_status = status
+            orm.processing_error = error
+            s.commit()
+
+    def apply_manual_gpx_result(self, session_id: int, *, start_time: Optional[str],
+                                 end_time: Optional[str], duration_sec: Optional[int],
+                                 sensors: dict, has_analysis: bool,
+                                 status: str, error: Optional[str] = None) -> None:
+        """Persist the outcome of ``services/gpx_processing.py`` onto the
+        session row: the manifest-derived summary fields (mirroring what the
+        CSV ingest pipeline keeps in sync for device sessions) plus the final
+        ``processing_status``."""
+        with self.Session() as s:
+            orm = s.get(SessionORM, session_id)
+            if orm is None:
+                return
+            orm.start_time = start_time
+            orm.end_time = end_time
+            orm.duration_sec = duration_sec
+            orm.sensors = sensors
+            orm.has_analysis = has_analysis
+            orm.processing_status = status
+            orm.processing_error = error
+            s.commit()
+
     def get(self, device_id: str, date: str) -> Optional[SessionORM]:
         with self.Session() as s:
             orm = self._by_key(s, device_id, date)

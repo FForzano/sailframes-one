@@ -18,7 +18,7 @@ from .auth import RegisterModel, LoginModel
 from .club import ClubCreateModel, ClubInviteModel, ClubJoinModel
 from .group import GroupCreateModel, GroupInviteModel, GroupJoinModel
 from .device import DeviceRegisterModel, DeviceAssignmentModel
-from .session import SessionCrewModel, SessionCrewSlotModel
+from .session import SessionCrewModel, SessionCrewSlotModel, SessionCreateModel
 from .boat import BoatWriteModel, BoatMemberModel, BoatMemberRoleModel
 
 __all__ = [
@@ -43,6 +43,7 @@ __all__ = [
     "DeviceAssignmentModel",
     "SessionCrewModel",
     "SessionCrewSlotModel",
+    "SessionCreateModel",
     "BoatWriteModel",
     "BoatMemberModel",
     "BoatMemberRoleModel",

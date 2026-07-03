@@ -47,6 +47,7 @@ export default function App() {
         <Route path="fleet" element={<FleetStatus />} />
         <Route path="sessions" element={<Sessions />} />
         <Route path="session/:deviceId/:date" element={<SessionView />} />
+        <Route path="session/manual/:id" element={<SessionView />} />
         <Route path="bom" element={<Bom />} />
         <Route path="battery" element={<Battery />} />
 

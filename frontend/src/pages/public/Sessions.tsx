@@ -26,8 +26,8 @@ export function Sessions() {
         <div className="sf-list">
           {sessions.map((s) => (
             <Link
-              key={`${s.device_id}/${s.date}`}
-              to={`/session/${s.device_id}/${s.date}`}
+              key={s.id}
+              to={s.source === "manual" ? `/session/manual/${s.id}` : `/session/${s.device_id}/${s.date}`}
               className="sf-listrow"
             >
               <span className="sf-listrow__meta">{fmtShortDate(s.date)}</span>

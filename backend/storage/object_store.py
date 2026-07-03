@@ -154,3 +154,15 @@ class ObjectBlobStore(BlobStore):
             Params={"Bucket": self.bucket, "Key": key},
             ExpiresIn=expiry,
         )
+
+    def upload_ref(self, key: str, content_type: str = "application/octet-stream", expiry: int = 3600) -> str:
+        # Same reasoning as download_ref: MinIO's internal host isn't
+        # browser-reachable, so proxy the PUT through the API (see
+        # ``routers/uploads.py``); AWS gets a real presigned PUT URL.
+        if self.endpoint:
+            return f"/api/uploads/{key}"
+        return self._s3.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type},
+            ExpiresIn=expiry,
+        )

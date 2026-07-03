@@ -181,7 +181,26 @@
     "crew": "Equipaggio",
     "guestName": "Nome ospite",
     "role": "Ruolo",
-    "addCrew": "Aggiungi membro"
+    "addCrew": "Aggiungi membro",
+    "create": "Crea sessione",
+    "created": "Sessione creata",
+    "boat": "Barca",
+    "date": "Data",
+    "device": "Device di tracking",
+    "deviceNone": "Nessun device (carica GPX manualmente)",
+    "selectBoat": "Seleziona una barca",
+    "addMember": "Aggiungi membro dell'equipaggio",
+    "selectMember": "Seleziona un membro",
+    "uploadGpx": "Carica tracciato GPX",
+    "uploadGpxHint": "Carica il file GPX registrato durante l'uscita per calcolare l'analisi.",
+    "uploadLater": "Carica più tardi",
+    "upload": "Carica",
+    "gpxUploaded": "GPX caricato: l'analisi è in elaborazione.",
+    "statusPending": "In attesa del caricamento del GPX",
+    "statusProcessing": "Elaborazione in corso…",
+    "statusReady": "Pronto",
+    "statusFailed": "Elaborazione non riuscita",
+    "refresh": "Aggiorna"
   },
   "profile": {
     "account": "Account",
@@ -221,7 +240,8 @@
   },
   "common": {
     "comingSoon": "In arrivo",
-    "comingSoonBody": "Quest'area è in fase di ricostruzione nel refactor del frontend."
+    "comingSoonBody": "Quest'area è in fase di ricostruzione nel refactor del frontend.",
+    "close": "Chiudi"
   },
   "notFound": {
     "title": "Pagina non trovata",

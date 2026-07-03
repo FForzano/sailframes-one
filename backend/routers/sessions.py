@@ -2,10 +2,11 @@
 
 Sessions are recorded-data manifests (one device, one date); the bulk sensor
 payloads stay in the blob store. This router covers listing, single fetch,
-deletion, and the bulk cleanup of short/unassigned sessions.
+deletion, creation (device-attributed or fully manual + GPX upload), and the
+bulk cleanup of short/unassigned sessions.
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
 from ..auth import (
     current_user,
@@ -14,19 +15,29 @@ from ..auth import (
     session_visible_to,
     verify_csrf,
 )
-from ..schemas import SessionCrewModel
+from ..schemas import SessionCreateModel, SessionCrewModel
 from ._common import (
     DATA_PREFIX,
     delete_prefix,
     list_keys,
     load_json_or_404,
     repos,
+    blob,
 )
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 # Standing-crew roles on a boat that may edit its sessions' crew/attribution.
 BOAT_MANAGE_ROLES = ["owner", "skipper"]
+
+
+def _crew_dicts(slots) -> list[dict]:
+    crew = []
+    for slot in slots:
+        if (slot.user_id is None) == (slot.guest_name is None):
+            raise HTTPException(422, "Each crew slot needs exactly one of user_id / guest_name")
+        crew.append({"user_id": slot.user_id, "guest_name": slot.guest_name, "boat_role": slot.boat_role})
+    return crew
 
 
 @router.get("")
@@ -45,6 +56,7 @@ def list_sessions(request: Request):
             continue
         duration_sec = s.duration_sec or 0
         sessions.append({
+            "id": s.id,
             "device_id": s.device_id,
             "date": s.date,
             "start_time": s.start_time,
@@ -59,9 +71,57 @@ def list_sessions(request: Request):
             "session_id": s.session_id,
             "visibility": s.visibility,
             "boat_id": s.boat_id,
+            "source": s.source,
+            "processing_status": s.processing_status,
         })
 
     return {"sessions": sorted(sessions, key=lambda s: s["date"], reverse=True)}
+
+
+@router.post("")
+def create_session(body: SessionCreateModel, request: Request):
+    """Register a sailing outing: boat + crew, and either an existing device
+    (claims/edits that device's session for the given date — 404 if it hasn't
+    uploaded anything yet) or nothing (creates a device-less "manual" session,
+    to be filled in via the GPX upload flow below). Any standing crew member of
+    the boat may create a session for it (not just owner/skipper)."""
+    verify_csrf(request)
+    user = require_user(request)
+    if not repos.boats.is_member(body.boat_id, user.id):
+        raise HTTPException(403, "Not a member of this boat")
+
+    crew = _crew_dicts(body.crew)
+
+    if body.device_id:
+        repos.sessions.attribute_boat(body.device_id, body.date, body.boat_id)
+        updated = repos.sessions.edit(
+            body.device_id, body.date, crew=crew, boat_id=body.boat_id, claim_owner_id=user.id,
+        )
+        if updated is None:
+            raise HTTPException(
+                404,
+                "No data uploaded yet for that device on that date. Create the "
+                "session without a device and upload a GPX track instead, or "
+                "try again once the device has synced.",
+            )
+        return updated.to_dict()
+
+    session = repos.sessions.create_manual(
+        boat_id=body.boat_id, date=body.date, name=body.name, crew=crew, owner_user_id=user.id,
+    )
+    return session.to_dict()
+
+
+@router.get("/id/{session_id}")
+def get_session_by_id(session_id: int, request: Request):
+    """Get a session by its surrogate id — the only way to address a
+    device-less "manual" session (it has no device_id/date pair)."""
+    session = repos.sessions.get_by_id(session_id)
+    if session is None:
+        raise HTTPException(404, f"Session not found: {session_id}")
+    if not session_visible_to(session, current_user(request)):
+        raise HTTPException(404, f"Session not found: {session_id}")
+    return session.to_dict()
 
 
 @router.get("/{device_id}/{date}")
@@ -76,7 +136,7 @@ def get_session(device_id: str, date: str, request: Request):
     return session.to_dict()
 
 
-def _can_edit_session(session, device_id: str, user) -> bool:
+def _can_edit_session(session, device_id, user) -> bool:
     """Owner/skipper of the attributed boat, whoever registered the device (for
     an unclaimed session), the session owner, or a superadmin."""
     if user.is_superadmin:
@@ -118,6 +178,50 @@ def edit_session_crew(device_id: str, date: str, body: SessionCrewModel, request
     return updated.to_dict()
 
 
+def _manual_session_or_404(session_id: int, user):
+    session = repos.sessions.get_by_id(session_id)
+    if session is None or session.source != "manual":
+        raise HTTPException(404, f"Session not found: {session_id}")
+    if not _can_edit_session(session, None, user):
+        raise HTTPException(403, "Not allowed to upload to this session")
+    return session
+
+
+@router.post("/{session_id}/gpx/upload-url")
+def get_gpx_upload_url(session_id: int, request: Request):
+    """Get a URL the caller can PUT the raw GPX file to directly (S3 presigned
+    PUT, or the ``/api/uploads`` proxy on MinIO/local — see
+    ``BlobStore.upload_ref``). Only for manual (device-less) sessions."""
+    verify_csrf(request)
+    user = require_user(request)
+    _manual_session_or_404(session_id, user)
+
+    key = f"raw/manual/{session_id}/track.gpx"
+    url = blob.upload_ref(key, content_type="application/gpx+xml")
+    return {"url": url, "key": key, "method": "PUT"}
+
+
+@router.post("/{session_id}/gpx/complete")
+def complete_gpx_upload(session_id: int, background_tasks: BackgroundTasks, request: Request):
+    """Call after the PUT to the upload URL succeeds: verifies the object
+    landed, then schedules GPX-parse + analysis in the background and returns
+    immediately. Poll ``GET /api/sessions/id/{id}`` for ``processing_status``."""
+    verify_csrf(request)
+    user = require_user(request)
+    _manual_session_or_404(session_id, user)
+
+    key = f"raw/manual/{session_id}/track.gpx"
+    if not blob.exists(key):
+        raise HTTPException(400, "No GPX file found at the upload URL — upload it first")
+
+    repos.sessions.set_processing_status(session_id, "processing")
+
+    from ..services.gpx_processing import process_manual_session_gpx
+    background_tasks.add_task(process_manual_session_gpx, session_id)
+
+    return {"status": "processing", "id": session_id}
+
+
 @router.delete("/{device_id}/{date}")
 def delete_session(device_id: str, date: str, request: Request):
     """Delete a session and all its data (processed folder)."""
@@ -157,10 +261,13 @@ def cleanup_sessions(
 
     for key in manifests:
         try:
-            manifest = load_json_or_404(key)
             parts = key.split("/")
             device_id = parts[1] if len(parts) > 2 else "unknown"
             date = parts[2] if len(parts) > 2 else "unknown"
+            if device_id == "manual":
+                # Manual/GPX sessions are DB-owned rows, not device+date pairs.
+                continue
+            manifest = load_json_or_404(key)
 
             duration_sec = manifest.get("duration_sec", 0)
             duration_minutes = duration_sec / 60 if duration_sec else 0

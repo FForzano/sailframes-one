@@ -68,9 +68,27 @@ def lambda_handler(event, context):
 
     Processes each S3 record independently so one bad file doesn't block others.
     Failures are logged and collected, but don't prevent remaining files from processing.
+
+    A record may also carry ``{"analyze": {"prefix": ...}, "bucket": ...}``
+    instead of the usual S3 event shape — the backend's manual-GPX-session
+    flow dispatches that to run the analysis pipeline against an
+    already-processed ``gps.json`` (see ``backend/services/gpx_processing.py``),
+    reusing this worker's numpy/pandas/``processing/*`` deps instead of
+    duplicating them in the lean API container.
     """
     errors = []
     for record in event.get('Records', []):
+        if 'analyze' in record:
+            bucket = record.get('bucket', DATA_BUCKET)
+            prefix = record['analyze']['prefix']
+            logger.info(f"Analyzing {bucket}/{prefix}")
+            try:
+                process_analyze_prefix(bucket, prefix)
+            except Exception as e:
+                logger.error(f"Failed to analyze {prefix}: {e}", exc_info=True)
+                errors.append({'key': prefix, 'error': str(e)})
+            continue
+
         bucket = record['s3']['bucket']['name']
         key = record['s3']['object']['key']
 
@@ -87,6 +105,50 @@ def lambda_handler(event, context):
         return {'statusCode': 207, 'body': json.dumps({'errors': errors, 'message': f'{len(errors)} file(s) failed'})}
 
     return {'statusCode': 200, 'body': 'OK'}
+
+
+def process_analyze_prefix(bucket: str, prefix: str):
+    """Run the analysis pipeline against an already-processed session
+    directory (``gps.json`` + optional ``imu``/``wind``/``pressure.json`` +
+    ``manifest.json``) and write ``analysis.json`` back next to it.
+
+    Used for manual/GPX-sourced sessions, which write ``gps.json`` directly
+    (see ``backend/services/gpx_processing.py``) instead of going through the
+    CSV pipeline above — everything downstream of "we have a gps.json" is
+    identical, so this reuses ``analyzer.analyze_session`` unchanged.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from analyzer import analyze_session
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        for name in ('gps.json', 'imu.json', 'wind.json', 'pressure.json', 'manifest.json'):
+            try:
+                obj = s3.get_object(Bucket=bucket, Key=f"{prefix}{name}")
+            except Exception:
+                continue  # optional sensor file / manifest not present — analyzer tolerates missing files
+            (tmp_path / name).write_bytes(obj['Body'].read())
+
+        result = analyze_session(tmp_path)
+
+    s3.put_object(
+        Bucket=bucket, Key=f"{prefix}analysis.json",
+        Body=json.dumps(result, indent=2).encode(), ContentType='application/json',
+    )
+
+    try:
+        manifest_obj = s3.get_object(Bucket=bucket, Key=f"{prefix}manifest.json")
+        manifest = json.loads(manifest_obj['Body'].read().decode('utf-8'))
+        manifest['has_analysis'] = 'error' not in result
+        manifest['updated_at'] = datetime.now(timezone.utc).isoformat()
+        s3.put_object(
+            Bucket=bucket, Key=f"{prefix}manifest.json",
+            Body=json.dumps(manifest, indent=2).encode(), ContentType='application/json',
+        )
+    except Exception:
+        logger.exception(f"Failed to update manifest has_analysis flag at {prefix}")
 
 
 def find_session_actual_date(bucket: str, device_id: str, session_id: str, path_date: str) -> str:

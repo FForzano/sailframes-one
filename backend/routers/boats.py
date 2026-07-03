@@ -96,10 +96,19 @@ def update_boat(boat_id: str, body: BoatWriteModel, request: Request):
 
 @router.get("/{boat_id}/members")
 def list_members(boat_id: str):
-    """List a boat's standing crew."""
+    """List a boat's standing crew, with email/name for display (e.g. the
+    session-creation crew picker) — ``BoatMemberORM`` itself only carries
+    ``user_id``."""
     if repos.boats.get(boat_id) is None:
         raise HTTPException(404, f"Boat not found: {boat_id}")
-    return {"members": [m.to_dict() for m in repos.boats.list_members(boat_id)]}
+    members = []
+    for m in repos.boats.list_members(boat_id):
+        d = m.to_dict()
+        user = repos.users.get_by_id(m.user_id)
+        d["email"] = user.email if user else None
+        d["name"] = user.name if user else None
+        members.append(d)
+    return {"members": members}
 
 
 @router.post("/{boat_id}/members")

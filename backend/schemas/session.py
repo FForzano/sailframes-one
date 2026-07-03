@@ -22,3 +22,19 @@ class SessionCrewModel(BaseModel):
     visibility: Optional[str] = None  # private | group | club | public
     club_id: Optional[int] = None
     group_id: Optional[int] = None
+
+
+class SessionCreateModel(BaseModel):
+    """Manually register a sailing outing.
+
+    ``device_id`` is optional: if set, this upserts the usual device+date
+    session (same as the ingest pipeline would attribute); if omitted, a new
+    device-less "manual" session is created, meant to be filled in later via
+    the GPX upload flow (``POST /api/sessions/{id}/gpx/upload-url`` +
+    ``.../complete``)."""
+
+    boat_id: str
+    date: str  # YYYY-MM-DD, the date of the outing
+    device_id: Optional[str] = None
+    name: Optional[str] = None
+    crew: list[SessionCrewSlotModel] = []

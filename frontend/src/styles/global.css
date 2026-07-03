@@ -257,6 +257,19 @@ a {
 .sf-page__title {
   margin: 0 0 0.25rem;
 }
+.sf-page__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.sf-page__head .sf-page__title {
+  margin: 0;
+}
+.sf-ml {
+  margin-left: 0.5rem;
+}
 .sf-card {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);

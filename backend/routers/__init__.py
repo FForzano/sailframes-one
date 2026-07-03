@@ -9,6 +9,7 @@ in ``_common``. This mirrors the per-aggregate split already used by
 from . import (
     e1,
     download,
+    uploads,
     sessions,
     data,
     analysis,
@@ -33,6 +34,7 @@ ALL_ROUTERS = [
     # Fleet raw data + downloads
     e1.router,
     download.router,
+    uploads.router,
     # Session-centric data
     sessions.router,
     data.router,

@@ -4,6 +4,8 @@ export interface BoatMember {
   user_id: number;
   role: BoatRole;
   created_at?: string;
+  email?: string | null;
+  name?: string | null;
 }
 
 export interface Boat {
