@@ -6,10 +6,11 @@ of a provider and upserts through the (station, observed_at) unique key.
 Add a provider by registering it in ``PROVIDERS``.
 """
 
-from . import ndbc
+from . import ndbc, open_meteo
 
 PROVIDERS = {
     "noaa_ndbc": ndbc.fetch_station,
+    "open_meteo": open_meteo.fetch_station,
 }
 
 __all__ = ["PROVIDERS"]

@@ -18,6 +18,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ImageUploader } from "@/components/common/ImageUploader";
 import { UserPicker } from "@/components/common/UserPicker";
+import { WindCard } from "@/components/common/WindCard";
 import { useMediaUpload } from "@/hooks/useMediaUpload";
 import { fmtDateTime, fmtDistance, fmtDuration, fmtKnots, userLabel } from "@/utils/format";
 import { sessionStatusBadge } from "./SessionsPage";
@@ -199,6 +200,10 @@ export function SessionDetailPage() {
           </p>
         )}
       </Card>
+
+      {tracks[0]?.pts[0] && (
+        <WindCard lat={tracks[0].pts[0].lat} lng={tracks[0].pts[0].lon} at={s.started_at} />
+      )}
 
       <Card title={t("sessions.playback")}>
         {streams.isLoading || (gpsStream && gps === null) ? (

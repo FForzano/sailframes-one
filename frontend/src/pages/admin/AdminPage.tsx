@@ -26,20 +26,46 @@ function WindStations() {
     external_station_id: "",
     name: "",
     station_type: "buoy",
+    lat: "",
+    lng: "",
   });
+  const isCoordProvider = form.provider === "open_meteo";
   const [observing, setObserving] = useState<WindStation | null>(null);
+  const [page, setPage] = useState(0);
+  const OBS_PAGE_SIZE = 50;
 
   const stations = useQuery({ queryKey: windKeys.stations, queryFn: windService.listStations });
   const observations = useQuery({
-    queryKey: windKeys.observations(observing?.id ?? "none"),
-    queryFn: () => windService.observations(observing!.id),
+    // The cache grows without bound (every scheduler tick upserts more rows),
+    // so the admin view pages through it server-side rather than fetching
+    // everything and slicing client-side.
+    queryKey: windKeys.observations(observing?.id ?? "none", String(page)),
+    queryFn: () =>
+      windService.observations(observing!.id, { limit: OBS_PAGE_SIZE, offset: page * OBS_PAGE_SIZE }),
     enabled: observing !== null,
   });
 
   const create = useMutation({
-    mutationFn: () => windService.createStation(form),
+    mutationFn: () =>
+      windService.createStation({
+        provider: form.provider,
+        // Derived server-side for open_meteo (see routers/wind.py) — omit
+        // the manually-typed id so it can't fight the derived one.
+        external_station_id: isCoordProvider ? undefined : form.external_station_id,
+        name: form.name || undefined,
+        station_type: form.station_type,
+        lat: form.lat ? Number(form.lat) : undefined,
+        lng: form.lng ? Number(form.lng) : undefined,
+      }),
     onSuccess: async () => {
-      setForm({ provider: "noaa_ndbc", external_station_id: "", name: "", station_type: "buoy" });
+      setForm({
+        provider: "noaa_ndbc",
+        external_station_id: "",
+        name: "",
+        station_type: "buoy",
+        lat: "",
+        lng: "",
+      });
       await queryClient.invalidateQueries({ queryKey: windKeys.stations });
     },
     onError: () => notify(t("errors.generic"), "error"),
@@ -66,14 +92,21 @@ function WindStations() {
             {stations.data?.map((s) => (
               <tr key={s.id}>
                 <td>{s.provider}</td>
-                <td>{s.external_station_id}</td>
+                <td>
+                  {s.provider === "open_meteo" && s.lat != null && s.lng != null
+                    ? `${s.lat.toFixed(3)}, ${s.lng.toFixed(3)}`
+                    : s.external_station_id}
+                </td>
                 <td>{s.name ?? "—"}</td>
                 <td>{s.station_type}</td>
                 <td style={{ display: "flex", gap: "0.4rem" }}>
                   <Button
                     variant="ghost"
                     className="sf-btn--sm"
-                    onClick={() => setObserving(observing?.id === s.id ? null : s)}
+                    onClick={() => {
+                      setObserving(observing?.id === s.id ? null : s);
+                      setPage(0);
+                    }}
                   >
                     {t("admin.observations")}
                   </Button>
@@ -110,21 +143,36 @@ function WindStations() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(observations.data ?? [])
-                    .slice(-50)
-                    .reverse()
-                    .map((o) => (
-                      <tr key={o.observed_at}>
-                        <td>{fmtDateTime(o.observed_at)}</td>
-                        <td>{o.twd_deg != null ? `${o.twd_deg}°` : "—"}</td>
-                        <td>{o.tws_kts != null ? `${o.tws_kts} kn` : "—"}</td>
-                        <td>{o.gust_kts != null ? `${o.gust_kts} kn` : "—"}</td>
-                      </tr>
-                    ))}
+                  {(observations.data ?? []).map((o) => (
+                    <tr key={o.observed_at}>
+                      <td>{fmtDateTime(o.observed_at)}</td>
+                      <td>{o.twd_deg != null ? `${o.twd_deg}°` : "—"}</td>
+                      <td>{o.tws_kts != null ? `${o.tws_kts} kn` : "—"}</td>
+                      <td>{o.gust_kts != null ? `${o.gust_kts} kn` : "—"}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           )}
+          <div className="sf-form__actions" style={{ justifyContent: "flex-start" }}>
+            <Button
+              variant="ghost"
+              className="sf-btn--sm"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              ‹
+            </Button>
+            <Button
+              variant="ghost"
+              className="sf-btn--sm"
+              disabled={(observations.data?.length ?? 0) < OBS_PAGE_SIZE}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              ›
+            </Button>
+          </div>
         </div>
       )}
 
@@ -140,7 +188,14 @@ function WindStations() {
           label={t("admin.provider")}
           id="ws-provider"
           value={form.provider}
-          onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+          onChange={(e) => {
+            const provider = e.target.value;
+            setForm((f) => ({
+              ...f,
+              provider,
+              station_type: provider === "open_meteo" ? "forecast_grid" : f.station_type,
+            }));
+          }}
         >
           {PROVIDERS.map((p) => (
             <option key={p} value={p}>
@@ -148,14 +203,39 @@ function WindStations() {
             </option>
           ))}
         </Select>
-        <InputField
-          label={t("admin.stationId")}
-          id="ws-ext"
-          value={form.external_station_id}
-          onChange={(e) => setForm((f) => ({ ...f, external_station_id: e.target.value }))}
-          placeholder="44013"
-          required
-        />
+        {isCoordProvider ? (
+          <>
+            <InputField
+              label="Lat"
+              id="ws-lat"
+              type="number"
+              step="any"
+              value={form.lat}
+              onChange={(e) => setForm((f) => ({ ...f, lat: e.target.value }))}
+              placeholder="44.79"
+              required
+            />
+            <InputField
+              label="Lng"
+              id="ws-lng"
+              type="number"
+              step="any"
+              value={form.lng}
+              onChange={(e) => setForm((f) => ({ ...f, lng: e.target.value }))}
+              placeholder="12.33"
+              required
+            />
+          </>
+        ) : (
+          <InputField
+            label={t("admin.stationId")}
+            id="ws-ext"
+            value={form.external_station_id}
+            onChange={(e) => setForm((f) => ({ ...f, external_station_id: e.target.value }))}
+            placeholder="44013"
+            required
+          />
+        )}
         <InputField
           label={t("common.name")}
           id="ws-name"

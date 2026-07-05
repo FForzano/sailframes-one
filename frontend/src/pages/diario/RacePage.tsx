@@ -13,6 +13,7 @@ import { Timeline } from "@/components/race/Timeline";
 import { SpeedChart } from "@/components/race/SpeedChart";
 import { Leaderboard } from "@/components/race/Leaderboard";
 import { RaceManagePanel } from "@/components/race/RaceManagePanel";
+import { WindCard } from "@/components/common/WindCard";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import type { UUID } from "@/types";
@@ -89,6 +90,14 @@ export function RacePage() {
         {regatta.data?.name ?? t("regate.title")} — {t("regate.raceNumber")}{" "}
         {race.data.race_number}
       </h1>
+
+      {tracks[0]?.pts[0] && (
+        <WindCard
+          lat={tracks[0].pts[0].lat}
+          lng={tracks[0].pts[0].lon}
+          at={race.data.start_time}
+        />
+      )}
 
       {tracks.length === 0 ? (
         <Card title={t("race.leaderboard")}>

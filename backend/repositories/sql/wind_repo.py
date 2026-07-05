@@ -97,7 +97,12 @@ class SqlWindRepo:
 
     def list_observations(self, station_id: uuid.UUID, *,
                           start: Optional[datetime] = None,
-                          end: Optional[datetime] = None) -> "list[WindObservationORM]":
+                          end: Optional[datetime] = None,
+                          limit: int = 500, offset: int = 0) -> "list[WindObservationORM]":
+        """Paginated, newest-first (page 0 = most recent). The cache grows
+        without bound (idempotent upsert on every scheduler tick) — callers
+        MUST page through it rather than fetch it whole; see the default
+        72h window in ``routers/wind.py`` when start/end are omitted."""
         with self.Session() as s:
             q = select(WindObservationORM).where(
                 WindObservationORM.wind_station_id == station_id
@@ -106,5 +111,29 @@ class SqlWindRepo:
                 q = q.where(WindObservationORM.observed_at >= start)
             if end is not None:
                 q = q.where(WindObservationORM.observed_at <= end)
-            q = q.order_by(WindObservationORM.observed_at)
+            q = q.order_by(WindObservationORM.observed_at.desc()).limit(limit).offset(offset)
             return list(s.scalars(q).all())
+
+    def find_nearest(self, lat: float, lng: float, *,
+                     providers: "Optional[list[str]]" = None,
+                     max_km: float = 50) -> Optional[WindStationORM]:
+        """Closest station within ``max_km``, optionally restricted to
+        ``providers`` (haversine, computed in Python — station counts are
+        small, no need for PostGIS). Provider quality tiers (real sensors vs.
+        forecast grid) are the caller's job — see
+        ``services/wind_lookup.find_or_create_station``."""
+        from ...services.geo import haversine_m
+
+        with self.Session() as s:
+            q = select(WindStationORM).where(
+                WindStationORM.lat.is_not(None), WindStationORM.lng.is_not(None)
+            )
+            if providers is not None:
+                q = q.where(WindStationORM.provider.in_(providers))
+            stations = list(s.scalars(q).all())
+        best, best_km = None, max_km
+        for st in stations:
+            km = haversine_m(lat, lng, st.lat, st.lng) / 1000
+            if km <= best_km:
+                best, best_km = st, km
+        return best

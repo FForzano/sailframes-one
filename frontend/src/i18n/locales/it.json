@@ -244,6 +244,9 @@
     "saveResult": "Salva risultato",
     "noData": "Nessuna traccia — associa sessioni o carica file GPX."
   },
+  "wind": {
+    "title": "Vento"
+  },
   "admin": {
     "title": "Amministrazione",
     "windStations": "Stazioni meteo",

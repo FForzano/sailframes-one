@@ -1,21 +1,27 @@
 """Wind endpoints (``/api/wind``): station catalog + cached observations.
 
 Matrix: stations/observations are pub-readable; writes are system (fetch job)
-or superadmin (station registration). The fetch itself is triggered on
-``/api/system/wind/fetch`` by the wind-scheduler service.
+or superadmin (station registration) — except ``/nearest``, any authenticated
+user can trigger an on-demand Open-Meteo lookup/auto-creation for their own
+session/race location (see ``services/wind_lookup.py``). The periodic fetch
+is triggered on ``/api/system/wind/fetch`` by the wind-scheduler service.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from ..auth import require_superadmin, verify_csrf
+from ..auth import require_superadmin, require_user, verify_csrf
 from ..schemas import WindStationWriteModel
+from ..services import wind_lookup
 from ._common import repos
 
 router = APIRouter(prefix="/api/wind", tags=["wind"])
+
+OBSERVATIONS_DEFAULT_WINDOW_HOURS = 72
+OBSERVATIONS_MAX_LIMIT = 1000
 
 
 def _require_station(station_id: uuid.UUID):
@@ -39,11 +45,20 @@ def get_station(station_id: uuid.UUID):
 def create_station(body: WindStationWriteModel, request: Request):
     verify_csrf(request)
     require_superadmin(request)
-    if not body.provider or not body.external_station_id or not body.station_type:
-        raise HTTPException(422, "provider, external_station_id and station_type are required")
-    if repos.wind.get_by_provider_external(body.provider, body.external_station_id):
+    if not body.provider or not body.station_type:
+        raise HTTPException(422, "provider and station_type are required")
+    data = body.model_dump(exclude_unset=True)
+    if body.provider == "open_meteo":
+        # No real "station id" for a forecast grid — the adapter queries by
+        # coordinate, so external_station_id is derived, not user-entered.
+        if body.lat is None or body.lng is None:
+            raise HTTPException(422, "lat and lng are required for open_meteo")
+        data["external_station_id"] = f"{body.lat},{body.lng}"
+    elif not body.external_station_id:
+        raise HTTPException(422, "external_station_id is required")
+    if repos.wind.get_by_provider_external(body.provider, data["external_station_id"]):
         raise HTTPException(409, "Station already registered")
-    return repos.wind.create(body.model_dump(exclude_unset=True)).to_dict()
+    return repos.wind.create(data).to_dict()
 
 
 @router.patch("/stations/{station_id}")
@@ -66,6 +81,26 @@ def delete_station(station_id: uuid.UUID, request: Request):
 @router.get("/stations/{station_id}/observations")
 def list_observations(station_id: uuid.UUID,
                       start: Optional[datetime] = None,
-                      end: Optional[datetime] = None):
+                      end: Optional[datetime] = None,
+                      limit: int = Query(200, le=OBSERVATIONS_MAX_LIMIT, gt=0),
+                      offset: int = Query(0, ge=0)):
+    """Newest-first, paginated. The cache grows without bound (idempotent
+    upsert on every scheduler tick) — defaults to the last 72h when no
+    explicit range is given, rather than dumping the whole history."""
     _require_station(station_id)
-    return [o.to_dict() for o in repos.wind.list_observations(station_id, start=start, end=end)]
+    if start is None and end is None:
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=OBSERVATIONS_DEFAULT_WINDOW_HOURS)
+    rows = repos.wind.list_observations(station_id, start=start, end=end,
+                                        limit=limit, offset=offset)
+    return [o.to_dict() for o in rows]
+
+
+@router.get("/nearest")
+def nearest_station(lat: float, lng: float, request: Request):
+    """Get-or-create the best wind station for a coordinate (real sensor
+    within 50km, else an existing Open-Meteo grid point within 25km, else a
+    freshly auto-created one) — any authenticated user, used by session/race
+    pages that have no wind data yet."""
+    require_user(request)
+    return wind_lookup.find_or_create_station(lat, lng).to_dict()

@@ -244,6 +244,9 @@
     "saveResult": "Save result",
     "noData": "No track data yet — match sessions or upload GPX files."
   },
+  "wind": {
+    "title": "Wind"
+  },
   "admin": {
     "title": "Administration",
     "windStations": "Wind stations",
