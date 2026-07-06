@@ -128,3 +128,4 @@ Repo layout: `backend/` · `frontend/` · `workers/{process_upload,video}/` ·
 ## License
 
 Apache 2.0, consistent with the original upstream project unless stated otherwise.
+Apache 2.0, consistent with the original upstream project unless stated otherwise.
