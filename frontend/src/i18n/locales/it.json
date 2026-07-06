@@ -213,7 +213,9 @@
     "avgRecovery": "Recupero medio",
     "avgDuration": "Durata media",
     "showLegs": "Mostra bordi",
-    "showManeuvers": "Mostra manovre"
+    "showManeuvers": "Mostra manovre",
+    "reanalyze": "Ricalcola analisi",
+    "reanalyzeQueued": "Ricalcolo analisi avviato"
   },
   "activities": {
     "title": "Attività",

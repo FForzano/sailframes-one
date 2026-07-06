@@ -833,6 +833,35 @@ h1, h2, h3 {
 .sf-options__panel .sf-check {
   margin-bottom: 0;
 }
+.sf-optionsmenu__panel {
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+}
+.sf-optionsmenu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--sf-text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.sf-optionsmenu__item:hover:not(:disabled) {
+  background: var(--sf-bg-2);
+}
+.sf-optionsmenu__item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sf-optionsmenu__item--danger {
+  color: var(--sf-danger);
+}
 
 /* Live playback readouts: 4-up row on desktop, 2×2 on mobile. */
 .sf-indicators {

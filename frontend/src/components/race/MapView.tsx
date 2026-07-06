@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { useTimeState } from "@/stores/timeController";
 import { useWindAt } from "@/hooks/useWindAt";
 import { fmtKnots } from "@/utils/format";
-import { pointAt, speedColor, speedRange, type Track } from "./raceModel";
+import { pointAt, smoothTrackLine, speedColor, speedRange, type Track } from "./raceModel";
 
 export interface MapMark {
   id?: string;
@@ -59,18 +59,17 @@ export function MapView({
     for (const tr of tracks) {
       const latlngs = tr.pts.map((p) => [p.lat, p.lon] as [number, number]);
       if (!latlngs.length) continue;
+      // The drawn line is lightly smoothed for readability — bounds/markers
+      // stay on the raw fixes so the true recorded track/position is never
+      // altered, only how the line connecting it looks.
+      const smoothed = smoothTrackLine(tr.pts);
       // Colored by speed (per-segment) rather than a single flat track color,
       // so a glance at the line shows where the boat was fast vs. slow.
       const [minSog, maxSog] = speedRange(tr);
       for (let i = 1; i < tr.pts.length; i++) {
-        const a = tr.pts[i - 1];
-        const b = tr.pts[i];
-        const avgSog = (a.sog + b.sog) / 2;
+        const avgSog = (tr.pts[i - 1].sog + tr.pts[i].sog) / 2;
         L.polyline(
-          [
-            [a.lat, a.lon],
-            [b.lat, b.lon],
-          ],
+          [smoothed[i - 1], smoothed[i]],
           { color: speedColor(avgSog, minSog, maxSog), weight: 3, opacity: 0.85 }
         ).addTo(map);
       }

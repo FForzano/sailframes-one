@@ -6,8 +6,6 @@ import {
   BarChart,
   CartesianGrid,
   Legend,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -47,11 +45,6 @@ export function SessionAnalysis({ sessionId }: { sessionId: UUID }) {
         {!!polar.data?.length && (
           <Section title={t("sessions.polar")}>
             <PolarChart points={polar.data} targetPoints={a.polar_target} />
-          </Section>
-        )}
-        {!!a.vmg_series?.length && (
-          <Section title={t("sessions.vmg")}>
-            <VmgChart series={a.vmg_series} />
           </Section>
         )}
         {!!a.legs.length && (
@@ -196,24 +189,6 @@ function LegsTable({ legs }: { legs: SessionLeg[] }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-// --- VMG series ------------------------------------------------------------------------
-
-function VmgChart({ series }: { series: { timestamp: number; vmg_kts: number }[] }) {
-  const data = series.map((v) => ({ t: v.timestamp, vmg: v.vmg_kts }));
-  return (
-    <ResponsiveContainer width="100%" height={180}>
-      <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-        <CartesianGrid stroke="var(--sf-border)" strokeDasharray="2 3" />
-        <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} hide />
-        <YAxis width={32} tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(v) => fmtKnots(Number(v))} labelFormatter={() => ""} />
-        <Line type="monotone" dataKey="vmg" stroke="#2f9be0" strokeWidth={1.5}
-          dot={false} isAnimationActive={false} />
-      </LineChart>
-    </ResponsiveContainer>
   );
 }
 

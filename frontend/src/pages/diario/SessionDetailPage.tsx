@@ -14,6 +14,7 @@ import { SpeedChart } from "@/components/race/SpeedChart";
 import { PlaybackIndicators } from "@/components/session/PlaybackIndicators";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { OptionsMenu } from "@/components/ui/OptionsMenu";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -190,6 +191,11 @@ export function SessionDetailPage() {
     onSuccess: () => navigate("/diario/sessioni"),
     onError: () => notify(t("errors.generic"), "error"),
   });
+  const reanalyze = useMutation({
+    mutationFn: () => sessionsService.reanalyze(sessionId!),
+    onSuccess: () => notify(t("sessions.reanalyzeQueued"), "success"),
+    onError: () => notify(t("errors.generic"), "error"),
+  });
   const removePhoto = useMutation({
     mutationFn: (imageId: UUID) => sessionsService.removePhoto(sessionId!, imageId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionKeys.photos(sessionId!) }),
@@ -212,9 +218,20 @@ export function SessionDetailPage() {
         }
         actions={
           manager && (
-            <Button variant="danger" className="sf-btn--sm" onClick={() => setDeleting(true)}>
-              {t("common.delete")}
-            </Button>
+            <OptionsMenu
+              items={[
+                {
+                  label: t("sessions.reanalyze"),
+                  onClick: () => reanalyze.mutate(),
+                  disabled: reanalyze.isPending,
+                },
+                {
+                  label: t("common.delete"),
+                  danger: true,
+                  onClick: () => setDeleting(true),
+                },
+              ]}
+            />
           )
         }
       >

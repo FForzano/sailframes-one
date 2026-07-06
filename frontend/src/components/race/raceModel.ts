@@ -17,6 +17,33 @@ export interface Track {
 // Distinct, colorblind-ish palette assigned by track order.
 const PALETTE = ["#2f9be0", "#e0654f", "#3fbf7f", "#e0b24a", "#9b6fe0", "#4fd0e0"];
 
+// How many neighboring fixes average into each rendered map point — kept
+// small on purpose so tack/gybe corners stay sharp; only for the drawn line,
+// never for speed/position data (playback marker, chart, indicators all
+// still read the raw fixes).
+const MAP_SMOOTH_WINDOW = 3;
+
+/** Centered moving average of a track's lat/lon, for a slightly cleaner
+ * drawn line without touching the underlying GPS fixes (sog/ms/position used
+ * elsewhere stay exact). Edge points are clamped, not padded, so the ends
+ * don't drift. */
+export function smoothTrackLine(pts: TrackPoint[], window = MAP_SMOOTH_WINDOW): Array<[number, number]> {
+  if (pts.length < window) return pts.map((p) => [p.lat, p.lon]);
+  const half = Math.floor(window / 2);
+  return pts.map((_, i) => {
+    let sumLat = 0;
+    let sumLon = 0;
+    let n = 0;
+    for (let k = -half; k <= half; k++) {
+      const idx = Math.min(pts.length - 1, Math.max(0, i + k));
+      sumLat += pts[idx].lat;
+      sumLon += pts[idx].lon;
+      n++;
+    }
+    return [sumLat / n, sumLon / n];
+  });
+}
+
 export function trackColor(i: number): string {
   return PALETTE[i % PALETTE.length];
 }

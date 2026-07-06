@@ -29,6 +29,10 @@ SESSION_MERGE_GAP_MINUTES = 10
 UPLOAD_URL_EXPIRY_S = 3600
 
 
+def bucket_name() -> str:
+    return os.environ.get("SAILFRAMES_BUCKET", "sailframes-fleet-data-prod")
+
+
 def upload_raw_key(session_upload_id: uuid.UUID, filename: str) -> str:
     return f"raw/uploads/{session_upload_id}/{filename}"
 

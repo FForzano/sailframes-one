@@ -213,7 +213,9 @@
     "avgRecovery": "Avg recovery",
     "avgDuration": "Avg duration",
     "showLegs": "Show legs",
-    "showManeuvers": "Show maneuvers"
+    "showManeuvers": "Show maneuvers",
+    "reanalyze": "Re-run analysis",
+    "reanalyzeQueued": "Analysis re-run queued"
   },
   "activities": {
     "title": "Activities",

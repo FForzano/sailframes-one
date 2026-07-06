@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import current_user, require_user, session_visible_to, verify_csrf
 from ..schemas import SessionCrewModel, SessionWriteModel
-from ..services import media
+from ..services import ingestion, media
 from ._common import blob, repos
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -116,6 +116,27 @@ def delete_session(session_id: uuid.UUID, request: Request):
         raise HTTPException(403, "Boat owner or activity creator required")
     repos.sessions.delete(session_id)
     return {"ok": True}
+
+
+@router.post("/{session_id}/reanalyze")
+def reanalyze_session(session_id: uuid.UUID, request: Request):
+    """Re-run the processing pipeline (maneuvers/legs/polar/VMG/…) on the
+    session's already-processed data — e.g. after a detection-logic change,
+    without re-importing. Same edit-level permission as PATCH; re-dispatches
+    to the most recently uploaded processed prefix, which already has
+    gps.json/wind_cache.json in place from the original import."""
+    verify_csrf(request)
+    user = require_user(request)
+    session = _require_session(session_id)
+    if not _can_edit(session, user):
+        raise HTTPException(403, "Not allowed")
+    uploads = repos.ingest.list_uploads(session_id=session_id)
+    if not uploads:
+        raise HTTPException(404, "No processed data to reanalyze")
+    upload = max(uploads, key=lambda u: u.uploaded_at)
+    prefix = ingestion.processed_prefix(upload.id)
+    ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
+    return {"ok": True, "session_upload_id": upload.id}
 
 
 # --- streams / stats / analysis --------------------------------------------------
