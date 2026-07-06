@@ -1,75 +1,25 @@
-# SailFrames self-hosted stack: MinIO (S3-compatible storage) + FastAPI.
-# Bring up with:  docker compose --env-file .env up -d
-# See deploy/README.md.
+# SailFrames self-hosted stack. One command brings up everything:
+#
+#   docker compose up --build
+#
+# Then open http://localhost:8080 (the SPA proxies /api to the backend, so it's
+# all same-origin). Every value below has a dev default, so no .env is required
+# to get started — copy .env.example to .env to override for a real deployment.
+#
+# Services:
+#   postgres  — metadata
+#   minio     — S3-compatible blob storage (+ one-time init + ingest webhook)
+#   backend   — the REST API (FastAPI)
+#   frontend  — the SPA (nginx: serves the build + proxies /api → backend)
+#   process_upload / video — heavy-processing workers. Same handler runs on AWS
+#            Lambda (container image) and here via the Lambda Runtime Interface
+#            Emulator that ships in the base image; the backend invokes them over
+#            HTTP on MinIO upload events.
+
+x-minio-user: &minio-user ${MINIO_ROOT_USER:-sailframes}
+x-minio-pass: &minio-pass ${MINIO_ROOT_PASSWORD:-sailframes-dev-secret}
 
 services:
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      # Bucket-notification webhook target (live at boot, no restart needed).
-      # Fires POST to the api service when objects are created.
-      MINIO_NOTIFY_WEBHOOK_ENABLE_SF: "on"
-      MINIO_NOTIFY_WEBHOOK_ENDPOINT_SF: "http://api:8000/hooks/minio"
-      MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_SF: ${SAILFRAMES_HOOK_TOKEN}
-    volumes:
-      - minio-data:/data
-    ports:
-      - "9000:9000"   # S3 API (firmware/curl uploads land here)
-      - "9001:9001"   # MinIO web console
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET}
-      SAILFRAMES_DATA_PREFIX: ${SAILFRAMES_DATA_PREFIX}
-      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
-      SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN}
-      SAILFRAMES_ADMIN_BYPASS: "1"
-      SAILFRAMES_METADATA_BACKEND: postgres
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_USER: ${POSTGRES_USER:-sailframes}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sailframes}
-      POSTGRES_DB: ${POSTGRES_DB:-sailframes}
-      # Optional bootstrap superadmin (seeded on first startup).
-      SAILFRAMES_SUPERADMIN_EMAIL: ${SAILFRAMES_SUPERADMIN_EMAIL:-}
-      SAILFRAMES_SUPERADMIN_PASSWORD: ${SAILFRAMES_SUPERADMIN_PASSWORD:-}
-
-    ports:
-      - "8000:8000"
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET}
-    entrypoint: ["/bin/sh", "/init/minio-init.sh"]
-    volumes:
-      - ./deploy/minio-init.sh:/init/minio-init.sh:ro
-    restart: "no"
-
   postgres:
     image: postgres:16
     environment:
@@ -85,6 +35,142 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: *minio-user
+      MINIO_ROOT_PASSWORD: *minio-pass
+      # Bucket-notification webhook → the backend ingest route on object create.
+      MINIO_NOTIFY_WEBHOOK_ENABLE_SF: "on"
+      MINIO_NOTIFY_WEBHOOK_ENDPOINT_SF: "http://backend:8000/hooks/minio"
+      MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_SF: ${SAILFRAMES_HOOK_TOKEN:-dev-hook-token}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: *minio-user
+      MINIO_ROOT_PASSWORD: *minio-pass
+      SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET:-sailframes-fleet-data-prod}
+      # Frontend origin allowed to CORS-fetch presigned URLs directly from MinIO.
+      SAILFRAMES_PUBLIC_ORIGIN: ${SAILFRAMES_PUBLIC_ORIGIN:-http://localhost:8080}
+    entrypoint: ["/bin/sh", "/init/minio-init.sh"]
+    volumes:
+      - ./deploy/minio-init.sh:/init/minio-init.sh:ro
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    environment:
+      SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET:-sailframes-fleet-data-prod}
+      SAILFRAMES_DATA_PREFIX: ${SAILFRAMES_DATA_PREFIX:-processed}
+      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
+      # Browser-reachable MinIO address, used ONLY to sign presigned URLs so
+      # uploads/downloads go straight browser<->MinIO instead of through the
+      # backend+nginx proxy (see backend/storage/object_store.py). In a real
+      # self-hosted deploy this must be MinIO's actual public host — leave
+      # unset to fall back to the (size-capped) proxy routes.
+      SAILFRAMES_S3_PUBLIC_ENDPOINT: ${SAILFRAMES_S3_PUBLIC_ENDPOINT:-http://localhost:9000}
+      AWS_ACCESS_KEY_ID: *minio-user
+      AWS_SECRET_ACCESS_KEY: *minio-pass
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN:-dev-hook-token}
+      SAILFRAMES_JWT_SECRET: ${SAILFRAMES_JWT_SECRET:-dev-jwt-secret-change-me}
+      SAILFRAMES_COOKIE_SECURE: "0"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-sailframes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sailframes}
+      POSTGRES_DB: ${POSTGRES_DB:-sailframes}
+      SAILFRAMES_SUPERADMIN_EMAIL: ${SAILFRAMES_SUPERADMIN_EMAIL:-admin@sailframes.dev}
+      SAILFRAMES_SUPERADMIN_PASSWORD: ${SAILFRAMES_SUPERADMIN_PASSWORD:-changeme}
+      # Worker dispatch targets (Lambda RIE invoke endpoints).
+      PROCESS_UPLOAD_URL: "http://process_upload:8080/2015-03-31/functions/function/invocations"
+      VIDEO_WORKER_URL: "http://video:8080/2015-03-31/functions/function/invocations"
+    ports:
+      - "8000:8000"   # direct API access (the SPA uses :8080/api instead)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  process_upload:
+    build:
+      context: ./workers/process_upload
+      dockerfile: Dockerfile
+    environment:
+      DATA_BUCKET: ${SAILFRAMES_BUCKET:-sailframes-fleet-data-prod}
+      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
+      AWS_ACCESS_KEY_ID: *minio-user
+      AWS_SECRET_ACCESS_KEY: *minio-pass
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      # Workers are DB-blind: results/status flow back through the backend
+      # system API (docs/api-project.md, actor `system`).
+      BACKEND_CALLBACK_URL: "http://backend:8000"
+      SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN:-dev-hook-token}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  video:
+    build:
+      context: ./workers/video
+      dockerfile: Dockerfile
+    environment:
+      DATA_BUCKET: ${SAILFRAMES_BUCKET:-sailframes-fleet-data-prod}
+      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
+      AWS_ACCESS_KEY_ID: *minio-user
+      AWS_SECRET_ACCESS_KEY: *minio-pass
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  wind-scheduler:
+    image: curlimages/curl:latest
+    entrypoint: ["/bin/sh", "/init/wind-scheduler.sh"]
+    volumes:
+      - ./deploy/wind-scheduler.sh:/init/wind-scheduler.sh:ro
+    environment:
+      BACKEND_URL: "http://backend:8000"
+      SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN:-dev-hook-token}
+      WIND_FETCH_INTERVAL_MIN_NOAA_NDBC: ${WIND_FETCH_INTERVAL_MIN_NOAA_NDBC:-30}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   minio-data:

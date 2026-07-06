@@ -1,4 +1,0 @@
-# Lambda dependencies
-# Note: boto3 is provided by Lambda runtime, no need to include
-# For local testing:
-boto3>=1.28.0

@@ -1,6 +1,5 @@
 # Data files (too large for git)
 data/
-export/
 
 # Python
 __pycache__/
@@ -22,51 +21,30 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
-.VSCodeCounter
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+.VSCodeCounter
 
 # Logs
 *.log
-/var/
 
 # Temporary files
 *.tmp
-/tmp/
 
-# KiCad
-*.kicad_prl
-*-backups/
-~*.lck
-.history/
-
-# AWS credentials (never commit)
+# Secrets — never commit
 .aws/
 credentials.json
-
-# Third-party API tokens / secrets — never commit
 secrets/
 *.secret
 *.secret.json
 secrets.json
-synoptic-token*
-weatherflow-token*
-tempest-token*
-**/api-keys.json
-**/api-keys/
-
-# E1 SD card config (contains WiFi passwords)
-edge-e/firmware/e1_sd_card/config.txt
 
 # Claude Code
 .claude/
 
-# Video files
+# Media
 *.mp4
-
-# Archive files (hardware backups)
-edge-e/hardware/*.zip

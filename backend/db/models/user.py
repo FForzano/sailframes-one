@@ -1,0 +1,65 @@
+"""Account tables: ``users`` and ``auth_refresh_tokens``.
+
+RBAC grants live in ``rbac.py`` (roles/permissions/user_roles); memberships in
+``club.py``/``group.py``/``boat.py``. See ``backend/auth`` for how tokens and
+permissions are evaluated.
+"""
+
+import uuid
+from datetime import date, datetime
+from typing import Optional
+
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from ..base import Base, TimestampMixin, UUIDPKMixin, enum_check
+
+USER_STATUSES = ("inactive", "active", "deleted")
+
+
+class UserORM(UUIDPKMixin, TimestampMixin, Base):
+    __tablename__ = "users"
+    __table_args__ = (enum_check("status", USER_STATUSES),)
+    # Secrets never leave the repo on the wire.
+    __wire_exclude__ = ("password_hash", "password_reset_token")
+
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    first_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    dob: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    terms_and_conditions: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_superadmin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # use_alter breaks the users<->images FK cycle (images.created_by -> users):
+    # this FK is added with a separate ALTER after both tables exist.
+    profile_image_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("images.id", ondelete="SET NULL", use_alter=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    roles: Mapped[list["UserRoleORM"]] = relationship(  # noqa: F821
+        back_populates="user", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class AuthRefreshTokenORM(UUIDPKMixin, Base):
+    """One row per issued refresh token. Rotation chains via family_id/prev_id;
+    only the hash of the opaque token is stored, never its plaintext value."""
+
+    __tablename__ = "auth_refresh_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    family_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    prev_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("auth_refresh_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+    issued_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String, nullable=True)
