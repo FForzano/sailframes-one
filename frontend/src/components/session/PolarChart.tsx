@@ -3,12 +3,16 @@ import type { PolarPoint } from "@/types";
 
 // Hand-rolled SVG polar diagram: boat speed (radius) vs true wind angle
 // (0° = head to wind, at top), one curve per TWS bucket — plus, when
-// available, a dashed "target" (max-speed) curve from `targetPoints`.
-// Recharts has no true radius-by-value polar, so this stays bespoke — the
-// analysis signature chart.
-const SIZE = 320;
-const C = SIZE / 2;
+// available, a second solid "target" (max-speed) curve from `targetPoints`,
+// in a lighter tint of the same bucket color. Recharts has no true
+// radius-by-value polar, so this stays bespoke — the analysis signature chart.
 const R = 140;
+// Room around the ring for the angle labels so they never sit on the ring
+// itself or clip against the SVG edge.
+const LABEL_GAP = 16;
+const CHART_PAD = 20;
+const SIZE = (R + LABEL_GAP) * 2 + CHART_PAD;
+const C = SIZE / 2;
 const RINGS = [0.25, 0.5, 0.75, 1];
 const SPOKES = [0, 45, 90, 135, 180];
 // Buckets more than this far apart (backend TWA_BUCKET_SIZE=5°) are treated
@@ -19,9 +23,34 @@ const GAP_THRESHOLD_DEG = 9;
 // Blue→red by TWS bucket order (cool = light air, warm = breeze).
 const TWS_COLORS = ["#2f9be0", "#3fbf7f", "#e0b24a", "#e0654f", "#9b6fe0"];
 
+/** Lightens a `#rrggbb` color by blending it toward white — used for the
+ * "target" (max-speed) curve so it reads as a distinct color per bucket
+ * (not just a dashed variant of the same one) while staying associated
+ * with its average curve. */
+function lighten(hex: string, amount: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 0xff;
+  const g = (n >> 8) & 0xff;
+  const b = n & 0xff;
+  const mix = (c: number) => Math.round(c + (255 - c) * amount);
+  return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+}
+
 function polar(twaDeg: number, radius: number, side: 1 | -1): [number, number] {
   const th = (twaDeg * Math.PI) / 180;
   return [C + side * radius * Math.sin(th), C - radius * Math.cos(th)];
+}
+
+/** Label anchor/offset for a spoke angle, derived from its position on the
+ * ring rather than hardcoded per angle — works for any SPOKES set. Labels
+ * sit just outside the ring (`R + LABEL_GAP`), centered for the top/bottom
+ * spokes and left-aligned for the side ones (all on the `side=1` half). */
+function labelProps(twaDeg: number): { anchor: "start" | "middle"; dx: number; dy: number } {
+  const th = (twaDeg * Math.PI) / 180;
+  const sin = Math.sin(th);
+  const cos = Math.cos(th);
+  if (Math.abs(sin) < 0.15) return { anchor: "middle", dx: 0, dy: cos > 0 ? -6 : 12 };
+  return { anchor: "start", dx: 4, dy: 4 };
 }
 
 /** Builds one side's path, broken into separate `M`-started segments at gaps
@@ -133,7 +162,7 @@ export function PolarChart({
       <svg
         ref={svgRef}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        style={{ width: "100%", maxWidth: 380 }}
+        style={{ width: "100%", maxWidth: 380, overflow: "visible" }}
         onClick={(e) => handlePick(e.clientX, e.clientY)}
         onTouchStart={(e) => {
           const t = e.touches[0];
@@ -146,11 +175,13 @@ export function PolarChart({
         {SPOKES.map((a) => {
           const [x1, y1] = polar(a, R, 1);
           const [x2, y2] = polar(a, R, -1);
+          const [lx, ly] = polar(a, R + LABEL_GAP, 1);
+          const { anchor, dx, dy } = labelProps(a);
           return (
             <g key={a}>
               <line x1={C} y1={C} x2={x1} y2={y1} stroke="var(--sf-border)" strokeDasharray="2 3" />
               <line x1={C} y1={C} x2={x2} y2={y2} stroke="var(--sf-border)" strokeDasharray="2 3" />
-              <text x={x1} y={y1} className="sf-polar__lbl" dx={a === 0 ? 0 : 4} dy={a === 0 ? -4 : 0}>
+              <text x={lx} y={ly} className="sf-polar__lbl" textAnchor={anchor} dx={dx} dy={dy}>
                 {a}°
               </text>
             </g>
@@ -169,16 +200,14 @@ export function PolarChart({
                   <path
                     d={segmentedPath(target, maxSpeed, 1)}
                     fill="none"
-                    stroke={color}
-                    strokeWidth={1.5}
-                    strokeDasharray="4 3"
+                    stroke={lighten(color, 0.5)}
+                    strokeWidth={2}
                   />
                   <path
                     d={segmentedPath(target, maxSpeed, -1)}
                     fill="none"
-                    stroke={color}
-                    strokeWidth={1.5}
-                    strokeDasharray="4 3"
+                    stroke={lighten(color, 0.5)}
+                    strokeWidth={2}
                     opacity={0.5}
                   />
                 </>
@@ -220,6 +249,18 @@ export function PolarChart({
             {g.tws.toFixed(0)} kn TWS
           </span>
         ))}
+        {!!targetPoints?.length && (
+          <>
+            <span className="sf-muted">
+              <i style={{ background: TWS_COLORS[0] }} />
+              avg
+            </span>
+            <span className="sf-muted">
+              <i style={{ background: lighten(TWS_COLORS[0], 0.5) }} />
+              max
+            </span>
+          </>
+        )}
         <span className="sf-muted">0–{maxSpeed.toFixed(1)} kn</span>
       </div>
     </div>

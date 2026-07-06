@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { useTimeState } from "@/stores/timeController";
 import { useWindAt } from "@/hooks/useWindAt";
 import { fmtKnots } from "@/utils/format";
-import { pointAt, smoothTrackLine, speedColor, speedRange, type Track } from "./raceModel";
+import { catmullRomInterval, pointAt, smoothTrackLine, speedColor, speedRange, type Track } from "./raceModel";
 
 export interface MapMark {
   id?: string;
@@ -59,19 +59,26 @@ export function MapView({
     for (const tr of tracks) {
       const latlngs = tr.pts.map((p) => [p.lat, p.lon] as [number, number]);
       if (!latlngs.length) continue;
-      // The drawn line is lightly smoothed for readability — bounds/markers
-      // stay on the raw fixes so the true recorded track/position is never
-      // altered, only how the line connecting it looks.
+      // The drawn line is lightly smoothed, then curved through a Catmull-Rom
+      // interpolation per interval — bounds/markers stay on the raw fixes so
+      // the true recorded track/position is never altered, only how the line
+      // connecting it looks (still one color per original interval, just
+      // drawn as a curve through it instead of a straight chord).
       const smoothed = smoothTrackLine(tr.pts);
       // Colored by speed (per-segment) rather than a single flat track color,
       // so a glance at the line shows where the boat was fast vs. slow.
       const [minSog, maxSog] = speedRange(tr);
       for (let i = 1; i < tr.pts.length; i++) {
         const avgSog = (tr.pts[i - 1].sog + tr.pts[i].sog) / 2;
-        L.polyline(
-          [smoothed[i - 1], smoothed[i]],
-          { color: speedColor(avgSog, minSog, maxSog), weight: 3, opacity: 0.85 }
-        ).addTo(map);
+        const color = speedColor(avgSog, minSog, maxSog);
+        const p0 = smoothed[Math.max(0, i - 2)];
+        const p1 = smoothed[i - 1];
+        const p2 = smoothed[i];
+        const p3 = smoothed[Math.min(smoothed.length - 1, i + 1)];
+        const curve = catmullRomInterval(p0, p1, p2, p3);
+        for (let k = 1; k < curve.length; k++) {
+          L.polyline([curve[k - 1], curve[k]], { color, weight: 3, opacity: 0.85 }).addTo(map);
+        }
       }
       bounds.push(...latlngs);
       const m = L.circleMarker(latlngs[0], {

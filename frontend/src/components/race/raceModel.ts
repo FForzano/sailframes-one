@@ -44,6 +44,45 @@ export function smoothTrackLine(pts: TrackPoint[], window = MAP_SMOOTH_WINDOW): 
   });
 }
 
+// Extra points drawn per original interval so the line reads as a curve
+// instead of a chain of straight chords — kept modest since it multiplies
+// the number of drawn segments per interval.
+const CURVE_SUBDIVISIONS = 4;
+
+/** Catmull-Rom interpolation between `p1` and `p2`, using `p0`/`p3` as the
+ * neighboring control points for the tangent — the standard way to turn a
+ * polyline's straight joints into a smooth curve through the same points
+ * (no data changes, purely how the segment between two points is drawn).
+ * Returns `subdivisions + 1` points from `p1` through `p2` inclusive. */
+export function catmullRomInterval(
+  p0: [number, number],
+  p1: [number, number],
+  p2: [number, number],
+  p3: [number, number],
+  subdivisions = CURVE_SUBDIVISIONS,
+): Array<[number, number]> {
+  const out: Array<[number, number]> = [p1];
+  for (let s = 1; s <= subdivisions; s++) {
+    const t = s / subdivisions;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const lat =
+      0.5 *
+      (2 * p1[0] +
+        (p2[0] - p0[0]) * t +
+        (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
+        (3 * p1[0] - p0[0] - 3 * p2[0] + p3[0]) * t3);
+    const lon =
+      0.5 *
+      (2 * p1[1] +
+        (p2[1] - p0[1]) * t +
+        (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
+        (3 * p1[1] - p0[1] - 3 * p2[1] + p3[1]) * t3);
+    out.push([lat, lon]);
+  }
+  return out;
+}
+
 export function trackColor(i: number): string {
   return PALETTE[i % PALETTE.length];
 }
