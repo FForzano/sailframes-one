@@ -78,7 +78,10 @@
     "newPassword": "Nuova password",
     "confirmPassword": "Conferma nuova password",
     "passwordMismatch": "Le password non coincidono",
-    "passwordChanged": "Password cambiata"
+    "passwordChanged": "Password cambiata",
+    "units": "Unità di misura",
+    "unitsNautical": "Nautico (kn, nm)",
+    "unitsMetric": "Metrico (km/h, km)"
   },
   "boats": {
     "title": "Le mie barche",
@@ -208,7 +211,9 @@
     "recovery": "Recupero",
     "avgSpeedLoss": "Perdita vel. media",
     "avgRecovery": "Recupero medio",
-    "avgDuration": "Durata media"
+    "avgDuration": "Durata media",
+    "showLegs": "Mostra bordi",
+    "showManeuvers": "Mostra manovre"
   },
   "activities": {
     "title": "Attività",

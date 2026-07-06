@@ -129,9 +129,11 @@ def analyze_session(data_dir: Path) -> dict:
     legs = segment_legs(gps, maneuvers, true_wind, imu)
     l_comparison = leg_comparison(legs)
 
-    # Polar diagram
+    # Polar diagram — average (actual performance) and max-per-bucket
+    # ("target") curves, so the UI can plot both together.
     polar_points = generate_polar(gps, true_wind)
     polar_chart = polar_to_chart_data(polar_points)
+    polar_target_points = generate_polar(gps, true_wind, use_max=True)
 
     # VMG series
     vmg_series = compute_vmg_series(gps, true_wind)
@@ -160,6 +162,11 @@ def analyze_session(data_dir: Path) -> dict:
             "speed_kts": p.boat_speed_kts, "vmg_kts": p.vmg_kts,
             "sample_count": p.sample_count,
         } for p in polar_points],
+        "polar_target": [{
+            "twa_deg": p.twa_deg, "tws_kts": p.tws_kts,
+            "speed_kts": p.boat_speed_kts, "vmg_kts": p.vmg_kts,
+            "sample_count": p.sample_count,
+        } for p in polar_target_points],
         "vmg_series": [asdict(v) for v in vmg_series],
         "true_wind": true_wind,
         "session_stats": sess_stats,

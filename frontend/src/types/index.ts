@@ -322,6 +322,9 @@ export interface SessionAnalysis {
   violin: Record<string, Record<string, ViolinMetric>> | null;
   sensor_stats: SensorStats | null;
   vmg_series: VmgPoint[] | null;
+  /** Max-speed-per-bucket "target" polar (vs. `points` from `/polar-points`,
+   * which is the average/actual-performance polar). */
+  polar_target: PolarPoint[] | null;
   computed_at: string | null;
 }
 

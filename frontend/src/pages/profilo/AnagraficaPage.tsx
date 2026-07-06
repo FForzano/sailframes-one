@@ -10,6 +10,7 @@ import { InputField } from "@/components/ui/InputField";
 import { Spinner } from "@/components/ui/Spinner";
 import { ImageUploader } from "@/components/common/ImageUploader";
 import { Avatar } from "@/components/ui/Avatar";
+import { unitsStore, useUnits } from "@/stores/unitsStore";
 
 export function AnagraficaPage() {
   const { t } = useTranslation();
@@ -18,6 +19,7 @@ export function AnagraficaPage() {
   const queryClient = useQueryClient();
 
   const me = useQuery({ queryKey: userKeys.me, queryFn: usersService.me });
+  const units = useUnits();
   const [form, setForm] = useState({ first_name: "", last_name: "", dob: "" });
 
   useEffect(() => {
@@ -98,6 +100,24 @@ export function AnagraficaPage() {
             </Button>
           </div>
         </form>
+      </Card>
+      <Card title={t("profile.units")}>
+        <div className="sf-form__row">
+          <button
+            type="button"
+            className={`sf-btn sf-btn--sm ${units === "nautical" ? "sf-btn--primary" : "sf-btn--ghost"}`}
+            onClick={() => unitsStore.set("nautical")}
+          >
+            {t("profile.unitsNautical")}
+          </button>
+          <button
+            type="button"
+            className={`sf-btn sf-btn--sm ${units === "metric" ? "sf-btn--primary" : "sf-btn--ghost"}`}
+            onClick={() => unitsStore.set("metric")}
+          >
+            {t("profile.unitsMetric")}
+          </button>
+        </div>
       </Card>
     </div>
   );

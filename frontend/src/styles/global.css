@@ -32,6 +32,11 @@ body,
   height: 100%;
 }
 
+html,
+body {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   font-family: var(--sf-font);
@@ -269,6 +274,16 @@ h1, h2, h3 {
 .sf-card__actions {
   display: flex;
   gap: 0.5rem;
+}
+/* Zero side padding so a full-bleed map/media fills the card's width; content
+   that still needs the normal inset (controls below the map, etc.) wraps
+   itself in `.sf-card__pad`. */
+.sf-card--flush {
+  padding-left: 0;
+  padding-right: 0;
+}
+.sf-card__pad {
+  padding: 0 1.25rem;
 }
 
 .sf-field {
@@ -638,7 +653,7 @@ h1, h2, h3 {
   background: #0a1826;
 }
 .sf-map--session {
-  height: 360px;
+  height: clamp(260px, 45vh, 420px);
 }
 .sf-map__surface {
   position: absolute;
@@ -701,6 +716,7 @@ h1, h2, h3 {
   font-size: 0.95rem;
   margin: 0 0 0.4rem;
   color: var(--sf-muted);
+  opacity: 0.75;
 }
 .sf-polar {
   display: flex;
@@ -728,6 +744,15 @@ h1, h2, h3 {
   height: 3px;
   border-radius: 2px;
 }
+.sf-polar__pick {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
 .sf-heatmap {
   display: grid;
   gap: 2px;
@@ -748,43 +773,29 @@ h1, h2, h3 {
   font-variant-numeric: tabular-nums;
 }
 
+/* Compact transport bar: step/play/step/speed-cycle + clock — no progress
+   bar (the speed chart is the scrubber), so this stays narrow on mobile. */
 .sf-timeline {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 1rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
-}
-.sf-timeline input[type="range"] {
-  flex: 1;
-  accent-color: var(--sf-primary);
+  width: fit-content;
+  max-width: 100%;
 }
 .sf-timeline__clock {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9rem;
   color: var(--sf-muted);
-  min-width: 70px;
+  min-width: 64px;
   text-align: right;
 }
-.sf-timeline__speeds {
-  display: flex;
-  gap: 0.25rem;
-}
 .sf-timeline__speed {
-  border: 1px solid var(--sf-border);
-  background: transparent;
-  color: var(--sf-muted);
-  border-radius: 6px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-.sf-timeline__speed.active {
-  background: var(--sf-primary);
-  color: var(--sf-primary-ink);
-  border-color: var(--sf-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 2.4rem;
 }
 
 .sf-chart {
@@ -792,6 +803,65 @@ h1, h2, h3 {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
+}
+
+.sf-chartpanel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.sf-chartpanel__head .sf-muted {
+  opacity: 0.75;
+}
+.sf-options {
+  position: relative;
+}
+.sf-options__panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  margin-top: 0.3rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+.sf-options__panel .sf-check {
+  margin-bottom: 0;
+}
+
+/* Live playback readouts: 4-up row on desktop, 2×2 on mobile. */
+.sf-indicators {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 700px) {
+  .sf-indicators {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.sf-indicators__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+}
+.sf-indicators__label {
+  font-size: 0.75rem;
+  color: var(--sf-muted);
+}
+.sf-indicators__value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .sf-markicon {
@@ -804,6 +874,27 @@ h1, h2, h3 {
 .sf-markicon--preview {
   color: var(--sf-primary);
   opacity: 0.75;
+}
+.sf-markicon--leg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--sf-primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+.sf-markicon--maneuver {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sf-warning);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
 }
 
 .sf-legend__dot {

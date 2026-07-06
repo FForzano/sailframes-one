@@ -130,6 +130,7 @@ def upsert_session_analysis(upload_id: uuid.UUID, payload: dict, request: Reques
         "leg_comparison": payload.get("leg_comparison"),
         "sensor_stats": payload.get("session_stats"),
         "vmg_series": payload.get("vmg_series"),
+        "polar_target": payload.get("polar_target"),
         "computed_at": now,
     })
     return {"ok": True, "session_id": sid}

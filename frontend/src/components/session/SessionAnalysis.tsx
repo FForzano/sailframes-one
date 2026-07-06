@@ -17,8 +17,9 @@ import { sessionsService, sessionKeys } from "@/services/sessions";
 import { polarsService, polarKeys } from "@/services/polars";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
-import { fmtDuration } from "@/utils/format";
+import { fmtDuration, fmtDistanceNm, fmtKnots, fmtSeconds } from "@/utils/format";
 import { PolarChart } from "./PolarChart";
+import { legSequence } from "@/utils/legSequence";
 import type { CorrelationMatrix, SensorStats, SessionLeg, SessionManeuver, UUID } from "@/types";
 
 /** Rich per-session analysis (maneuvers, polar, VMG, correlations, …), assembled
@@ -45,7 +46,7 @@ export function SessionAnalysis({ sessionId }: { sessionId: UUID }) {
         {a.maneuver_summary && <ManeuverSummary summary={a.maneuver_summary} />}
         {!!polar.data?.length && (
           <Section title={t("sessions.polar")}>
-            <PolarChart points={polar.data} />
+            <PolarChart points={polar.data} targetPoints={a.polar_target} />
           </Section>
         )}
         {!!a.vmg_series?.length && (
@@ -148,9 +149,9 @@ function ManeuversTable({ maneuvers }: { maneuvers: SessionManeuver[] }) {
           {maneuvers.map((m) => (
             <tr key={m.id}>
               <td>{t(`sessions.${m.maneuver_type}`)}</td>
-              <td>{m.speed_loss_kts.toFixed(2)} kn</td>
-              <td>{m.recovery_time_sec.toFixed(1)} s</td>
-              <td>{m.duration_sec.toFixed(1)} s</td>
+              <td>{fmtKnots(m.speed_loss_kts)}</td>
+              <td>{fmtSeconds(m.recovery_time_sec)}</td>
+              <td>{fmtSeconds(m.duration_sec)}</td>
               <td>{Math.abs(m.heading_change_deg).toFixed(0)}°</td>
             </tr>
           ))}
@@ -164,12 +165,14 @@ function ManeuversTable({ maneuvers }: { maneuvers: SessionManeuver[] }) {
 
 function LegsTable({ legs }: { legs: SessionLeg[] }) {
   const { t } = useTranslation();
+  const seq = legSequence(legs);
   const ranked = legs.slice().sort((x, y) => y.avg_vmg_kts - x.avg_vmg_kts);
   return (
     <div className="sf-tablewrap">
       <table className="sf-table">
         <thead>
           <tr>
+            <th>#</th>
             <th>{t("sessions.type")}</th>
             <th>VMG</th>
             <th>{t("sessions.avgSpeed")}</th>
@@ -181,11 +184,12 @@ function LegsTable({ legs }: { legs: SessionLeg[] }) {
         <tbody>
           {ranked.map((l) => (
             <tr key={l.id}>
+              <td>{seq.get(l.id)}</td>
               <td>{t(`sessions.${l.leg_type}`)}</td>
-              <td>{l.avg_vmg_kts.toFixed(2)} kn</td>
-              <td>{l.avg_speed_kts.toFixed(2)} kn</td>
-              <td>{l.max_speed_kts.toFixed(2)} kn</td>
-              <td>{l.distance_nm.toFixed(2)} nm</td>
+              <td>{fmtKnots(l.avg_vmg_kts)}</td>
+              <td>{fmtKnots(l.avg_speed_kts)}</td>
+              <td>{fmtKnots(l.max_speed_kts)}</td>
+              <td>{fmtDistanceNm(l.distance_nm)}</td>
               <td>{fmtDuration(l.duration_sec)}</td>
             </tr>
           ))}
@@ -205,7 +209,7 @@ function VmgChart({ series }: { series: { timestamp: number; vmg_kts: number }[]
         <CartesianGrid stroke="var(--sf-border)" strokeDasharray="2 3" />
         <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} hide />
         <YAxis width={32} tick={{ fontSize: 11 }} />
-        <Tooltip formatter={(v) => `${Number(v).toFixed(2)} kn`} labelFormatter={() => ""} />
+        <Tooltip formatter={(v) => fmtKnots(Number(v))} labelFormatter={() => ""} />
         <Line type="monotone" dataKey="vmg" stroke="#2f9be0" strokeWidth={1.5}
           dot={false} isAnimationActive={false} />
       </LineChart>

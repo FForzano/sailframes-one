@@ -198,6 +198,10 @@ class SessionAnalysisORM(Base):
     # Per-variable distributions (speed/apparent wind/heel/pitch mean-max-std).
     sensor_stats: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     vmg_series: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Max-speed-per-bucket "target" polar (vs. the avg/actual polar in
+    # `polar_points`) — same shape, kept alongside the other derived series
+    # rather than as its own table since it isn't a relational/queryable datum.
+    polar_target: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

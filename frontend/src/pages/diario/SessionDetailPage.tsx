@@ -7,10 +7,11 @@ import { boatsService, boatKeys } from "@/services/boats";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useToast } from "@/hooks/useToast";
 import { timeController } from "@/stores/timeController";
-import { buildTrack, timeBounds, trackColor } from "@/components/race/raceModel";
-import { MapView } from "@/components/race/MapView";
+import { buildTrack, medianIntervalMs, timeBounds, trackColor } from "@/components/race/raceModel";
+import { MapView, type MapMark } from "@/components/race/MapView";
 import { Timeline } from "@/components/race/Timeline";
 import { SpeedChart } from "@/components/race/SpeedChart";
+import { PlaybackIndicators } from "@/components/session/PlaybackIndicators";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -22,6 +23,7 @@ import { WindCard } from "@/components/common/WindCard";
 import { SessionAnalysis } from "@/components/session/SessionAnalysis";
 import { useMediaUpload } from "@/hooks/useMediaUpload";
 import { fmtDateTime, fmtDistance, fmtDuration, fmtKnots, userLabel } from "@/utils/format";
+import { legSequence } from "@/utils/legSequence";
 import { sessionStatusBadge } from "./SessionsPage";
 import type { GpsPoint, UUID } from "@/types";
 import { useRef } from "react";
@@ -69,6 +71,8 @@ export function SessionDetailPage() {
   const [addingCrew, setAddingCrew] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [gps, setGps] = useState<GpsPoint[] | null>(null);
+  const [showLegs, setShowLegs] = useState(true);
+  const [showManeuvers, setShowManeuvers] = useState(true);
 
   const session = useQuery({
     queryKey: sessionKeys.detail(sessionId!),
@@ -102,6 +106,14 @@ export function SessionDetailPage() {
     enabled: !!sessionId,
   });
   const boats = useQuery({ queryKey: boatKeys.all, queryFn: () => boatsService.list() });
+  // Same query key/fn as SessionAnalysis — TanStack Query dedupes, no extra
+  // network round-trip — just so the map can plot leg/maneuver markers.
+  const analysis = useQuery({
+    queryKey: sessionKeys.analysis(sessionId!),
+    queryFn: () => sessionsService.analysis(sessionId!),
+    enabled: !!sessionId,
+    retry: false,
+  });
 
   // The gps stream JSON lives in object storage — fetch via its download_url.
   const gpsStream = streams.data?.find((s) => s.sensor_type === "gps" && s.download_url);
@@ -129,6 +141,37 @@ export function SessionDetailPage() {
   useEffect(() => {
     if (tracks.length) timeController.setBounds(...timeBounds(tracks));
   }, [tracks]);
+
+  const marks = useMemo<MapMark[]>(() => {
+    const out: MapMark[] = [];
+    if (showLegs && analysis.data?.legs.length) {
+      const seq = legSequence(analysis.data.legs);
+      for (const l of analysis.data.legs) {
+        if (l.start_lat == null || l.start_lon == null) continue;
+        out.push({
+          id: l.id,
+          kind: "leg",
+          seq: seq.get(l.id),
+          mark_role: t(`sessions.${l.leg_type}`),
+          lat: l.start_lat,
+          lng: l.start_lon,
+        });
+      }
+    }
+    if (showManeuvers && analysis.data?.maneuvers.length) {
+      for (const m of analysis.data.maneuvers) {
+        if (m.start_lat == null || m.start_lon == null) continue;
+        out.push({
+          id: m.id,
+          kind: "maneuver",
+          mark_role: t(`sessions.${m.maneuver_type}`),
+          lat: m.start_lat,
+          lng: m.start_lon,
+        });
+      }
+    }
+    return out;
+  }, [analysis.data, showLegs, showManeuvers, t]);
 
   const addCrew = useMutation({
     mutationFn: (userId: UUID) => sessionsService.addCrew(sessionId!, { user_id: userId }),
@@ -175,7 +218,63 @@ export function SessionDetailPage() {
           )
         }
       >
-        {stats.data && (
+        {s.activity_id && (
+          <p className="sf-muted">
+            <Link to={`/diario/activities/${s.activity_id}`}>{t("sessions.activity")}</Link>
+          </p>
+        )}
+      </Card>
+
+      <Card className="sf-card--flush">
+        {streams.isLoading || (gpsStream && gps === null) ? (
+          <div className="sf-card__pad">
+            <Spinner />
+          </div>
+        ) : tracks.length === 0 ? (
+          <p className="sf-muted sf-card__pad">{t("sessions.noGps")}</p>
+        ) : (
+          <div className="sf-section__body">
+            <MapView
+              tracks={tracks}
+              marks={marks}
+              className="sf-race__map sf-map--session"
+              wind={
+                tracks[0]?.pts[0]
+                  ? { lat: tracks[0].pts[0].lat, lng: tracks[0].pts[0].lon, at: s.started_at }
+                  : undefined
+              }
+            />
+            <div className="sf-section__body sf-card__pad">
+              {!!(analysis.data?.legs.length || analysis.data?.maneuvers.length) && (
+                <div className="sf-strip">
+                  <label className="sf-check">
+                    <input
+                      type="checkbox"
+                      checked={showLegs}
+                      onChange={(e) => setShowLegs(e.target.checked)}
+                    />
+                    <span>{t("sessions.showLegs")}</span>
+                  </label>
+                  <label className="sf-check">
+                    <input
+                      type="checkbox"
+                      checked={showManeuvers}
+                      onChange={(e) => setShowManeuvers(e.target.checked)}
+                    />
+                    <span>{t("sessions.showManeuvers")}</span>
+                  </label>
+                </div>
+              )}
+              <Timeline stepMs={medianIntervalMs(tracks[0]) * 5} />
+              <SpeedChart tracks={tracks} vmg={analysis.data?.vmg_series} />
+              <PlaybackIndicators track={tracks[0]} vmg={analysis.data?.vmg_series} />
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {stats.data && (
+        <Card title={t("sessions.stats")}>
           <div className="sf-tablewrap">
             <table className="sf-table">
               <tbody>
@@ -194,39 +293,12 @@ export function SessionDetailPage() {
               </tbody>
             </table>
           </div>
-        )}
-        {s.activity_id && (
-          <p className="sf-muted">
-            <Link to={`/diario/activities/${s.activity_id}`}>{t("sessions.activity")}</Link>
-          </p>
-        )}
-      </Card>
+        </Card>
+      )}
 
       {tracks[0]?.pts[0] && (
         <WindCard lat={tracks[0].pts[0].lat} lng={tracks[0].pts[0].lon} at={s.started_at} />
       )}
-
-      <Card title={t("sessions.playback")}>
-        {streams.isLoading || (gpsStream && gps === null) ? (
-          <Spinner />
-        ) : tracks.length === 0 ? (
-          <p className="sf-muted">{t("sessions.noGps")}</p>
-        ) : (
-          <div className="sf-section__body">
-            <MapView
-              tracks={tracks}
-              className="sf-race__map sf-map--session"
-              wind={
-                tracks[0]?.pts[0]
-                  ? { lat: tracks[0].pts[0].lat, lng: tracks[0].pts[0].lon, at: s.started_at }
-                  : undefined
-              }
-            />
-            <Timeline />
-            <SpeedChart tracks={tracks} />
-          </div>
-        )}
-      </Card>
 
       <Card
         title={t("sessions.crew")}

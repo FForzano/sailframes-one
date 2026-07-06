@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useTimeState } from "@/stores/timeController";
 import { useWindAt } from "@/hooks/useWindAt";
+import { fmtKnots } from "@/utils/format";
 import { pointAt, speedColor, speedRange, type Track } from "./raceModel";
 
 export interface MapMark {
@@ -12,6 +13,12 @@ export interface MapMark {
   lng: number;
   /** preview marks (suggest/auto-start-line before apply) render dashed */
   preview?: boolean;
+  /** "leg" marks render as a numbered circle (see `seq`); "maneuver" marks
+   * render as a small plain dot in a distinct color. Omit for the default
+   * diamond (race marks: start/windward/gate/finish…). */
+  kind?: "leg" | "maneuver";
+  /** Progressive number shown on "leg" marks (matches the LegsTable `#` column). */
+  seq?: number;
 }
 
 // Imperative Leaflet (not react-leaflet): tracks + marks are drawn once, and
@@ -81,15 +88,17 @@ export function MapView({
     }
 
     for (const mk of marks) {
-      L.marker([mk.lat, mk.lng], {
-        icon: L.divIcon({
-          className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
-          html: "◆",
-          iconSize: [16, 16],
-        }),
-      })
-        .bindTooltip(mk.mark_role)
-        .addTo(map);
+      const icon =
+        mk.kind === "leg"
+          ? L.divIcon({ className: "sf-markicon sf-markicon--leg", html: `${mk.seq ?? ""}`, iconSize: [18, 18] })
+          : mk.kind === "maneuver"
+            ? L.divIcon({ className: "sf-markicon sf-markicon--maneuver", html: "", iconSize: [10, 10] })
+            : L.divIcon({
+                className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
+                html: "◆",
+                iconSize: [16, 16],
+              });
+      L.marker([mk.lat, mk.lng], { icon }).bindTooltip(mk.mark_role).addTo(map);
       bounds.push([mk.lat, mk.lng]);
     }
 
@@ -118,16 +127,14 @@ export function MapView({
     <div className={`${className} sf-map`}>
       <div ref={elRef} className="sf-map__surface" />
       {observation?.twd_deg != null && (
-        <div className="sf-map__wind" title={`${observation.tws_kts ?? "—"} kn`}>
+        <div className="sf-map__wind" title={fmtKnots(observation.tws_kts)}>
           <span
             className="sf-map__wind-arrow"
             style={{ transform: `rotate(${observation.twd_deg}deg)` }}
           >
             ↑
           </span>
-          <span className="sf-map__wind-speed">
-            {observation.tws_kts != null ? `${observation.tws_kts} kn` : "—"}
-          </span>
+          <span className="sf-map__wind-speed">{fmtKnots(observation.tws_kts)}</span>
         </div>
       )}
     </div>

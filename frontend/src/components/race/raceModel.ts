@@ -114,6 +114,42 @@ export function indexAt(track: Track, ms: number): number {
   return lo;
 }
 
+// Earth radius in meters, for the haversine distance used by the cumulative
+// distance helper below.
+const EARTH_R_M = 6371000;
+
+function haversineM(a: TrackPoint, b: TrackPoint): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_R_M * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/** Cumulative distance (meters) from the track's start up to and including
+ * each point — index-aligned with `track.pts`, for live "distance so far"
+ * readouts during playback (paired with `indexAt`). */
+export function buildCumulativeDistances(track: Track): number[] {
+  const out: number[] = new Array(track.pts.length);
+  let total = 0;
+  for (let i = 0; i < track.pts.length; i++) {
+    if (i > 0) total += haversineM(track.pts[i - 1], track.pts[i]);
+    out[i] = total;
+  }
+  return out;
+}
+
+/** Median gap (ms) between consecutive fixes — used to size a sensible
+ * step-forward/back jump for the playback transport controls. */
+export function medianIntervalMs(track: Track): number {
+  const { pts } = track;
+  if (pts.length < 2) return 5000;
+  const gaps = pts.slice(1).map((p, i) => p.ms - pts[i].ms).sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)] || 5000;
+}
+
 export function timeBounds(tracks: Track[]): [number, number] {
   let min = Infinity;
   let max = -Infinity;

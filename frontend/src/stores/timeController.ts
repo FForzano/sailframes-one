@@ -12,6 +12,8 @@ export interface TimeState {
   speed: number; // 1 / 2 / 4 …
 }
 
+const SPEEDS = [1, 2, 4, 8];
+
 class TimeController {
   private state: TimeState = { tMin: 0, tMax: 0, cursor: 0, playing: false, speed: 1 };
   private listeners = new Set<() => void>();
@@ -42,9 +44,18 @@ class TimeController {
     this.emit();
   }
 
+  step(deltaMs: number) {
+    this.seek(this.state.cursor + deltaMs);
+  }
+
   setSpeed(speed: number) {
     this.state.speed = speed;
     this.emit();
+  }
+
+  cycleSpeed() {
+    const i = SPEEDS.indexOf(this.state.speed);
+    this.setSpeed(SPEEDS[(i + 1) % SPEEDS.length]);
   }
 
   play() {

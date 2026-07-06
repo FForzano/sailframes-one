@@ -37,7 +37,7 @@ _LEG_FIELDS = ("leg_type", "start_time", "end_time", "duration_sec", "distance_n
                "avg_twa_deg", "std_heading_deg", "num_points", "start_lat",
                "start_lon", "end_lat", "end_lon")
 _ANALYSIS_FIELDS = ("correlations", "violin", "maneuver_summary", "leg_comparison",
-                    "sensor_stats", "vmg_series", "computed_at")
+                    "sensor_stats", "vmg_series", "polar_target", "computed_at")
 
 
 class SqlSessionRepo:
