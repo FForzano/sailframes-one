@@ -87,20 +87,33 @@ def list_observations(station_id: uuid.UUID,
     """Newest-first, paginated. The cache grows without bound (idempotent
     upsert on every scheduler tick) — defaults to the last 72h when no
     explicit range is given, rather than dumping the whole history."""
-    _require_station(station_id)
+    station = _require_station(station_id)
     if start is None and end is None:
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=OBSERVATIONS_DEFAULT_WINDOW_HOURS)
     rows = repos.wind.list_observations(station_id, start=start, end=end,
                                         limit=limit, offset=offset)
+    # An explicit range further back than the periodic scheduler/forecast
+    # fetch ever covers (e.g. a session imported for an older date) has no
+    # cached rows — backfill from the historical archive once, on demand,
+    # rather than silently returning nothing (or the wrong-window "latest").
+    if not rows and end < datetime.now(timezone.utc) - timedelta(hours=OBSERVATIONS_DEFAULT_WINDOW_HOURS):
+        wind_lookup.backfill_historical(station, start, end)
+        rows = repos.wind.list_observations(station_id, start=start, end=end,
+                                            limit=limit, offset=offset)
     return [o.to_dict() for o in rows]
 
 
 @router.get("/nearest")
-def nearest_station(lat: float, lng: float, request: Request):
+def nearest_station(lat: float, lng: float, request: Request, at: Optional[datetime] = None):
     """Get-or-create the best wind station for a coordinate (real sensor
     within 50km, else an existing Open-Meteo grid point within 25km, else a
     freshly auto-created one) — any authenticated user, used by session/race
-    pages that have no wind data yet."""
+    pages that have no wind data yet.
+
+    ``at``: pass the session/race's actual time (not "now") so a real sensor
+    with no historical data for that date falls through to the Open-Meteo
+    grid tier instead of being returned empty-handed — see
+    ``services/wind_lookup.find_or_create_station``."""
     require_user(request)
-    return wind_lookup.find_or_create_station(lat, lng).to_dict()
+    return wind_lookup.find_or_create_station(lat, lng, at=at).to_dict()

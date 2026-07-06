@@ -21,6 +21,47 @@ export function trackColor(i: number): string {
   return PALETTE[i % PALETTE.length];
 }
 
+// Sequential blue→cyan→green→yellow→red scale, used to color a track by
+// speed (slow = blue, fast = red) instead of the flat per-track PALETTE color.
+const SPEED_SCALE: Array<[number, [number, number, number]]> = [
+  [0.0, [47, 107, 224]],
+  [0.35, [47, 191, 224]],
+  [0.6, [63, 191, 127]],
+  [0.8, [224, 178, 74]],
+  [1.0, [224, 79, 79]],
+];
+
+/** Maps `sog` to a color along `SPEED_SCALE`, normalized against [min, max]
+ * (typically a single track's own speed range, so its full gradient is used
+ * regardless of how fast the boat actually went). */
+export function speedColor(sog: number, min: number, max: number): string {
+  const t = max > min ? Math.min(1, Math.max(0, (sog - min) / (max - min))) : 0;
+  for (let i = 1; i < SPEED_SCALE.length; i++) {
+    const [t0, c0] = SPEED_SCALE[i - 1];
+    const [t1, c1] = SPEED_SCALE[i];
+    if (t <= t1) {
+      const f = (t - t0) / (t1 - t0 || 1);
+      const r = Math.round(c0[0] + (c1[0] - c0[0]) * f);
+      const g = Math.round(c0[1] + (c1[1] - c0[1]) * f);
+      const b = Math.round(c0[2] + (c1[2] - c0[2]) * f);
+      return `rgb(${r},${g},${b})`;
+    }
+  }
+  const last = SPEED_SCALE[SPEED_SCALE.length - 1][1];
+  return `rgb(${last[0]},${last[1]},${last[2]})`;
+}
+
+/** [min, max] `sog` across a track's points (both 0 if empty). */
+export function speedRange(track: Track): [number, number] {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const p of track.pts) {
+    if (p.sog < min) min = p.sog;
+    if (p.sog > max) max = p.sog;
+  }
+  return Number.isFinite(min) ? [min, max] : [0, 0];
+}
+
 /** One track from a processed GPS stream (canonical point shape
  * `{t, lat, lon, speed_kn, course}` — worker output / GPX parse). */
 export function buildTrack(id: string, name: string, points: GpsPoint[], color: string): Track {

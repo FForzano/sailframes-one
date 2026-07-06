@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useTimeState } from "@/stores/timeController";
-import { pointAt, type Track } from "./raceModel";
+import { useWindAt } from "@/hooks/useWindAt";
+import { pointAt, speedColor, speedRange, type Track } from "./raceModel";
 
 export interface MapMark {
   id?: string;
@@ -21,20 +22,26 @@ export function MapView({
   tracks,
   marks = [],
   className = "sf-race__map",
+  wind,
 }: {
   tracks: Track[];
   marks?: MapMark[];
   className?: string;
+  /** Region to show a wind direction/speed overlay for (e.g. the session's
+   * start point + start time) — omit to hide the overlay entirely. */
+  wind?: { lat: number; lng: number; at?: string | null };
 }) {
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Record<string, L.CircleMarker>>({});
   const { cursor } = useTimeState();
+  const { data: windAt } = useWindAt(wind?.lat, wind?.lng, wind?.at);
 
   // One-time map + static layer setup (rebuilt when the data identity changes).
   useEffect(() => {
     if (!elRef.current) return;
-    const map = L.map(elRef.current, { zoomControl: true });
+    const map = L.map(elRef.current, { zoomControl: false, preferCanvas: true });
+    L.control.zoom({ position: "bottomright" }).addTo(map);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       attribution: "© OpenStreetMap © CARTO",
       maxZoom: 20,
@@ -45,7 +52,21 @@ export function MapView({
     for (const tr of tracks) {
       const latlngs = tr.pts.map((p) => [p.lat, p.lon] as [number, number]);
       if (!latlngs.length) continue;
-      L.polyline(latlngs, { color: tr.color, weight: 2, opacity: 0.8 }).addTo(map);
+      // Colored by speed (per-segment) rather than a single flat track color,
+      // so a glance at the line shows where the boat was fast vs. slow.
+      const [minSog, maxSog] = speedRange(tr);
+      for (let i = 1; i < tr.pts.length; i++) {
+        const a = tr.pts[i - 1];
+        const b = tr.pts[i];
+        const avgSog = (a.sog + b.sog) / 2;
+        L.polyline(
+          [
+            [a.lat, a.lon],
+            [b.lat, b.lon],
+          ],
+          { color: speedColor(avgSog, minSog, maxSog), weight: 3, opacity: 0.85 }
+        ).addTo(map);
+      }
       bounds.push(...latlngs);
       const m = L.circleMarker(latlngs[0], {
         radius: 6,
@@ -92,5 +113,23 @@ export function MapView({
     }
   }, [cursor, tracks]);
 
-  return <div ref={elRef} className={className} />;
+  const observation = windAt?.observation;
+  return (
+    <div className={`${className} sf-map`}>
+      <div ref={elRef} className="sf-map__surface" />
+      {observation?.twd_deg != null && (
+        <div className="sf-map__wind" title={`${observation.tws_kts ?? "—"} kn`}>
+          <span
+            className="sf-map__wind-arrow"
+            style={{ transform: `rotate(${observation.twd_deg}deg)` }}
+          >
+            ↑
+          </span>
+          <span className="sf-map__wind-speed">
+            {observation.tws_kts != null ? `${observation.tws_kts} kn` : "—"}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }

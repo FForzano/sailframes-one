@@ -212,7 +212,15 @@ export function SessionDetailPage() {
           <p className="sf-muted">{t("sessions.noGps")}</p>
         ) : (
           <div className="sf-section__body">
-            <MapView tracks={tracks} className="sf-race__map sf-map--session" />
+            <MapView
+              tracks={tracks}
+              className="sf-race__map sf-map--session"
+              wind={
+                tracks[0]?.pts[0]
+                  ? { lat: tracks[0].pts[0].lat, lng: tracks[0].pts[0].lon, at: s.started_at }
+                  : undefined
+              }
+            />
             <Timeline />
             <SpeedChart tracks={tracks} />
           </div>
