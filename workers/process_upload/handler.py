@@ -115,7 +115,9 @@ def process_analyze_prefix(bucket: str, prefix: str):
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        for name in ('gps.json', 'imu.json', 'wind.json', 'pressure.json'):
+        # wind_cache.json: the backend's pre-fetched regional wind, used as the
+        # true-wind source when the session has no onboard wind sensor.
+        for name in ('gps.json', 'imu.json', 'wind.json', 'pressure.json', 'wind_cache.json'):
             try:
                 obj = s3.get_object(Bucket=bucket, Key=f"{prefix}{name}")
             except Exception:
@@ -128,6 +130,12 @@ def process_analyze_prefix(bucket: str, prefix: str):
         Bucket=bucket, Key=f"{prefix}analysis.json",
         Body=json.dumps(result, indent=2).encode(), ContentType='application/json',
     )
+
+    # Persist the analysis to the DB (the backend fans it out to its normalized
+    # tables). The prefix is processed/uploads/{upload_id}/ — key by that upload.
+    upload_id = prefix.rstrip('/').split('/')[-1]
+    _post_system(f"session-uploads/{upload_id}/analysis", result,
+                 label=f"analysis for {upload_id}")
 
 
 def extract_start_time_from_filename(filename: str) -> str:
@@ -172,12 +180,12 @@ def _sensor_from_filename(filename: str) -> str:
     return None
 
 
-def _post_callback(payload: dict):
-    """Report processing results to the backend system API (3 attempts).
+def _post_system(path: str, payload: dict, label: str):
+    """POST a JSON payload to a backend system API path (3 attempts).
 
     Workers are DB-blind by design: the backend owns every DB write. When
     BACKEND_CALLBACK_URL is unset the worker runs in pure-storage mode and
-    skips the callback silently."""
+    skips the callback silently. ``path`` is relative to ``/api/system/``."""
     base = os.environ.get('BACKEND_CALLBACK_URL')
     token = os.environ.get('SAILFRAMES_HOOK_TOKEN')
     if not base or not token:
@@ -186,7 +194,7 @@ def _post_callback(payload: dict):
     import time
     import urllib.request
 
-    url = f"{base.rstrip('/')}/api/system/ingest/complete"
+    url = f"{base.rstrip('/')}/api/system/{path.lstrip('/')}"
     body = json.dumps(payload).encode()
     for attempt in range(3):
         try:
@@ -196,12 +204,18 @@ def _post_callback(payload: dict):
                          'Authorization': f'Bearer {token}'},
             )
             with urllib.request.urlopen(req, timeout=30) as resp:
-                logger.info(f"Callback OK ({resp.status}) for {payload.get('session_upload_id')}")
+                logger.info(f"Callback OK ({resp.status}) for {label}")
                 return
         except Exception as e:
             logger.warning(f"Callback attempt {attempt + 1}/3 failed: {e}")
             time.sleep(2 ** attempt)
-    logger.error(f"Callback permanently failed for {payload.get('session_upload_id')}")
+    logger.error(f"Callback permanently failed for {label}")
+
+
+def _post_callback(payload: dict):
+    """Report file-processing results to the backend ingest-complete endpoint."""
+    _post_system("ingest/complete", payload,
+                 label=str(payload.get('session_upload_id')))
 
 
 def process_file(bucket: str, key: str):

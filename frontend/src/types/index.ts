@@ -253,6 +253,98 @@ export interface SessionCrew {
   user?: UserSummary | null;
 }
 
+// --- session analysis ------------------------------------------------------------------
+
+/** One detected tack/gybe. `*_time` are unix-epoch seconds (worker native). */
+export interface SessionManeuver {
+  id: UUID;
+  maneuver_type: "tack" | "gybe";
+  start_time: number;
+  end_time: number;
+  duration_sec: number;
+  speed_loss_kts: number;
+  speed_before_kts: number;
+  speed_min_kts: number;
+  speed_after_kts: number;
+  recovery_time_sec: number;
+  heading_change_deg: number;
+  max_heel_deg: number | null;
+  distance_lost_m: number | null;
+  start_lat: number | null;
+  start_lon: number | null;
+}
+
+/** One straight-line leg between maneuvers. */
+export interface SessionLeg {
+  id: UUID;
+  leg_type: "upwind" | "downwind" | "reach";
+  start_time: number;
+  end_time: number;
+  duration_sec: number;
+  distance_nm: number;
+  avg_speed_kts: number;
+  max_speed_kts: number;
+  avg_vmg_kts: number;
+  avg_heel_deg: number | null;
+  avg_twa_deg: number | null;
+  std_heading_deg: number;
+  num_points: number;
+  start_lat: number | null;
+  start_lon: number | null;
+  end_lat: number | null;
+  end_lon: number | null;
+}
+
+export interface VmgPoint {
+  timestamp: number;
+  vmg_kts: number;
+  twa_deg: number;
+  boat_speed_kts: number;
+  tws_kts: number | null;
+}
+
+/** Per-variable {mean,max,std,…} distributions (speed/apparent wind/heel/pitch). */
+export type SensorStats = Record<string, Record<string, number>>;
+
+export interface CorrelationMatrix {
+  variables: string[];
+  matrix: Record<string, Record<string, number>>;
+}
+
+/** `GET /sessions/{id}/analysis` — the DB-assembled analysis. Polar and scalar
+ * stats come from their own endpoints (`/polar-points`, `/stats`). */
+export interface SessionAnalysis {
+  maneuvers: SessionManeuver[];
+  legs: SessionLeg[];
+  maneuver_summary: Record<string, unknown> | null;
+  leg_comparison: Record<string, unknown> | null;
+  correlations: CorrelationMatrix | null;
+  violin: Record<string, Record<string, ViolinMetric>> | null;
+  sensor_stats: SensorStats | null;
+  vmg_series: VmgPoint[] | null;
+  computed_at: string | null;
+}
+
+export interface ViolinMetric {
+  values: number[];
+  mean: number;
+  median: number;
+  std: number;
+  min: number;
+  max: number;
+  q25: number;
+  q75: number;
+}
+
+/** Empirical per-session polar point (`GET /polar-points?session_id=`). */
+export interface PolarPoint {
+  twa_deg: number;
+  tws_kts: number;
+  speed_kts: number;
+  vmg_kts: number | null;
+  sample_count: number | null;
+}
+
 /** Canonical processed GPS point (worker output / GPX parse). */
 export interface GpsPoint {
   t: string; // ISO timestamp

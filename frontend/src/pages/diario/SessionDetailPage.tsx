@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ImageUploader } from "@/components/common/ImageUploader";
 import { UserPicker } from "@/components/common/UserPicker";
 import { WindCard } from "@/components/common/WindCard";
+import { SessionAnalysis } from "@/components/session/SessionAnalysis";
 import { useMediaUpload } from "@/hooks/useMediaUpload";
 import { fmtDateTime, fmtDistance, fmtDuration, fmtKnots, userLabel } from "@/utils/format";
 import { sessionStatusBadge } from "./SessionsPage";
@@ -315,6 +316,8 @@ export function SessionDetailPage() {
           <p className="sf-muted">{t("common.none")}</p>
         )}
       </Card>
+
+      <SessionAnalysis sessionId={sessionId} />
 
       {addingCrew && (
         <Modal title={t("sessions.addCrew")} onClose={() => setAddingCrew(false)}>

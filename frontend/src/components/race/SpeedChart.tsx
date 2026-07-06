@@ -1,80 +1,79 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useState } from "react";
+import {
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { timeController, useTimeState } from "@/stores/timeController";
 import type { Track } from "./raceModel";
 
-// SVG speed-over-ground chart, one polyline per track, with a cursor line
-// synced to the shared time controller. Click/drag anywhere seeks.
-const W = 1000;
+// Speed-over-ground chart, one line per track, with a cursor line synced to the
+// shared time controller. Click/drag anywhere seeks. Recharts-based to stay
+// visually consistent with the analysis charts.
 const H = 160;
 
 export function SpeedChart({ tracks }: { tracks: Track[] }) {
   const { tMin, tMax, cursor } = useTimeState();
-  const svgRef = useRef<SVGSVGElement>(null);
-  const span = Math.max(1, tMax - tMin);
+  const [dragging, setDragging] = useState(false);
 
-  const { maxSog, paths } = useMemo(() => {
+  // Merge every track's points onto a shared time axis (one column per track);
+  // gaps are connected so tracks with different clocks still render one line.
+  const { data, maxSog } = useMemo(() => {
+    const byMs = new Map<number, Record<string, number>>();
     let mx = 1;
-    for (const tr of tracks) for (const p of tr.pts) if (p.sog > mx) mx = p.sog;
-    const built = tracks.map((tr) => {
-      const d = tr.pts
-        .map((p, i) => {
-          const x = ((p.ms - tMin) / span) * W;
-          const y = H - (p.sog / mx) * H;
-          return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(" ");
-      return { id: tr.id, color: tr.color, d };
-    });
-    return { maxSog: mx, paths: built };
-  }, [tracks, tMin, span]);
+    for (const tr of tracks) {
+      for (const p of tr.pts) {
+        if (p.sog > mx) mx = p.sog;
+        const row = byMs.get(p.ms) ?? { ms: p.ms };
+        row[tr.id] = p.sog;
+        byMs.set(p.ms, row);
+      }
+    }
+    const rows = [...byMs.values()].sort((a, b) => a.ms - b.ms);
+    return { data: rows, maxSog: mx };
+  }, [tracks]);
 
-  const seekFromEvent = (clientX: number) => {
-    const el = svgRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    timeController.seek(tMin + frac * span);
+  const seekTo = (label: unknown) => {
+    if (typeof label === "number") timeController.seek(label);
   };
-
-  const cursorX = ((cursor - tMin) / span) * W;
 
   return (
     <div>
       <span className="sf-muted" style={{ fontSize: "0.8rem" }}>
         0–{maxSog.toFixed(0)} kn
       </span>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        className="sf-chart"
-        style={{ height: 160, display: "block" }}
-        onPointerDown={(e) => {
-          (e.target as Element).setPointerCapture?.(e.pointerId);
-          seekFromEvent(e.clientX);
-        }}
-        onPointerMove={(e) => e.buttons === 1 && seekFromEvent(e.clientX)}
-      >
-        {paths.map((p) => (
-          <path
-            key={p.id}
-            d={p.d}
-            fill="none"
-            stroke={p.color}
-            strokeWidth={1.5}
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-        <line
-          x1={cursorX}
-          y1={0}
-          x2={cursorX}
-          y2={H}
-          stroke="#fff"
-          strokeWidth={1}
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
+      <ResponsiveContainer width="100%" height={H}>
+        <LineChart
+          data={data}
+          margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
+          onMouseDown={(s) => {
+            setDragging(true);
+            seekTo(s?.activeLabel);
+          }}
+          onMouseMove={(s) => dragging && seekTo(s?.activeLabel)}
+          onMouseUp={() => setDragging(false)}
+          onMouseLeave={() => setDragging(false)}
+        >
+          <XAxis dataKey="ms" type="number" domain={[tMin, tMax]} hide />
+          <YAxis domain={[0, maxSog]} hide />
+          {tracks.map((tr) => (
+            <Line
+              key={tr.id}
+              type="monotone"
+              dataKey={tr.id}
+              stroke={tr.color}
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive={false}
+              connectNulls
+            />
+          ))}
+          <ReferenceLine x={cursor} stroke="#fff" strokeWidth={1} />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }

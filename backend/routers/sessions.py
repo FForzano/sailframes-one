@@ -14,7 +14,6 @@ from fastapi import APIRouter, HTTPException, Request
 from ..auth import current_user, require_user, session_visible_to, verify_csrf
 from ..schemas import SessionCrewModel, SessionWriteModel
 from ..services import media
-from ..storage import BlobNotFound
 from ._common import blob, repos
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -145,16 +144,22 @@ def get_stats(session_id: uuid.UUID, request: Request):
 
 @router.get("/{session_id}/analysis")
 def get_analysis(session_id: uuid.UUID, request: Request):
-    """analysis.json produced by the worker's analyze pass — one per upload;
-    the first found wins (single-upload sessions are the standard case)."""
+    """The worker's analysis, assembled from its normalized DB homes: discrete
+    tacks/gybes (``session_maneuvers``) and legs (``session_legs``) as rows, plus
+    the JSON matrices/series/distributions (``session_analysis``). The polar
+    curve and scalar stats have their own endpoints (``/polar-points``,
+    ``/stats``). 404 until the pipeline has run (like ``/stats``)."""
     user = current_user(request)
     _require_visible(session_id, user)
-    for upload in repos.ingest.list_uploads(session_id=session_id):
-        try:
-            return blob.get_json(f"processed/uploads/{upload.id}/analysis.json")
-        except BlobNotFound:
-            continue
-    raise HTTPException(404, "No analysis available")
+    analysis = repos.sessions.get_analysis(session_id)
+    maneuvers = repos.sessions.list_maneuvers(session_id)
+    legs = repos.sessions.list_legs(session_id)
+    if analysis is None and not maneuvers and not legs:
+        raise HTTPException(404, "No analysis available")
+    data = analysis.to_dict() if analysis is not None else {}
+    data["maneuvers"] = [m.to_dict() for m in maneuvers]
+    data["legs"] = [l.to_dict() for l in legs]
+    return data
 
 
 # --- crew ------------------------------------------------------------------------

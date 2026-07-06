@@ -14,7 +14,10 @@ from typing import Optional
 from sqlalchemy import select
 
 from ...db.models import (
+    SessionAnalysisORM,
     SessionCrewORM,
+    SessionLegORM,
+    SessionManeuverORM,
     SessionORM,
     SessionPhotoORM,
     SessionStatsORM,
@@ -25,6 +28,16 @@ from ...db.models import (
 _FIELDS = ("activity_id", "boat_id", "started_at", "ended_at", "status")
 _STATS_FIELDS = ("distance_m", "avg_speed_kts", "max_speed_kts", "duration_s",
                  "avg_polar_pct", "max_polar_pct", "computed_at")
+_MANEUVER_FIELDS = ("maneuver_type", "start_time", "end_time", "duration_sec",
+                    "speed_loss_kts", "speed_before_kts", "speed_min_kts",
+                    "speed_after_kts", "recovery_time_sec", "heading_change_deg",
+                    "max_heel_deg", "distance_lost_m", "start_lat", "start_lon")
+_LEG_FIELDS = ("leg_type", "start_time", "end_time", "duration_sec", "distance_nm",
+               "avg_speed_kts", "max_speed_kts", "avg_vmg_kts", "avg_heel_deg",
+               "avg_twa_deg", "std_heading_deg", "num_points", "start_lat",
+               "start_lon", "end_lat", "end_lon")
+_ANALYSIS_FIELDS = ("correlations", "violin", "maneuver_summary", "leg_comparison",
+                    "sensor_stats", "vmg_series", "computed_at")
 
 
 class SqlSessionRepo:
@@ -298,3 +311,55 @@ class SqlSessionRepo:
                     setattr(orm, k, v)
             s.commit()
         return self.get_stats(session_id)
+
+    # --- analysis: maneuvers / legs / json leftovers ---
+
+    def _replace_children(self, model, field_names, session_id, rows):
+        """Delete a session's existing analysis rows and insert the new set —
+        the analysis is recomputed wholesale, so a full replace is simpler and
+        safer than diffing (idempotent on re-runs)."""
+        from sqlalchemy import delete
+        with self.Session() as s:
+            s.execute(delete(model).where(model.session_id == session_id))
+            for r in rows:
+                s.add(model(session_id=session_id,
+                            **{k: r.get(k) for k in field_names if k in r}))
+            s.commit()
+
+    def upsert_maneuvers(self, session_id: uuid.UUID, rows: "list[dict]") -> None:
+        self._replace_children(SessionManeuverORM, _MANEUVER_FIELDS, session_id, rows)
+
+    def list_maneuvers(self, session_id: uuid.UUID) -> "list[SessionManeuverORM]":
+        with self.Session() as s:
+            return list(s.scalars(
+                select(SessionManeuverORM)
+                .where(SessionManeuverORM.session_id == session_id)
+                .order_by(SessionManeuverORM.start_time)
+            ).all())
+
+    def upsert_legs(self, session_id: uuid.UUID, rows: "list[dict]") -> None:
+        self._replace_children(SessionLegORM, _LEG_FIELDS, session_id, rows)
+
+    def list_legs(self, session_id: uuid.UUID) -> "list[SessionLegORM]":
+        with self.Session() as s:
+            return list(s.scalars(
+                select(SessionLegORM)
+                .where(SessionLegORM.session_id == session_id)
+                .order_by(SessionLegORM.start_time)
+            ).all())
+
+    def get_analysis(self, session_id: uuid.UUID) -> Optional[SessionAnalysisORM]:
+        with self.Session() as s:
+            return s.get(SessionAnalysisORM, session_id)
+
+    def upsert_analysis(self, session_id: uuid.UUID, data: dict) -> SessionAnalysisORM:
+        with self.Session() as s:
+            orm = s.get(SessionAnalysisORM, session_id)
+            if orm is None:
+                orm = SessionAnalysisORM(session_id=session_id)
+                s.add(orm)
+            for k, v in data.items():
+                if k in _ANALYSIS_FIELDS:
+                    setattr(orm, k, v)
+            s.commit()
+        return self.get_analysis(session_id)

@@ -20,6 +20,9 @@ from .session import (
     SessionPhotoORM,
     SessionVideoORM,
     SessionStatsORM,
+    SessionManeuverORM,
+    SessionLegORM,
+    SessionAnalysisORM,
 )
 from .ingest import ImportORM, SessionUploadORM, SessionStreamORM
 from .wind import WindStationORM, WindObservationORM
@@ -55,6 +58,9 @@ __all__ = [
     "SessionPhotoORM",
     "SessionVideoORM",
     "SessionStatsORM",
+    "SessionManeuverORM",
+    "SessionLegORM",
+    "SessionAnalysisORM",
     "ImportORM",
     "SessionUploadORM",
     "SessionStreamORM",

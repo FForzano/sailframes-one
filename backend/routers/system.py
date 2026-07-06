@@ -100,6 +100,41 @@ def upsert_session_stats(session_id: uuid.UUID, payload: SessionStatsPayload,
     return repos.sessions.upsert_stats(session_id, data).to_dict()
 
 
+@router.post("/session-uploads/{upload_id}/analysis")
+def upsert_session_analysis(upload_id: uuid.UUID, payload: dict, request: Request):
+    """Persist the worker's analysis for an upload's session, fanning it out to
+    its normalized homes: scalar aggregates → ``session_stats``, the empirical
+    polar curve → ``polar_points``, discrete tacks/gybes → ``session_maneuvers``,
+    legs → ``session_legs``, and the remaining matrices/series/distributions →
+    ``session_analysis`` (JSON). The worker stays DB-blind: it posts the whole
+    ``analysis.json`` dict and the backend owns the writes. Idempotent — every
+    child set is replaced wholesale on re-runs."""
+    require_system(request)
+    upload = repos.ingest.get_upload(upload_id)
+    if upload is None:
+        raise HTTPException(404, "Upload not found")
+    sid = upload.session_id
+    now = datetime.now(timezone.utc)
+
+    summary = payload.get("summary") or {}
+    if summary:
+        repos.sessions.upsert_stats(sid, {**summary, "computed_at": now})
+    repos.polars.bulk_upsert(session_id=sid, source="empirical",
+                             points=payload.get("polar_points") or [])
+    repos.sessions.upsert_maneuvers(sid, payload.get("maneuvers") or [])
+    repos.sessions.upsert_legs(sid, payload.get("legs") or [])
+    repos.sessions.upsert_analysis(sid, {
+        "correlations": payload.get("correlations"),
+        "violin": payload.get("violin"),
+        "maneuver_summary": payload.get("maneuver_summary"),
+        "leg_comparison": payload.get("leg_comparison"),
+        "sensor_stats": payload.get("session_stats"),
+        "vmg_series": payload.get("vmg_series"),
+        "computed_at": now,
+    })
+    return {"ok": True, "session_id": sid}
+
+
 @router.post("/wind/fetch")
 def wind_fetch(payload: WindFetchModel, request: Request):
     """Periodic fetch trigger (wind-scheduler service). Iterates the DB

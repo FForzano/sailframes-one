@@ -91,16 +91,11 @@ def list_observations(station_id: uuid.UUID,
     if start is None and end is None:
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=OBSERVATIONS_DEFAULT_WINDOW_HOURS)
-    rows = repos.wind.list_observations(station_id, start=start, end=end,
-                                        limit=limit, offset=offset)
-    # An explicit range further back than the periodic scheduler/forecast
-    # fetch ever covers (e.g. a session imported for an older date) has no
-    # cached rows — backfill from the historical archive once, on demand,
+    # A range further back than the scheduler/forecast fetch ever covers has no
+    # cached rows — the shared primitive backfills from the archive on demand,
     # rather than silently returning nothing (or the wrong-window "latest").
-    if not rows and end < datetime.now(timezone.utc) - timedelta(hours=OBSERVATIONS_DEFAULT_WINDOW_HOURS):
-        wind_lookup.backfill_historical(station, start, end)
-        rows = repos.wind.list_observations(station_id, start=start, end=end,
-                                            limit=limit, offset=offset)
+    rows = wind_lookup.list_observations_with_backfill(
+        station, start, end, limit=limit, offset=offset)
     return [o.to_dict() for o in rows]
 
 

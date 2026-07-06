@@ -11,6 +11,7 @@ Key layout (docs/device-protocol.md + api-project.md):
   referenced by ``session_streams.data_ref``.
 """
 
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -19,6 +20,10 @@ from typing import Optional
 import requests
 
 from ..repositories import get_repos
+from ..storage import get_blob_store
+from . import wind_lookup
+
+logger = logging.getLogger(__name__)
 
 SESSION_MERGE_GAP_MINUTES = 10
 UPLOAD_URL_EXPIRY_S = 3600
@@ -96,3 +101,27 @@ def dispatch_analysis(bucket: str, prefix: str) -> None:
         return  # analysis is best-effort; streams already registered
     record = {"analyze": {"prefix": prefix}, "bucket": bucket}
     requests.post(url, json={"Records": [record]}, timeout=_worker_timeout())
+
+
+def write_wind_cache(prefix: str, lat: float, lng: float,
+                     start: datetime, end: datetime) -> None:
+    """Pre-fetch the region's wind for a session's time window and drop it in
+    the processed prefix as ``wind_cache.json``, so the (DB-blind) worker can
+    use it as the true-wind source when the session has no onboard wind sensor.
+
+    Best-effort: resolving the station triggers a historical backfill when the
+    cache is empty for an old date (see ``wind_lookup.observations_in_window``).
+    A failure here just means the worker falls back to GPS-estimated wind."""
+    try:
+        _, rows = wind_lookup.observations_in_window(lat, lng, start, end)
+        # Only the fields the worker needs, as JSON primitives — the blob store's
+        # put_json uses plain json.dumps (no UUID/datetime encoder like FastAPI).
+        payload = [{
+            "observed_at": o.observed_at.isoformat(),
+            "twd_deg": o.twd_deg,
+            "tws_kts": o.tws_kts,
+            "gust_kts": o.gust_kts,
+        } for o in rows]
+        get_blob_store().put_json(f"{prefix}wind_cache.json", payload)
+    except Exception:
+        logger.warning("wind cache pre-fetch failed for prefix %s", prefix, exc_info=True)

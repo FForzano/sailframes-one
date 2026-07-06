@@ -75,6 +75,35 @@ def find_or_create_station(lat: float, lng: float, at: Optional[datetime] = None
     return station
 
 
+def list_observations_with_backfill(station, start: datetime, end: datetime,
+                                    *, limit: int = 500, offset: int = 0):
+    """List a station's cached observations in ``[start, end]`` (newest-first),
+    backfilling from the historical archive once if the cache is empty for a
+    window that predates the periodic scheduler's coverage. The shared read
+    primitive behind both ``routers/wind.py`` and ``observations_in_window``."""
+    from datetime import timezone
+
+    repos = get_repos()
+    rows = repos.wind.list_observations(station.id, start=start, end=end,
+                                        limit=limit, offset=offset)
+    if not rows and end < datetime.now(timezone.utc) - timedelta(
+            hours=HISTORICAL_CHECK_WINDOW_HOURS):
+        backfill_historical(station, start, end)
+        rows = repos.wind.list_observations(station.id, start=start, end=end,
+                                            limit=limit, offset=offset)
+    return rows
+
+
+def observations_in_window(lat: float, lng: float, start: datetime, end: datetime,
+                           *, limit: int = 500):
+    """Resolve the best station for a coordinate and return ``(station, rows)``
+    for ``[start, end]``. Used by the ingestion pipeline to pre-fetch a
+    session's wind (with historical backfill) before dispatching analysis."""
+    station = find_or_create_station(lat, lng, at=start)
+    rows = list_observations_with_backfill(station, start, end, limit=limit)
+    return station, rows
+
+
 def backfill_historical(station, start: datetime, end: datetime) -> None:
     """Fetch and cache past observations for a date range the periodic
     scheduler never covered — e.g. a session imported for a date older than
@@ -95,4 +124,6 @@ def backfill_historical(station, start: datetime, end: datetime) -> None:
                        exc_info=True)
 
 
-__all__ = ["find_or_create_station", "backfill_historical", "REAL_SENSOR_PROVIDERS"]
+__all__ = ["find_or_create_station", "observations_in_window",
+           "list_observations_with_backfill", "backfill_historical",
+           "REAL_SENSOR_PROVIDERS"]

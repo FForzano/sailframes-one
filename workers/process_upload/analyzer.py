@@ -35,9 +35,13 @@ from processing.stats import (
     session_statistics,
     violin_plot_data,
 )
-from processing.straight_lines import leg_comparison, segment_legs
+from processing.straight_lines import _haversine_nm, leg_comparison, segment_legs
 from processing.vmg import compute_vmg_series
-from processing.wind import compute_true_wind_series, estimate_wind_from_gps
+from processing.wind import (
+    compute_true_wind_series,
+    estimate_wind_from_gps,
+    true_wind_from_cached,
+)
 
 
 def load_sensor_json(path: Path) -> list[dict]:
@@ -97,10 +101,16 @@ def analyze_session(data_dir: Path) -> dict:
     if not gps:
         return {"error": "No GPS data found"}
 
-    # True wind calculation
+    # True wind calculation. Preference order:
+    #   1. onboard wind sensor (measured apparent → true),
+    #   2. cached regional wind (nearby station / forecast grid, from the
+    #      backend's wind_cache.json) interpolated onto the track,
+    #   3. a single rough direction estimated from the GPS tacks (maneuvers only).
     true_wind = compute_true_wind_series(gps, wind, imu)
+    if not true_wind:
+        cached_wind = load_sensor_json(data_dir / "wind_cache.json")
+        true_wind = true_wind_from_cached(gps, cached_wind)
 
-    # Estimate wind direction if no wind sensor data
     twd_estimate = None
     if not true_wind:
         est = estimate_wind_from_gps(gps)
@@ -132,13 +142,24 @@ def analyze_session(data_dir: Path) -> dict:
     correlations = correlation_matrix(gps, true_wind, imu)
     leg_ranking = leg_performance_ranking(legs)
 
+    # Scalar aggregates for the DB session_stats table (distance/duration/speed).
+    summary = _session_summary(gps)
+
     # Build result
     result = {
+        "summary": summary,
         "maneuvers": [asdict(m) for m in maneuvers],
         "maneuver_summary": m_summary,
         "legs": [asdict(l) for l in legs],
         "leg_comparison": l_comparison,
+        # Chart-shaped polar for the blob artifact; flat points for the DB
+        # (polar_points table, keyed by session).
         "polar": polar_chart,
+        "polar_points": [{
+            "twa_deg": p.twa_deg, "tws_kts": p.tws_kts,
+            "speed_kts": p.boat_speed_kts, "vmg_kts": p.vmg_kts,
+            "sample_count": p.sample_count,
+        } for p in polar_points],
         "vmg_series": [asdict(v) for v in vmg_series],
         "true_wind": true_wind,
         "session_stats": sess_stats,
@@ -148,6 +169,26 @@ def analyze_session(data_dir: Path) -> dict:
     }
 
     return result
+
+
+def _session_summary(gps: list[GpsPoint]) -> dict:
+    """Scalar session aggregates for the DB ``session_stats`` table.
+
+    ``avg_polar_pct``/``max_polar_pct`` are intentionally omitted — they need a
+    reference polar for the boat, not available here (see plan follow-up)."""
+    if not gps:
+        return {}
+    speeds = [p.speed_kts for p in gps]
+    distance_m = sum(
+        _haversine_nm(gps[i - 1].lat, gps[i - 1].lon, gps[i].lat, gps[i].lon) * 1852.0
+        for i in range(1, len(gps))
+    )
+    return {
+        "distance_m": round(distance_m, 1),
+        "duration_s": int(_to_timestamp(gps[-1].timestamp) - _to_timestamp(gps[0].timestamp)),
+        "avg_speed_kts": round(float(np.mean(speeds)), 2),
+        "max_speed_kts": round(float(max(speeds)), 2),
+    }
 
 
 def main():

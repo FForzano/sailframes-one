@@ -693,6 +693,61 @@ h1, h2, h3 {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* ---------- Session analysis ---------- */
+.sf-analysis__block {
+  margin-top: 0.5rem;
+}
+.sf-analysis__title {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+  color: var(--sf-muted);
+}
+.sf-polar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sf-polar__lbl {
+  fill: var(--sf-muted);
+  font-size: 10px;
+}
+.sf-polar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+}
+.sf-polar__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.sf-polar__legend i {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+.sf-heatmap {
+  display: grid;
+  gap: 2px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+.sf-heatmap__lbl {
+  color: var(--sf-muted);
+  padding: 0.2rem 0.35rem;
+  white-space: nowrap;
+  align-self: center;
+}
+.sf-heatmap__cell {
+  padding: 0.35rem 0.4rem;
+  text-align: center;
+  border-radius: 3px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
 .sf-timeline {
   display: flex;
   align-items: center;
