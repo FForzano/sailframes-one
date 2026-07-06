@@ -1,26 +1,37 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMediaUpload } from "@/hooks/useMediaUpload";
 import { Button } from "@/components/ui/Button";
+import { ImageCropModal } from "@/components/common/ImageCropModal";
 import type { UUID } from "@/types";
 
-/** File picker + presign/PUT/confirm state, for any parent-mediated image. */
+/** File picker + presign/PUT/confirm state, for any parent-mediated image.
+ * Pass `crop` to have the user reposition/zoom a square crop before it's
+ * uploaded (e.g. profile pictures). */
 export function ImageUploader({
   create,
   confirm,
   onDone,
   label,
   accept = "image/*",
+  crop = false,
 }: {
   create: () => Promise<{ image_id: UUID; upload_url: string }>;
   confirm: (id: UUID) => Promise<unknown>;
   onDone?: () => void | Promise<void>;
   label?: string;
   accept?: string;
+  crop?: boolean;
 }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
   const { upload, busy, error } = useMediaUpload({ create, confirm, onDone });
+
+  const closeCrop = () => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+  };
 
   return (
     <span className="sf-uploader">
@@ -31,7 +42,13 @@ export function ImageUploader({
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) void upload(f);
+          if (f) {
+            if (crop) {
+              setCropSrc(URL.createObjectURL(f));
+            } else {
+              void upload(f);
+            }
+          }
           e.target.value = "";
         }}
       />
@@ -45,6 +62,16 @@ export function ImageUploader({
         {busy ? "…" : (label ?? t("common.upload"))}
       </Button>
       {error && <span className="sf-form__error"> {error}</span>}
+      {cropSrc && (
+        <ImageCropModal
+          imageSrc={cropSrc}
+          onCancel={closeCrop}
+          onCropped={(blob) => {
+            closeCrop();
+            void upload(new File([blob], "avatar.jpg", { type: "image/jpeg" }));
+          }}
+        />
+      )}
     </span>
   );
 }

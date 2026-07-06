@@ -1,7 +1,10 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { ToastViewport } from "@/components/ui/ToastViewport";
+import { Avatar } from "@/components/ui/Avatar";
+import { usersService, userKeys } from "@/services/users";
 
 // The main navigation exposes ONLY the 3 macro-sections (plus Profilo/Admin
 // utilities) — sub-pages are reached from inside each section
@@ -13,6 +16,14 @@ import { ToastViewport } from "@/components/ui/ToastViewport";
 export function AppShell() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  // Resolved profile_image URL isn't on the auth capabilities payload, only
+  // on /users/me — same query key as AnagraficaPage so it's cached, not
+  // re-fetched.
+  const me = useQuery({
+    queryKey: userKeys.me,
+    queryFn: usersService.me,
+    enabled: !!user,
+  });
 
   const sections = [
     { to: "/diario", label: t("nav.diario"), icon: "📔" },
@@ -41,8 +52,13 @@ export function AppShell() {
           ))}
         </nav>
         <div className="sf-navbar__spacer" />
-        <div className="sf-navbar__user">
-          <span className="sf-navbar__email">{user?.email}</span>
+        <div className="sf-navbar__user" title={user?.email}>
+          <Avatar
+            size="sm"
+            profileImage={me.data?.profile_image ?? null}
+            firstName={user?.first_name}
+            lastName={user?.last_name}
+          />
         </div>
       </header>
       <main className="sf-main">

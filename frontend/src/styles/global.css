@@ -117,11 +117,6 @@ h1, h2, h3 {
   align-items: center;
   gap: 0.75rem;
 }
-.sf-navbar__email {
-  color: var(--sf-muted);
-  font-size: 0.85rem;
-}
-
 /* ---------- Mobile action bar (bottom) ---------- */
 .sf-actionbar {
   display: none;
@@ -554,6 +549,18 @@ h1, h2, h3 {
 .sf-avatar--lg {
   width: 96px;
   height: 96px;
+}
+.sf-avatar--sm {
+  width: 32px;
+  height: 32px;
+}
+.sf-avatar--initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--sf-text);
+  font-size: 0.85em;
 }
 .sf-photo-grid {
   display: grid;

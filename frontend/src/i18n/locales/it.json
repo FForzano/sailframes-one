@@ -71,6 +71,8 @@
     "lastName": "Cognome",
     "dob": "Data di nascita",
     "profileImage": "Immagine profilo",
+    "cropImage": "Modifica immagine profilo",
+    "zoom": "Zoom",
     "changePassword": "Cambia password",
     "currentPassword": "Password attuale",
     "newPassword": "Nuova password",

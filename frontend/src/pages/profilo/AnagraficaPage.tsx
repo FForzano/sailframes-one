@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
 import { Spinner } from "@/components/ui/Spinner";
 import { ImageUploader } from "@/components/common/ImageUploader";
+import { Avatar } from "@/components/ui/Avatar";
 
 export function AnagraficaPage() {
   const { t } = useTranslation();
@@ -54,15 +55,17 @@ export function AnagraficaPage() {
     <div className="sf-grid" style={{ gridTemplateColumns: "minmax(280px, 480px)" }}>
       <Card title={t("profile.details")}>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
-          {me.data?.profile_image ? (
-            <img className="sf-avatar sf-avatar--lg" src={me.data.profile_image.url} alt="" />
-          ) : (
-            <div className="sf-avatar sf-avatar--lg" />
-          )}
+          <Avatar
+            size="lg"
+            profileImage={me.data?.profile_image ?? null}
+            firstName={me.data?.first_name}
+            lastName={me.data?.last_name}
+          />
           <ImageUploader
             label={t("profile.profileImage")}
             create={usersService.createProfileImage}
             confirm={(id) => usersService.confirmProfileImage(id)}
+            crop
             onDone={async () => {
               await queryClient.invalidateQueries({ queryKey: userKeys.me });
             }}
