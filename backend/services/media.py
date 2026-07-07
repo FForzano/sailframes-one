@@ -36,6 +36,19 @@ def create_file_upload(user_id: uuid.UUID, *,
     return {"file_id": file.id, "upload_url": url}
 
 
+def register_processed_image(ref: str) -> Optional[uuid.UUID]:
+    """Register an image a worker already wrote directly to storage (system
+    callbacks, e.g. session track thumbnails) — no presigned-upload/confirm
+    dance, since the object is already sitting at `ref`. Returns None (and
+    creates no row) if the object isn't actually there."""
+    if not get_blob_store().exists(ref):
+        return None
+    repos = get_repos()
+    image = repos.media.create_image(created_by=None)
+    repos.media.update_image(image.id, {"ref": ref, "status": "processed"})
+    return image.id
+
+
 def confirm_image(image_id: uuid.UUID) -> bool:
     """Flip to processed once the client reports the PUT done (and the object
     actually exists)."""

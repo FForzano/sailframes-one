@@ -229,6 +229,7 @@ export interface Session {
   started_at: string | null;
   ended_at: string | null;
   status: SessionStatus;
+  thumbnail: ImageRef | null;
 }
 
 export interface SessionStream {

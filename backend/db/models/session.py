@@ -202,6 +202,11 @@ class SessionAnalysisORM(Base):
     # `polar_points`) — same shape, kept alongside the other derived series
     # rather than as its own table since it isn't a relational/queryable datum.
     polar_target: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Small track-preview PNG rendered once by the worker from gps.json, so
+    # the sessions list can show it without re-rendering the track per view.
+    thumbnail_image_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

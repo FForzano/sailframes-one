@@ -14,6 +14,7 @@ from pydantic import AwareDatetime, BaseModel
 
 from ..auth import require_system
 from ..schemas import WindFetchModel
+from ..services import media
 from ..services.wind_providers import PROVIDERS
 from ._common import repos
 
@@ -123,7 +124,8 @@ def upsert_session_analysis(upload_id: uuid.UUID, payload: dict, request: Reques
                              points=payload.get("polar_points") or [])
     repos.sessions.upsert_maneuvers(sid, payload.get("maneuvers") or [])
     repos.sessions.upsert_legs(sid, payload.get("legs") or [])
-    repos.sessions.upsert_analysis(sid, {
+
+    analysis_fields = {
         "correlations": payload.get("correlations"),
         "violin": payload.get("violin"),
         "maneuver_summary": payload.get("maneuver_summary"),
@@ -132,7 +134,19 @@ def upsert_session_analysis(upload_id: uuid.UUID, payload: dict, request: Reques
         "vmg_series": payload.get("vmg_series"),
         "polar_target": payload.get("polar_target"),
         "computed_at": now,
-    })
+    }
+    # The worker already wrote the PNG straight to storage (it stays DB-blind)
+    # — the backend just registers the resulting `images` row. Re-analyze
+    # replaces it, so the old row (if any) is cleaned up rather than leaked.
+    thumbnail_ref = payload.get("thumbnail_ref")
+    if thumbnail_ref:
+        thumbnail_image_id = media.register_processed_image(thumbnail_ref)
+        if thumbnail_image_id is not None:
+            previous = repos.sessions.get_analysis(sid)
+            analysis_fields["thumbnail_image_id"] = thumbnail_image_id
+            if previous and previous.thumbnail_image_id:
+                media.delete_image(previous.thumbnail_image_id, deleted_by=None)
+    repos.sessions.upsert_analysis(sid, analysis_fields)
     return {"ok": True, "session_id": sid}
 
 

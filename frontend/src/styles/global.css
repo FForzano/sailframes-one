@@ -400,6 +400,17 @@ h1, h2, h3 {
 .sf-table tr:hover td {
   background: color-mix(in srgb, var(--sf-surface-2) 50%, transparent);
 }
+.sf-session-thumb {
+  display: block;
+  width: 56px;
+  height: 42px;
+  border-radius: 4px;
+  background: var(--sf-bg-2);
+  object-fit: contain;
+}
+.sf-session-thumb--empty {
+  border: 1px dashed var(--sf-border);
+}
 
 .sf-badge {
   display: inline-block;

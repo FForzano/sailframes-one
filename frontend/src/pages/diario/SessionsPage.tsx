@@ -44,6 +44,7 @@ export function SessionsPage() {
           <table className="sf-table">
             <thead>
               <tr>
+                <th></th>
                 <th>{t("sessions.start")}</th>
                 <th>{t("sessions.boat")}</th>
                 <th>{t("common.status")}</th>
@@ -52,6 +53,19 @@ export function SessionsPage() {
             <tbody>
               {sessions.data?.map((s) => (
                 <tr key={s.id}>
+                  <td>
+                    <Link to={`/diario/sessioni/${s.id}`}>
+                      {s.thumbnail ? (
+                        <img
+                          src={s.thumbnail.url}
+                          alt=""
+                          className="sf-session-thumb"
+                        />
+                      ) : (
+                        <span className="sf-session-thumb sf-session-thumb--empty" aria-hidden />
+                      )}
+                    </Link>
+                  </td>
                   <td>
                     <Link to={`/diario/sessioni/${s.id}`}>{fmtDateTime(s.started_at)}</Link>
                   </td>

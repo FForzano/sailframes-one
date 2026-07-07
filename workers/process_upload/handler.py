@@ -112,6 +112,7 @@ def process_analyze_prefix(bucket: str, prefix: str):
     from pathlib import Path
 
     from analyzer import analyze_session
+    from thumbnail import render_track_thumbnail
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -125,6 +126,21 @@ def process_analyze_prefix(bucket: str, prefix: str):
             (tmp_path / name).write_bytes(obj['Body'].read())
 
         result = analyze_session(tmp_path)
+
+        # Track-preview thumbnail for the sessions list — rendered once here
+        # (not on every list load) and stored next to the rest of the
+        # analysis output; the backend registers it as an `images` row.
+        gps_path = tmp_path / 'gps.json'
+        if gps_path.exists():
+            try:
+                png_bytes = render_track_thumbnail(json.loads(gps_path.read_text()))
+                if png_bytes:
+                    thumbnail_key = f"{prefix}thumbnail.png"
+                    s3.put_object(Bucket=bucket, Key=thumbnail_key, Body=png_bytes,
+                                  ContentType='image/png')
+                    result['thumbnail_ref'] = thumbnail_key
+            except Exception as e:
+                logger.warning(f"Failed to render track thumbnail for {prefix}: {e}")
 
     s3.put_object(
         Bucket=bucket, Key=f"{prefix}analysis.json",

@@ -53,6 +53,13 @@ def _is_crew_or_manager(session, user) -> bool:
             or repos.boats.is_member(session.boat_id, user.id, roles=["owner", "admin"]))
 
 
+def _with_thumbnail(session) -> dict:
+    d = session.to_dict()
+    analysis = repos.sessions.get_analysis(session.id)
+    d["thumbnail"] = media.image_payload(analysis.thumbnail_image_id if analysis else None)
+    return d
+
+
 @router.get("")
 def list_sessions(request: Request, activity_id: Optional[uuid.UUID] = None,
                   boat_id: Optional[uuid.UUID] = None, mine: bool = False):
@@ -61,9 +68,9 @@ def list_sessions(request: Request, activity_id: Optional[uuid.UUID] = None,
         if user is None:
             raise HTTPException(401, "Authentication required")
         # Boat membership / crew implies visibility — no extra filter needed.
-        return [s.to_dict() for s in repos.sessions.list_for_user(user.id)]
+        return [_with_thumbnail(s) for s in repos.sessions.list_for_user(user.id)]
     sessions = repos.sessions.list(activity_id=activity_id, boat_id=boat_id)
-    return [s.to_dict() for s in sessions if session_visible_to(s, user)]
+    return [_with_thumbnail(s) for s in sessions if session_visible_to(s, user)]
 
 
 @router.get("/{session_id}")
