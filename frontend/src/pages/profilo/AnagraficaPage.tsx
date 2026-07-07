@@ -22,6 +22,16 @@ export function AnagraficaPage() {
   const units = useUnits();
   const [form, setForm] = useState({ first_name: "", last_name: "", dob: "" });
 
+  const saveUnits = useMutation({
+    mutationFn: (unit_system: "nautical" | "metric") =>
+      usersService.update(user!.id, { unit_system }),
+    onSuccess: async (_, unit_system) => {
+      unitsStore.set(unit_system);
+      await queryClient.invalidateQueries({ queryKey: userKeys.me });
+    },
+    onError: () => notify(t("errors.generic"), "error"),
+  });
+
   useEffect(() => {
     if (me.data) {
       setForm({
@@ -106,14 +116,16 @@ export function AnagraficaPage() {
           <button
             type="button"
             className={`sf-btn sf-btn--sm ${units === "nautical" ? "sf-btn--primary" : "sf-btn--ghost"}`}
-            onClick={() => unitsStore.set("nautical")}
+            disabled={saveUnits.isPending}
+            onClick={() => saveUnits.mutate("nautical")}
           >
             {t("profile.unitsNautical")}
           </button>
           <button
             type="button"
             className={`sf-btn sf-btn--sm ${units === "metric" ? "sf-btn--primary" : "sf-btn--ghost"}`}
-            onClick={() => unitsStore.set("metric")}
+            disabled={saveUnits.isPending}
+            onClick={() => saveUnits.mutate("metric")}
           >
             {t("profile.unitsMetric")}
           </button>

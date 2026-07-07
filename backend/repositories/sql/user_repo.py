@@ -53,7 +53,7 @@ class SqlUserRepo:
 
     def update(self, user_id: uuid.UUID, changes: dict) -> Optional[UserORM]:
         allowed = ("first_name", "last_name", "dob", "profile_image_id",
-                   "terms_and_conditions", "password_hash")
+                   "terms_and_conditions", "password_hash", "unit_system")
         with self.Session() as s:
             orm = s.get(UserORM, user_id)
             if orm is None:

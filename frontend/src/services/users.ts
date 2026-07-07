@@ -10,8 +10,10 @@ export const userKeys = {
 export const usersService = {
   list: () => api.get<User[]>("/users"), // superadmin
   me: () => api.get<User & { profile_image: ImageRef | null }>("/users/me"),
-  update: (id: UUID, changes: Partial<Pick<User, "first_name" | "last_name" | "dob">>) =>
-    api.patch<User>(`/users/${id}`, changes),
+  update: (
+    id: UUID,
+    changes: Partial<Pick<User, "first_name" | "last_name" | "dob" | "unit_system">>,
+  ) => api.patch<User>(`/users/${id}`, changes),
   remove: (id: UUID) => api.del(`/users/${id}`),
   lookup: (email: string) =>
     api.get<UserSummary>(`/users/lookup?email=${encodeURIComponent(email)}`),

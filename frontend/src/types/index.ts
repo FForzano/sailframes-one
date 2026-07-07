@@ -38,6 +38,7 @@ export interface User {
   is_superadmin: boolean;
   status: string;
   profile_image_id: UUID | null;
+  unit_system: "nautical" | "metric";
   created_at?: string;
 }
 

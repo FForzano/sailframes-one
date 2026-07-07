@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -6,6 +7,7 @@ import { ToastViewport } from "@/components/ui/ToastViewport";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProfileMenu } from "@/components/layout/ProfileMenu";
 import { usersService, userKeys } from "@/services/users";
+import { unitsStore } from "@/stores/unitsStore";
 
 // The main navigation exposes ONLY the 3 macro-sections (plus Admin) as
 // inline links — sub-pages are reached from inside each section
@@ -25,6 +27,14 @@ export function AppShell() {
     queryFn: usersService.me,
     enabled: !!user,
   });
+
+  // The profile's unit_system is the source of truth; sync it into the
+  // local store once loaded so it follows the account across devices.
+  useEffect(() => {
+    if (me.data?.unit_system && me.data.unit_system !== unitsStore.get()) {
+      unitsStore.set(me.data.unit_system);
+    }
+  }, [me.data?.unit_system]);
 
   const sections = [
     { to: "/diario", label: t("nav.diario"), icon: "📔" },
