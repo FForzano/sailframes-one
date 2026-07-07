@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..auth import current_user, require_user, session_visible_to, verify_csrf
 from ..schemas import SessionCrewModel, SessionWriteModel
 from ..services import ingestion, media
-from ._common import blob, repos
+from ._common import blob, repos, with_user
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -53,13 +53,6 @@ def _is_crew_or_manager(session, user) -> bool:
             or repos.boats.is_member(session.boat_id, user.id, roles=["owner", "admin"]))
 
 
-def _with_thumbnail(session) -> dict:
-    d = session.to_dict()
-    analysis = repos.sessions.get_analysis(session.id)
-    d["thumbnail"] = media.image_payload(analysis.thumbnail_image_id if analysis else None)
-    return d
-
-
 @router.get("")
 def list_sessions(request: Request, activity_id: Optional[uuid.UUID] = None,
                   boat_id: Optional[uuid.UUID] = None, mine: bool = False):
@@ -68,9 +61,9 @@ def list_sessions(request: Request, activity_id: Optional[uuid.UUID] = None,
         if user is None:
             raise HTTPException(401, "Authentication required")
         # Boat membership / crew implies visibility — no extra filter needed.
-        return [_with_thumbnail(s) for s in repos.sessions.list_for_user(user.id)]
+        return [media.session_thumbnail_payload(s) for s in repos.sessions.list_for_user(user.id)]
     sessions = repos.sessions.list(activity_id=activity_id, boat_id=boat_id)
-    return [_with_thumbnail(s) for s in sessions if session_visible_to(s, user)]
+    return [media.session_thumbnail_payload(s) for s in sessions if session_visible_to(s, user)]
 
 
 @router.get("/{session_id}")
@@ -196,7 +189,7 @@ def get_analysis(session_id: uuid.UUID, request: Request):
 def list_crew(session_id: uuid.UUID, request: Request):
     user = current_user(request)
     _require_visible(session_id, user)
-    return [c.to_dict() for c in repos.sessions.list_crew(session_id)]
+    return [with_user(c.to_dict(), c.user_id) for c in repos.sessions.list_crew(session_id)]
 
 
 @router.post("/{session_id}/crew")

@@ -1,7 +1,7 @@
 """Session request DTOs: sessions + crew."""
 
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import AwareDatetime, BaseModel
 
@@ -15,4 +15,4 @@ class SessionWriteModel(BaseModel):
 
 class SessionCrewModel(BaseModel):
     user_id: uuid.UUID
-    sailing_role: str = "crew"  # skipper | crew | guest
+    sailing_role: Literal["skipper", "crew", "guest"] = "crew"

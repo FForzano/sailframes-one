@@ -24,7 +24,7 @@ export function SpeedChart({ tracks, vmg }: { tracks: Track[]; vmg?: VmgPoint[] 
   const { t } = useTranslation();
   const { tMin, tMax, cursor } = useTimeState();
   const [dragging, setDragging] = useState(false);
-  const [showVmg, setShowVmg] = useState(false);
+  const [showVmg, setShowVmg] = useState(true);
   const [optionsOpen, setOptionsOpen] = useState(false);
 
   // Merge every track's points (and the VMG series) onto a shared time axis;

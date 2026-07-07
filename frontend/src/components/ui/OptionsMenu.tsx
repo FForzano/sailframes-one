@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useClickOutside } from "@/hooks/useClickOutside";
 
 export interface OptionsMenuItem {
   label: string;
@@ -12,15 +13,7 @@ export interface OptionsMenuItem {
 export function OptionsMenu({ items }: { items: OptionsMenuItem[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
+  useClickOutside(ref, open, () => setOpen(false));
 
   return (
     <div className="sf-options" ref={ref}>

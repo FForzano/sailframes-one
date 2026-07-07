@@ -58,7 +58,6 @@
     "cancelRequest": "Annulla richiesta"
   },
   "diario": {
-    "sessions": "Sessioni",
     "activities": "Attività",
     "races": "Regate"
   },
@@ -179,6 +178,12 @@
     "noGps": "Nessun dato GPS per questa sessione",
     "crew": "Equipaggio",
     "addCrew": "Aggiungi equipaggio",
+    "sailingRole": "Ruolo",
+    "sailingRoles": {
+      "skipper": "Timoniere",
+      "crew": "Equipaggio",
+      "guest": "Ospite"
+    },
     "photos": "Foto",
     "videos": "Video",
     "processing": "Elaborazione…",
@@ -191,9 +196,10 @@
     "importDone": "Import elaborato",
     "importFailed": "Import fallito",
     "activity": "Attività",
+    "backToActivity": "Torna all'attività",
     "analysis": "Analisi",
     "polar": "Diagramma polare",
-    "vmg": "VMG nel tempo",
+    "vmg": "VMG",
     "legs": "Bordi (ordinati per VMG)",
     "maneuvers": "Manovre",
     "maneuverCompare": "Virate vs strambate",
@@ -229,10 +235,30 @@
       "private": "Privata"
     },
     "newActivity": "Nuova attività",
-    "sessions": "Sessioni",
+    "boats": "Barche",
+    "map": "Mappa",
+    "rename": "Rinomina",
+    "namePlaceholder": "Nome attività",
     "marks": "Boe",
     "addMark": "Aggiungi boa",
     "markRole": "Ruolo boa",
+    "markRoles": {
+      "pin": "Pin (boa di partenza)",
+      "rc": "Comitato di regata",
+      "windward": "Bolina",
+      "leeward": "Poppa",
+      "gate_port": "Cancello sinistra",
+      "gate_stbd": "Cancello destra",
+      "offset": "Offset",
+      "drill": "Esercitazione"
+    },
+    "timeOfDay": {
+      "morning": "Mattina",
+      "afternoon": "Pomeriggio",
+      "evening": "Sera",
+      "night": "Notte"
+    },
+    "noGps": "Nessun dato GPS per questa attività",
     "empty": "Nessuna attività.",
     "deleteConfirm": "Eliminare questa attività?",
     "mine": "Solo mie"
@@ -254,6 +280,7 @@
     "leaderboard": "Classifica live",
     "results": "Risultati",
     "speed": "Velocità (kn)",
+    "course": "Rotta",
     "play": "Play",
     "pause": "Pausa",
     "manage": "Gestione prova",

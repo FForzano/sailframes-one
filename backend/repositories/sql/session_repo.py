@@ -213,6 +213,18 @@ class SqlSessionRepo:
                 )
             ).first() is not None
 
+    def is_crew_in_activity(self, activity_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """Whether `user_id` crews any session belonging to `activity_id` —
+        used by `activity_visible_to` so crew can see the parent activity
+        (they can already see their own session via `session_visible_to`)."""
+        with self.Session() as s:
+            q = (
+                select(SessionCrewORM.id)
+                .join(SessionORM, SessionORM.id == SessionCrewORM.session_id)
+                .where(SessionORM.activity_id == activity_id, SessionCrewORM.user_id == user_id)
+            )
+            return s.scalars(q).first() is not None
+
     # --- photos / videos ---
 
     def list_photos(self, session_id: uuid.UUID) -> "list[SessionPhotoORM]":

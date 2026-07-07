@@ -81,6 +81,18 @@ def lambda_handler(event, context):
                 errors.append({'key': prefix, 'error': str(e)})
             continue
 
+        if 'activity_thumbnail' in record:
+            bucket = record.get('bucket', DATA_BUCKET)
+            activity_id = record['activity_thumbnail']['activity_id']
+            prefixes = record['activity_thumbnail']['prefixes']
+            logger.info(f"Rendering activity thumbnail for {activity_id} ({len(prefixes)} sessions)")
+            try:
+                process_activity_thumbnail(bucket, activity_id, prefixes)
+            except Exception as e:
+                logger.error(f"Failed to render activity thumbnail for {activity_id}: {e}", exc_info=True)
+                errors.append({'key': activity_id, 'error': str(e)})
+            continue
+
         bucket = record['s3']['bucket']['name']
         key = record['s3']['object']['key']
 
@@ -152,6 +164,35 @@ def process_analyze_prefix(bucket: str, prefix: str):
     upload_id = prefix.rstrip('/').split('/')[-1]
     _post_system(f"session-uploads/{upload_id}/analysis", result,
                  label=f"analysis for {upload_id}")
+
+
+def process_activity_thumbnail(bucket: str, activity_id: str, prefixes: list):
+    """Composite an overlay PNG — one track per session, different color each
+    — from the already-processed ``gps.json`` of every session in the
+    activity, and report it back to the backend.
+
+    Dispatched by the backend whenever a session's analysis finishes (see
+    ``backend/routers/system.py::upsert_session_analysis``), passing every
+    sibling session's most recently processed prefix — not just the one that
+    just finished, since the composite has to reflect the whole activity."""
+    from thumbnail import render_overlay_thumbnail
+
+    tracks = []
+    for prefix in prefixes:
+        try:
+            obj = s3.get_object(Bucket=bucket, Key=f"{prefix}gps.json")
+        except Exception:
+            continue  # that session isn't processed yet — skip it, not fatal
+        tracks.append(json.loads(obj['Body'].read()))
+
+    png_bytes = render_overlay_thumbnail(tracks)
+    if not png_bytes:
+        return
+
+    thumbnail_key = f"activities/{activity_id}/thumbnail.png"
+    s3.put_object(Bucket=bucket, Key=thumbnail_key, Body=png_bytes, ContentType='image/png')
+    _post_system(f"activities/{activity_id}/thumbnail", {"thumbnail_ref": thumbnail_key},
+                 label=f"activity thumbnail for {activity_id}")
 
 
 def extract_start_time_from_filename(filename: str) -> str:

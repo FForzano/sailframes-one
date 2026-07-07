@@ -124,7 +124,7 @@ def activity_visible_to(activity, user) -> bool:
 
     public → anyone (also anonymous); club → active club members (or scoped
     club.manage); group → group members; private → creator only. Superadmin
-    always sees everything."""
+    and any session's crew always see it too, regardless of visibility."""
     from ..repositories import get_repos
 
     if activity is None:
@@ -136,6 +136,8 @@ def activity_visible_to(activity, user) -> bool:
     if user.is_superadmin or activity.created_by == user.id:
         return True
     repos = get_repos()
+    if repos.sessions.is_crew_in_activity(activity.id, user.id):
+        return True
     if activity.visibility == "club" and activity.club_id is not None:
         return (repos.clubs.is_active_member(activity.club_id, user.id)
                 or user_has_permission(user, "club.manage", club_id=activity.club_id))

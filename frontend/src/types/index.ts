@@ -47,6 +47,7 @@ export interface UserSummary {
   first_name: string | null;
   last_name: string | null;
   email: string;
+  profile_image: ImageRef | null;
 }
 
 export interface Capabilities {
@@ -209,12 +210,25 @@ export interface Activity {
   created_by: UUID | null;
   started_at: string | null;
   ended_at: string | null;
+  thumbnail: ImageRef | null;
 }
+
+// Fixed set enforced by a DB check constraint (backend/db/models/activity.py
+// MARK_ROLES) — mirrored in frontend/src/utils/markRoles.ts for the dropdown.
+export type MarkRole =
+  | "pin"
+  | "rc"
+  | "windward"
+  | "leeward"
+  | "gate_port"
+  | "gate_stbd"
+  | "offset"
+  | "drill";
 
 export interface Mark {
   id: UUID;
   activity_id: UUID;
-  mark_role: string; // start_pin | start_rc | windward | leeward | gate | finish…
+  mark_role: MarkRole;
   lat: number;
   lng: number;
   set_at: string | null;
@@ -249,9 +263,11 @@ export interface SessionStats {
   computed_at: string | null;
 }
 
+export type SailingRole = "skipper" | "crew" | "guest";
+
 export interface SessionCrew {
   user_id: UUID;
-  sailing_role: string;
+  sailing_role: SailingRole;
   user?: UserSummary | null;
 }
 
@@ -421,18 +437,26 @@ export interface RaceResult {
   status: string; // finished | dnf | dns | dsq…
 }
 
+export type ActivitySessionData = Record<
+  UUID,
+  {
+    session_id: UUID;
+    boat: { id: UUID; name: string; sail_number: string | null } | null;
+    sensors: Record<string, GpsPoint[]>;
+  }
+>;
+
 /** `GET /races/{id}/data` — per-session windowed sensor data. */
 export interface RaceData {
   race_id: UUID;
   activity_id: UUID | null;
-  sessions: Record<
-    UUID,
-    {
-      session_id: UUID;
-      boat: { id: UUID; name: string; sail_number: string | null } | null;
-      sensors: Record<string, GpsPoint[]>;
-    }
-  >;
+  sessions: ActivitySessionData;
+}
+
+/** `GET /activities/{id}/data` — same shape as `RaceData` minus `race_id`. */
+export interface ActivityData {
+  activity_id: UUID;
+  sessions: ActivitySessionData;
 }
 
 // --- wind ----------------------------------------------------------------------------

@@ -235,11 +235,21 @@ group_id
 visibility          -- public|club|group|private
 started_at
 ended_at
+thumbnail_image_id   -- nullable, FK images.id
 
 nota: raggruppa N sessioni (barche) nello stesso intervallo di tempo a
 prescindere dal fatto che sia una regata. Uscita in solo → activity con una
 sola session; uscita di gruppo → activity con N sessions, type=training,
 nessuna regata collegata; regata tracciata → type=race + race_id valorizzato.
+
+nota su thumbnail_image_id: preview PNG con le tracce di tutte le sessioni
+dell'activity sovrapposte (colore diverso per barca) — è quella che il
+frontend mostra nella lista Attività unificata (vedi frontend-project.md).
+Rigenerata dal worker (stesso hook di sessions.thumbnail_image_id) ogni
+volta che una session dell'activity completa il processing, componendo i
+gps.json di tutte le sessioni già processate a quel momento — non solo
+quella appena arrivata, perché una session può finire di processare dopo
+un'altra e la thumbnail deve sempre riflettere l'insieme completo.
 
 ## sessions
 id
@@ -248,6 +258,8 @@ boat_id
 started_at
 ended_at
 status                 -- derivato/aggregato dagli status dei session_uploads collegati
+thumbnail_image_id    -- nullable, FK images.id — preview PNG della singola traccia,
+                          renderizzata dal worker da gps.json a fine processing
 
 nota: source_type/device_id/import_id/raw_ref NON stanno più qui — una session
 può avere più device che contribuiscono dati contemporaneamente (es. l'E1 sulla

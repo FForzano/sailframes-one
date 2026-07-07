@@ -12,12 +12,15 @@ import { MapView, type MapMark } from "@/components/race/MapView";
 import { Timeline } from "@/components/race/Timeline";
 import { SpeedChart } from "@/components/race/SpeedChart";
 import { PlaybackIndicators } from "@/components/session/PlaybackIndicators";
+import { MapLegsOptions } from "@/components/session/MapLegsOptions";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { OptionsMenu } from "@/components/ui/OptionsMenu";
 import { Modal } from "@/components/ui/Modal";
+import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Avatar } from "@/components/ui/Avatar";
 import { ImageUploader } from "@/components/common/ImageUploader";
 import { UserPicker } from "@/components/common/UserPicker";
 import { WindCard } from "@/components/common/WindCard";
@@ -25,8 +28,9 @@ import { SessionAnalysis } from "@/components/session/SessionAnalysis";
 import { useMediaUpload } from "@/hooks/useMediaUpload";
 import { fmtDateTime, fmtDistance, fmtDuration, fmtKnots, userLabel } from "@/utils/format";
 import { legSequence } from "@/utils/legSequence";
-import { sessionStatusBadge } from "./SessionsPage";
-import type { GpsPoint, UUID } from "@/types";
+import { sessionStatusBadge } from "@/utils/badges";
+import { SAILING_ROLES } from "@/utils/sailingRoles";
+import type { GpsPoint, SailingRole, UUID } from "@/types";
 import { useRef } from "react";
 
 function VideoUploader({ sessionId, onDone }: { sessionId: UUID; onDone: () => Promise<void> }) {
@@ -70,6 +74,7 @@ export function SessionDetailPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [addingCrew, setAddingCrew] = useState(false);
+  const [crewRole, setCrewRole] = useState<SailingRole>("crew");
   const [deleting, setDeleting] = useState(false);
   const [gps, setGps] = useState<GpsPoint[] | null>(null);
   const [showLegs, setShowLegs] = useState(true);
@@ -175,9 +180,11 @@ export function SessionDetailPage() {
   }, [analysis.data, showLegs, showManeuvers, t]);
 
   const addCrew = useMutation({
-    mutationFn: (userId: UUID) => sessionsService.addCrew(sessionId!, { user_id: userId }),
+    mutationFn: (userId: UUID) =>
+      sessionsService.addCrew(sessionId!, { user_id: userId, sailing_role: crewRole }),
     onSuccess: async () => {
       setAddingCrew(false);
+      setCrewRole("crew");
       await queryClient.invalidateQueries({ queryKey: sessionKeys.crew(sessionId!) });
     },
     onError: () => notify(t("errors.generic"), "error"),
@@ -188,7 +195,7 @@ export function SessionDetailPage() {
   });
   const removeSession = useMutation({
     mutationFn: () => sessionsService.remove(sessionId!),
-    onSuccess: () => navigate("/diario/sessioni"),
+    onSuccess: () => navigate(session.data ? `/diario/activities/${session.data.activity_id}` : "/diario/activities"),
     onError: () => notify(t("errors.generic"), "error"),
   });
   const reanalyze = useMutation({
@@ -209,6 +216,11 @@ export function SessionDetailPage() {
 
   return (
     <div className="sf-section__body">
+      {s.activity_id && (
+        <Link to={`/diario/activities/${s.activity_id}`} className="sf-backlink">
+          ← {t("sessions.backToActivity")}
+        </Link>
+      )}
       <Card
         title={
           <>
@@ -235,11 +247,7 @@ export function SessionDetailPage() {
           )
         }
       >
-        {s.activity_id && (
-          <p className="sf-muted">
-            <Link to={`/diario/activities/${s.activity_id}`}>{t("sessions.activity")}</Link>
-          </p>
-        )}
+        {null}
       </Card>
 
       <Card className="sf-card--flush">
@@ -255,34 +263,27 @@ export function SessionDetailPage() {
               tracks={tracks}
               marks={marks}
               className="sf-race__map sf-map--session"
+              vmg={analysis.data?.vmg_series}
               wind={
                 tracks[0]?.pts[0]
                   ? { lat: tracks[0].pts[0].lat, lng: tracks[0].pts[0].lon, at: s.started_at }
                   : undefined
               }
+              mapOptions={
+                !!(analysis.data?.legs.length || analysis.data?.maneuvers.length) && (
+                  <MapLegsOptions
+                    showLegs={showLegs}
+                    onShowLegsChange={setShowLegs}
+                    showManeuvers={showManeuvers}
+                    onShowManeuversChange={setShowManeuvers}
+                  />
+                )
+              }
+              controls={
+                <Timeline className="sf-timeline--overlay" stepMs={medianIntervalMs(tracks[0]) * 5} />
+              }
             />
             <div className="sf-section__body sf-card__pad">
-              {!!(analysis.data?.legs.length || analysis.data?.maneuvers.length) && (
-                <div className="sf-strip">
-                  <label className="sf-check">
-                    <input
-                      type="checkbox"
-                      checked={showLegs}
-                      onChange={(e) => setShowLegs(e.target.checked)}
-                    />
-                    <span>{t("sessions.showLegs")}</span>
-                  </label>
-                  <label className="sf-check">
-                    <input
-                      type="checkbox"
-                      checked={showManeuvers}
-                      onChange={(e) => setShowManeuvers(e.target.checked)}
-                    />
-                    <span>{t("sessions.showManeuvers")}</span>
-                  </label>
-                </div>
-              )}
-              <Timeline stepMs={medianIntervalMs(tracks[0]) * 5} />
               <SpeedChart tracks={tracks} vmg={analysis.data?.vmg_series} />
               <PlaybackIndicators track={tracks[0]} vmg={analysis.data?.vmg_series} />
             </div>
@@ -331,9 +332,18 @@ export function SessionDetailPage() {
           <div className="sf-strip">
             {crew.data.map((c) => (
               <div key={c.user_id} className="sf-strip__item sf-strip__item--muted">
-                <span>
-                  <strong>{userLabel(c.user)}</strong>{" "}
-                  <span className="sf-muted">{c.sailing_role}</span>
+                <span className="sf-crew-row">
+                  <Avatar
+                    profileImage={c.user?.profile_image}
+                    firstName={c.user?.first_name}
+                    lastName={c.user?.last_name}
+                    size="sm"
+                  />
+                  <span>
+                    <strong>{userLabel(c.user)}</strong>{" "}
+                    <span className="sf-muted">{c.user?.email}</span>{" "}
+                    <span className="sf-badge">{t(`sessions.sailingRoles.${c.sailing_role}`)}</span>
+                  </span>
                 </span>
                 {manager && (
                   <Button
@@ -409,7 +419,25 @@ export function SessionDetailPage() {
       <SessionAnalysis sessionId={sessionId} />
 
       {addingCrew && (
-        <Modal title={t("sessions.addCrew")} onClose={() => setAddingCrew(false)}>
+        <Modal
+          title={t("sessions.addCrew")}
+          onClose={() => {
+            setAddingCrew(false);
+            setCrewRole("crew");
+          }}
+        >
+          <Select
+            label={t("sessions.sailingRole")}
+            id="crew-role"
+            value={crewRole}
+            onChange={(e) => setCrewRole(e.target.value as SailingRole)}
+          >
+            {SAILING_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {t(`sessions.sailingRoles.${role}`)}
+              </option>
+            ))}
+          </Select>
           <UserPicker busy={addCrew.isPending} onPick={(u) => addCrew.mutate(u.id)} />
         </Modal>
       )}

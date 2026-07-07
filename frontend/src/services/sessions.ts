@@ -4,6 +4,7 @@ import type {
   FileUploadTicket,
   ImageRef,
   ImageUploadTicket,
+  SailingRole,
   Session,
   SessionAnalysis,
   SessionCrew,
@@ -36,7 +37,7 @@ export const sessionsService = {
   analysis: (id: UUID) => api.get<SessionAnalysis>(`/sessions/${id}/analysis`),
 
   crew: (id: UUID) => api.get<SessionCrew[]>(`/sessions/${id}/crew`),
-  addCrew: (id: UUID, body: { user_id: UUID; sailing_role?: string }) =>
+  addCrew: (id: UUID, body: { user_id: UUID; sailing_role?: SailingRole }) =>
     api.post(`/sessions/${id}/crew`, body),
   removeCrew: (id: UUID, userId: UUID) => api.del(`/sessions/${id}/crew/${userId}`),
 

@@ -7,6 +7,7 @@ the club for race activities.
 """
 
 import uuid
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -19,10 +20,18 @@ from ..auth import (
     user_has_permission,
     verify_csrf,
 )
+from ..db.models.activity import MARK_ROLES
 from ..schemas import ActivityWriteModel, MarkWriteModel
-from ._common import repos
+from ..services import ingestion, media
+from ._common import activity_sensor_data, repos
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
+
+
+def _with_thumbnail(activity) -> dict:
+    d = activity.to_dict()
+    d["thumbnail"] = media.image_payload(activity.thumbnail_image_id)
+    return d
 
 
 def _require_activity(activity_id: uuid.UUID):
@@ -60,12 +69,12 @@ def list_activities(request: Request, type: Optional[str] = None,
         club_id=club_id, group_id=group_id, type=type,
         created_by=user.id if mine else None,
     )
-    return [a.to_dict() for a in activities if activity_visible_to(a, user)]
+    return [_with_thumbnail(a) for a in activities if activity_visible_to(a, user)]
 
 
 @router.get("/{activity_id}")
 def get_activity(activity_id: uuid.UUID, request: Request):
-    return _require_visible(activity_id, current_user(request)).to_dict()
+    return _with_thumbnail(_require_visible(activity_id, current_user(request)))
 
 
 @router.post("")
@@ -100,11 +109,42 @@ def delete_activity(activity_id: uuid.UUID, request: Request):
     return {"ok": True}
 
 
+@router.post("/{activity_id}/regenerate-thumbnail")
+def regenerate_thumbnail(activity_id: uuid.UUID, request: Request):
+    """Force a rebuild of the activity's overlay thumbnail, composited from
+    every session's most recently processed track — for when the automatic
+    post-analysis trigger (``system.py::upsert_session_analysis``) missed it,
+    or a session was added/reprocessed after the last composite."""
+    verify_csrf(request)
+    user = require_user(request)
+    activity = _require_activity(activity_id)
+    if not can_edit_activity(activity, user):
+        raise HTTPException(403, "Not allowed")
+    prefixes = ingestion.activity_thumbnail_prefixes(activity_id)
+    if not prefixes:
+        raise HTTPException(404, "No processed sessions to render a thumbnail from")
+    ingestion.dispatch_activity_thumbnail(ingestion.bucket_name(), activity_id, prefixes)
+    return {"ok": True}
+
+
 @router.get("/{activity_id}/sessions")
 def list_activity_sessions(activity_id: uuid.UUID, request: Request):
     user = current_user(request)
     _require_visible(activity_id, user)
-    return [s.to_dict() for s in repos.sessions.list(activity_id=activity_id)]
+    return [media.session_thumbnail_payload(s) for s in repos.sessions.list(activity_id=activity_id)]
+
+
+@router.get("/{activity_id}/data")
+def get_activity_data(activity_id: uuid.UUID, request: Request,
+                      sensors: str = "gps", pad_start: int = 0, pad_end: int = 0):
+    """Time-aligned sensor data of every session in the activity, keyed by
+    session id with boat info embedded — same shape as ``GET
+    /races/{id}/data`` minus ``race_id``, for the activity's own overlay map."""
+    activity = _require_visible(activity_id, current_user(request))
+    start = activity.started_at - timedelta(seconds=pad_start) if activity.started_at else None
+    end = activity.ended_at + timedelta(seconds=pad_end) if activity.ended_at else None
+    out = activity_sensor_data(activity.id, sensors, start, end)
+    return {"activity_id": activity_id, "sessions": out}
 
 
 # --- marks ---------------------------------------------------------------------
@@ -125,6 +165,8 @@ def add_mark(activity_id: uuid.UUID, body: MarkWriteModel, request: Request):
         raise HTTPException(403, "Not allowed")
     if body.mark_role is None or body.lat is None or body.lng is None:
         raise HTTPException(422, "mark_role, lat and lng are required")
+    if body.mark_role not in MARK_ROLES:
+        raise HTTPException(422, f"mark_role must be one of {MARK_ROLES}")
     return repos.activities.add_mark(activity_id, body.model_dump(exclude_unset=True)).to_dict()
 
 
@@ -139,6 +181,8 @@ def update_mark(activity_id: uuid.UUID, mark_id: uuid.UUID,
     mark = repos.activities.get_mark(mark_id)
     if mark is None or mark.activity_id != activity_id:
         raise HTTPException(404, "Mark not found")
+    if body.mark_role is not None and body.mark_role not in MARK_ROLES:
+        raise HTTPException(422, f"mark_role must be one of {MARK_ROLES}")
     return repos.activities.update_mark(mark_id, body.model_dump(exclude_unset=True)).to_dict()
 
 

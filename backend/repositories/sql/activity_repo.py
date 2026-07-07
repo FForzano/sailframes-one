@@ -6,6 +6,7 @@ trainings get buoys too (see docs/er-project.md).
 """
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -13,7 +14,7 @@ from sqlalchemy import select
 from ...db.models import ActivityORM, MarkORM
 
 _FIELDS = ("name", "type", "club_id", "race_id", "created_by", "group_id",
-           "visibility", "started_at", "ended_at")
+           "visibility", "started_at", "ended_at", "thumbnail_image_id")
 _MARK_FIELDS = ("mark_role", "lat", "lng", "set_at")
 
 
@@ -78,6 +79,22 @@ class SqlActivityRepo:
             s.delete(orm)
             s.commit()
             return True
+
+    def extend_window(self, activity_id: uuid.UUID, started_at: Optional[datetime],
+                      ended_at: Optional[datetime]) -> None:
+        """Widen the activity's own bounds monotonically (min start, max end)
+        — keeps it in sync with every session ever attached to it, since
+        sessions extend their own window independently (see
+        ``services.ingestion.find_or_create_session``)."""
+        with self.Session() as s:
+            orm = s.get(ActivityORM, activity_id)
+            if orm is None:
+                return
+            if started_at is not None and (orm.started_at is None or started_at < orm.started_at):
+                orm.started_at = started_at
+            if ended_at is not None and (orm.ended_at is None or ended_at > orm.ended_at):
+                orm.ended_at = ended_at
+            s.commit()
 
     # --- marks ---
 

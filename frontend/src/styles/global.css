@@ -287,12 +287,42 @@ h1, h2, h3 {
   display: flex;
   gap: 0.5rem;
 }
+/* Click-to-rename title text (ActivityDetailPage) — a dashed underline hints
+   it's editable; the input that replaces it on click matches the title size. */
+.sf-card__title--editable {
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+}
+.sf-card__title--editable:hover {
+  border-bottom-color: var(--sf-muted);
+}
+.sf-card__title-input {
+  font: inherit;
+  font-size: 1.05rem;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  color: var(--sf-text);
+}
+/* A <select> styled to look like the badges around it (visibility editor). */
+.sf-badge--select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  cursor: pointer;
+}
 /* Zero side padding so a full-bleed map/media fills the card's width; content
    that still needs the normal inset (controls below the map, etc.) wraps
    itself in `.sf-card__pad`. */
 .sf-card--flush {
   padding-left: 0;
   padding-right: 0;
+}
+/* ...but keep the head's own inset — only the body should go edge-to-edge. */
+.sf-card--flush .sf-card__head {
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
 }
 .sf-card__pad {
   padding: 0 1.25rem;
@@ -412,6 +442,55 @@ h1, h2, h3 {
   border: 1px dashed var(--sf-border);
 }
 
+.sf-backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  color: var(--sf-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.sf-backlink:hover {
+  color: var(--sf-primary);
+}
+
+.sf-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.sf-activity-card {
+  display: block;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+.sf-activity-card:hover {
+  border-color: var(--sf-primary);
+}
+.sf-activity-card__thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  background: var(--sf-bg-2);
+  object-fit: contain;
+}
+.sf-activity-card__thumb--empty {
+  border-bottom: 1px dashed var(--sf-border);
+}
+.sf-activity-card__body {
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .sf-badge {
   display: inline-block;
   padding: 0.15rem 0.55rem;
@@ -466,6 +545,11 @@ h1, h2, h3 {
 .sf-strip__item--muted {
   background: var(--sf-surface);
   color: var(--sf-muted);
+}
+.sf-crew-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 .sf-strip__actions {
   display: flex;
@@ -669,6 +753,10 @@ h1, h2, h3 {
   border: 1px solid var(--sf-border);
   overflow: hidden;
   position: relative;
+  /* Contain Leaflet's internal z-index stack (controls, panes, the wind
+     badge below) so it can never render above page chrome (nav, modals,
+     dropdowns) that sits outside this element. */
+  isolation: isolate;
 }
 .sf-race__map .leaflet-container {
   height: 100%;
@@ -702,6 +790,78 @@ h1, h2, h3 {
 }
 .sf-race__map .leaflet-control-zoom-in {
   border-right: 1px solid var(--sf-border);
+}
+
+/* Recenter control: pans/fits the map back to the current playback position.
+   Box-model centering (not line-height) + an inline SVG rather than a glyph
+   — text/emoji glyphs are rarely optically centered in their em-box. */
+.sf-map__recenter {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  margin-top: 6px;
+}
+
+/* Map overlays: options popover (top-right) and playback transport (bottom-center). */
+.sf-map__options {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+}
+.sf-map__controls {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
+.sf-timeline--overlay {
+  background: rgba(20, 50, 77, 0.85);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+/* Draggable position marker — a colored dot matching the track's color,
+   dragged along the track to scrub playback (see MapView.tsx). */
+.sf-posmarker span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #1a1a1a;
+  box-sizing: border-box;
+}
+
+/* Click-track popup: a plain semi-transparent rounded rectangle instead of
+   Leaflet's default speech-bubble tail/shadow — dismissed by clicking
+   elsewhere on the map (Leaflet's default popup behavior), no close button. */
+.sf-map-popup .leaflet-popup-content-wrapper {
+  background: rgba(10, 24, 38, 0.85);
+  color: #fff;
+  border-radius: var(--sf-radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.sf-map-popup .leaflet-popup-content {
+  margin: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.sf-map-popup .leaflet-popup-tip-container {
+  display: none;
 }
 
 /* Wind indicator overlay: direction + speed for the session's region. */

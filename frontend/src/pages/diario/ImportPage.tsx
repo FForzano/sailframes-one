@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { boatsService, boatKeys } from "@/services/boats";
 import { importsService } from "@/services/imports";
+import { sessionsService } from "@/services/sessions";
 import { putToUploadUrl } from "@/api/media";
 import { ApiError } from "@/api/client";
 import { Card } from "@/components/ui/Card";
@@ -25,6 +26,13 @@ export function ImportPage() {
   const [error, setError] = useState<string | null>(null);
 
   const boats = useQuery({ queryKey: boatKeys.mine, queryFn: () => boatsService.list(true) });
+  // Only the session's own detail route needs the parent activity — fetched
+  // just to build that link once the import lands, not shown anywhere else.
+  const importedSession = useQuery({
+    queryKey: ["sessions", row?.session_id, "for-import-redirect"],
+    queryFn: () => sessionsService.get(row!.session_id!),
+    enabled: phase === "done" && !!row?.session_id,
+  });
 
   const start = async () => {
     const file = fileRef.current?.files?.[0];
@@ -111,11 +119,16 @@ export function ImportPage() {
           <p className="sf-badge sf-badge--success">{t("sessions.importDone")}</p>
           <div className="sf-form__actions">
             <Button
+              disabled={!!row?.session_id && !importedSession.data}
               onClick={() =>
-                navigate(row?.session_id ? `/diario/sessioni/${row.session_id}` : "/diario/sessioni")
+                navigate(
+                  importedSession.data
+                    ? `/diario/activities/${importedSession.data.activity_id}/barche/${importedSession.data.id}`
+                    : "/diario/activities",
+                )
               }
             >
-              {t("diario.sessions")}
+              {t("activities.title")}
             </Button>
           </div>
         </>

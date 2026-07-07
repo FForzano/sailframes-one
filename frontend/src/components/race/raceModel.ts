@@ -1,4 +1,4 @@
-import type { GpsPoint, RaceData } from "@/types";
+import type { ActivitySessionData, GpsPoint, VmgPoint } from "@/types";
 
 // A replay track: parsed points (ms epoch) + a stable display color.
 export interface TrackPoint {
@@ -6,6 +6,8 @@ export interface TrackPoint {
   lat: number;
   lon: number;
   sog: number;
+  /** Course over ground, degrees — null when the fix didn't carry one. */
+  cog: number | null;
 }
 export interface Track {
   id: string;
@@ -138,13 +140,15 @@ export function buildTrack(id: string, name: string, points: GpsPoint[], color: 
       lat: p.lat,
       lon: p.lon,
       sog: p.speed_kn ?? 0,
+      cog: p.course ?? null,
     }))
     .sort((a, b) => a.ms - b.ms);
   return { id, name, color, pts };
 }
 
-/** Tracks from `GET /races/{id}/data` — sessions keyed by id, boat embedded. */
-export function buildTracks(data: RaceData): Track[] {
+/** Tracks from `GET /races/{id}/data` or `GET /activities/{id}/data` —
+ * sessions keyed by id, boat embedded. */
+export function buildTracks(data: { sessions: ActivitySessionData }): Track[] {
   const tracks: Track[] = [];
   let i = 0;
   for (const [sessionId, entry] of Object.entries(data.sessions ?? {})) {
@@ -178,6 +182,21 @@ export function indexAt(track: Track, ms: number): number {
     else hi = mid - 1;
   }
   return lo;
+}
+
+// Nearest VMG sample at-or-before `ms` — `vmg_series` is its own time axis
+// (epoch seconds, not necessarily the same cadence as GPS fixes), so this
+// mirrors `indexAt`'s binary search rather than joining by index.
+export function vmgAt(vmg: VmgPoint[] | null | undefined, ms: number): VmgPoint | null {
+  if (!vmg?.length || ms < vmg[0].timestamp * 1000) return null;
+  let lo = 0;
+  let hi = vmg.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (vmg[mid].timestamp * 1000 <= ms) lo = mid;
+    else hi = mid - 1;
+  }
+  return vmg[lo];
 }
 
 // Earth radius in meters, for the haversine distance used by the cumulative
