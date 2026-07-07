@@ -4,15 +4,16 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { ToastViewport } from "@/components/ui/ToastViewport";
 import { Avatar } from "@/components/ui/Avatar";
+import { ProfileMenu } from "@/components/layout/ProfileMenu";
 import { usersService, userKeys } from "@/services/users";
 
-// The main navigation exposes ONLY the 3 macro-sections (plus Profilo/Admin
-// utilities) — sub-pages are reached from inside each section
-// (docs/frontend-project.md, "Navigazione principale").
-//
-// Desktop: links inline in the top navbar. Mobile: the links move to a fixed
-// bottom action bar (thumb-reachable). Logout lives only in Profilo on both
-// layouts (see ProfiloLayout.tsx).
+// The main navigation exposes ONLY the 3 macro-sections (plus Admin) as
+// inline links — sub-pages are reached from inside each section
+// (docs/frontend-project.md, "Navigazione principale"). Profilo isn't a
+// nav link: on desktop it's the avatar dropdown (ProfileMenu), on mobile
+// it's the avatar entry in the bottom action bar. Logout lives in the
+// ProfileMenu dropdown on desktop and at the bottom of the Profilo page on
+// mobile (see ProfiloLayout.tsx).
 export function AppShell() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -33,6 +34,7 @@ export function AppShell() {
       ? [{ to: "/admin", label: t("nav.admin"), icon: "⚙️" }]
       : []),
   ];
+  const navLinkSections = sections.filter((s) => s.to !== "/profilo");
 
   return (
     <div className="sf-shell">
@@ -41,7 +43,7 @@ export function AppShell() {
           SailFrames
         </NavLink>
         <nav className="sf-navbar__links" aria-label="Main">
-          {sections.map((s) => (
+          {navLinkSections.map((s) => (
             <NavLink
               key={s.to}
               to={s.to}
@@ -52,14 +54,12 @@ export function AppShell() {
           ))}
         </nav>
         <div className="sf-navbar__spacer" />
-        <div className="sf-navbar__user" title={user?.email}>
-          <Avatar
-            size="sm"
-            profileImage={me.data?.profile_image ?? null}
-            firstName={user?.first_name}
-            lastName={user?.last_name}
-          />
-        </div>
+        <ProfileMenu
+          profileImage={me.data?.profile_image ?? null}
+          firstName={user?.first_name}
+          lastName={user?.last_name}
+          email={user?.email}
+        />
       </header>
       <main className="sf-main">
         <Outlet />
@@ -67,9 +67,19 @@ export function AppShell() {
       <nav className="sf-actionbar" aria-label="Main">
         {sections.map((s) => (
           <NavLink key={s.to} to={s.to} className="sf-actionbar__item">
-            <span className="sf-actionbar__icon" aria-hidden>
-              {s.icon}
-            </span>
+            {s.to === "/profilo" ? (
+              <Avatar
+                size="sm"
+                className="sf-actionbar__avatar"
+                profileImage={me.data?.profile_image ?? null}
+                firstName={user?.first_name}
+                lastName={user?.last_name}
+              />
+            ) : (
+              <span className="sf-actionbar__icon" aria-hidden>
+                {s.icon}
+              </span>
+            )}
             <span className="sf-actionbar__label">{s.label}</span>
           </NavLink>
         ))}

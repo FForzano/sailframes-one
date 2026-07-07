@@ -49,9 +49,9 @@ export function MapView({
     if (!elRef.current) return;
     const map = L.map(elRef.current, { zoomControl: false, preferCanvas: true });
     L.control.zoom({ position: "bottomright" }).addTo(map);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: "© OpenStreetMap © CARTO",
-      maxZoom: 20,
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors",
+      maxZoom: 19,
     }).addTo(map);
     mapRef.current = map;
 
@@ -83,7 +83,7 @@ export function MapView({
       bounds.push(...latlngs);
       const m = L.circleMarker(latlngs[0], {
         radius: 6,
-        color: "#fff",
+        color: "#1a1a1a",
         weight: 2,
         fillColor: tr.color,
         fillOpacity: 1,

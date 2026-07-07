@@ -9,8 +9,17 @@ export interface SectionTab {
 
 /** Macro-section layout: sub-page tabs (real routes, not UI tabs) + outlet.
  * `header` renders above the tabs on every sub-page of the section (used by
- * Gruppi for the shared invites/discovery strip). */
-export function SectionLayout({ tabs, header }: { tabs: SectionTab[]; header?: ReactNode }) {
+ * Gruppi for the shared invites/discovery strip). `footer` renders below the
+ * outlet (used by Profilo for the mobile-only logout button). */
+export function SectionLayout({
+  tabs,
+  header,
+  footer,
+}: {
+  tabs: SectionTab[];
+  header?: ReactNode;
+  footer?: ReactNode;
+}) {
   return (
     <div className="sf-section">
       {header}
@@ -24,6 +33,7 @@ export function SectionLayout({ tabs, header }: { tabs: SectionTab[]; header?: R
       <div className="sf-section__body">
         <Outlet />
       </div>
+      {footer}
     </div>
   );
 }

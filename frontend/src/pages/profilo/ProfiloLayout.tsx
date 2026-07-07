@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 
 export function ProfiloLayout() {
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const navigate = useNavigate();
 
   const onLogout = async () => {
@@ -16,22 +16,21 @@ export function ProfiloLayout() {
 
   return (
     <SectionLayout
-      header={
-        // Logout lives only here (both mobile and desktop) — the navbar no
-        // longer has its own logout button.
-        <div className="sf-strip__item sf-strip__item--muted">
-          <span className="sf-muted">{user?.email}</span>
-          <Button variant="ghost" className="sf-btn--sm" onClick={onLogout}>
-            {t("auth.logout")}
-          </Button>
-        </div>
-      }
       tabs={[
         { to: "/profilo/anagrafica", label: t("profile.details") },
         { to: "/profilo/password", label: t("profile.password") },
         { to: "/profilo/barche", label: t("profile.boats") },
         { to: "/profilo/devices", label: t("profile.devices") },
       ]}
+      footer={
+        // Desktop logs out from the navbar avatar dropdown; mobile has no
+        // such dropdown, so it keeps a logout button at the page bottom.
+        <div className="sf-mobile-only sf-profilo__logout">
+          <Button variant="danger" className="sf-btn--sm" onClick={onLogout}>
+            {t("auth.logout")}
+          </Button>
+        </div>
+      }
     />
   );
 }

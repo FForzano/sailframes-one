@@ -63,6 +63,7 @@
     "races": "Races"
   },
   "profile": {
+    "myProfile": "My profile",
     "details": "Details",
     "password": "Password",
     "boats": "Boats",
