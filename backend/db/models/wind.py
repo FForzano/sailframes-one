@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, UUIDPKMixin, enum_check
@@ -52,6 +52,12 @@ class WindObservationORM(UUIDPKMixin, Base):
     twd_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     tws_kts: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     gust_kts: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # True for Open-Meteo forecast-endpoint rows (provisional); false for
+    # archive/reanalysis rows and for every non-Open-Meteo provider (real
+    # sensors are never "forecast"). Lets the reconciliation job find rows
+    # to overwrite once the archive has caught up — see
+    # ``services/wind_lookup.reconcile_forecasts``.
+    is_forecast: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

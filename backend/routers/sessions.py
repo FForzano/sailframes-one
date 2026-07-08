@@ -139,6 +139,25 @@ def reanalyze_session(session_id: uuid.UUID, request: Request):
     return {"ok": True, "session_upload_id": upload.id}
 
 
+@router.post("/{session_id}/wind/refresh")
+def refresh_session_wind(session_id: uuid.UUID, request: Request):
+    """Recompute the session's ``wind_cache.json`` (multi-waypoint sampling,
+    tighter Open-Meteo grid — see ``services/ingestion.refresh_wind_cache``)
+    and re-run analysis. For sessions ingested before those improvements
+    landed; new sessions get them automatically. Same edit-level permission
+    as PATCH/reanalyze."""
+    verify_csrf(request)
+    user = require_user(request)
+    session = _require_session(session_id)
+    if not _can_edit(session, user):
+        raise HTTPException(403, "Not allowed")
+    try:
+        ingestion.refresh_wind_cache(session_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return {"ok": True}
+
+
 # --- streams / stats / analysis --------------------------------------------------
 
 @router.get("/{session_id}/streams")

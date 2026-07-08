@@ -203,6 +203,11 @@ export function SessionDetailPage() {
     onSuccess: () => notify(t("sessions.reanalyzeQueued"), "success"),
     onError: () => notify(t("errors.generic"), "error"),
   });
+  const refreshWind = useMutation({
+    mutationFn: () => sessionsService.refreshWind(sessionId!),
+    onSuccess: () => notify(t("sessions.refreshWindQueued"), "success"),
+    onError: () => notify(t("errors.generic"), "error"),
+  });
   const removePhoto = useMutation({
     mutationFn: (imageId: UUID) => sessionsService.removePhoto(sessionId!, imageId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionKeys.photos(sessionId!) }),
@@ -236,6 +241,11 @@ export function SessionDetailPage() {
                   label: t("sessions.reanalyze"),
                   onClick: () => reanalyze.mutate(),
                   disabled: reanalyze.isPending,
+                },
+                {
+                  label: t("sessions.refreshWind"),
+                  onClick: () => refreshWind.mutate(),
+                  disabled: refreshWind.isPending,
                 },
                 {
                   label: t("common.delete"),

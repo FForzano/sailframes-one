@@ -9,13 +9,13 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ...db.models import WindObservationORM, WindStationORM
 
 _STATION_FIELDS = ("provider", "external_station_id", "name", "station_type", "lat", "lng")
-_OBS_FIELDS = ("observed_at", "twd_deg", "tws_kts", "gust_kts")
+_OBS_FIELDS = ("observed_at", "twd_deg", "tws_kts", "gust_kts", "is_forecast")
 
 
 class SqlWindRepo:
@@ -81,7 +81,8 @@ class SqlWindRepo:
         if not rows:
             return 0
         values = [
-            {"wind_station_id": station_id, **{k: r.get(k) for k in _OBS_FIELDS}}
+            {"wind_station_id": station_id,
+             **{k: r.get(k, False) if k == "is_forecast" else r.get(k) for k in _OBS_FIELDS}}
             for r in rows
         ]
         with self.Session() as s:
@@ -94,6 +95,63 @@ class SqlWindRepo:
             inserted = len(s.execute(stmt).fetchall())
             s.commit()
             return inserted
+
+    def reconcile_observations(self, station_id: uuid.UUID, rows: "list[dict]") -> int:
+        """Overwrite existing (station, observed_at) rows with settled values
+        — unlike ``upsert_observations`` (which skips duplicates so the
+        periodic fetch stays cheap), this is for the reconciliation job
+        replacing provisional forecast readings with the archive's reanalysis
+        once it's had time to catch up. Returns the number of rows written."""
+        if not rows:
+            return 0
+        values = [
+            {"wind_station_id": station_id,
+             **{k: r.get(k, False) if k == "is_forecast" else r.get(k) for k in _OBS_FIELDS}}
+            for r in rows
+        ]
+        with self.Session() as s:
+            stmt = pg_insert(WindObservationORM).values(values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["wind_station_id", "observed_at"],
+                set_={
+                    "twd_deg": stmt.excluded.twd_deg,
+                    "tws_kts": stmt.excluded.tws_kts,
+                    "gust_kts": stmt.excluded.gust_kts,
+                    "is_forecast": stmt.excluded.is_forecast,
+                    "fetched_at": func.now(),
+                },
+            )
+            s.execute(stmt)
+            s.commit()
+            return len(values)
+
+    def stations_with_stale_forecasts(self, cutoff: datetime) -> "list[uuid.UUID]":
+        """Distinct station ids that still have forecast-sourced rows older
+        than ``cutoff`` — candidates for the reconciliation job."""
+        with self.Session() as s:
+            q = (
+                select(WindObservationORM.wind_station_id)
+                .where(WindObservationORM.is_forecast.is_(True),
+                       WindObservationORM.observed_at < cutoff)
+                .distinct()
+            )
+            return list(s.scalars(q).all())
+
+    def stale_forecast_range(self, station_id: uuid.UUID,
+                             cutoff: datetime) -> "Optional[tuple[datetime, datetime]]":
+        """``(min, max) observed_at`` of a station's not-yet-reconciled
+        forecast rows older than ``cutoff``, or ``None`` if there are none —
+        lets the reconciliation job fetch one archive range per station
+        instead of one call per stale hour."""
+        with self.Session() as s:
+            lo, hi = s.execute(
+                select(func.min(WindObservationORM.observed_at),
+                      func.max(WindObservationORM.observed_at))
+                .where(WindObservationORM.wind_station_id == station_id,
+                      WindObservationORM.is_forecast.is_(True),
+                      WindObservationORM.observed_at < cutoff)
+            ).one()
+            return None if lo is None else (lo, hi)
 
     def list_observations(self, station_id: uuid.UUID, *,
                           start: Optional[datetime] = None,

@@ -155,25 +155,100 @@ def dispatch_activity_thumbnail(bucket: str, activity_id: uuid.UUID, prefixes: l
         logger.warning("activity thumbnail dispatch failed for %s", activity_id, exc_info=True)
 
 
-def write_wind_cache(prefix: str, lat: float, lng: float,
-                     start: datetime, end: datetime) -> None:
-    """Pre-fetch the region's wind for a session's time window and drop it in
-    the processed prefix as ``wind_cache.json``, so the (DB-blind) worker can
-    use it as the true-wind source when the session has no onboard wind sensor.
+WIND_WAYPOINTS_MAX = 6
 
-    Best-effort: resolving the station triggers a historical backfill when the
-    cache is empty for an old date (see ``wind_lookup.observations_in_window``).
-    A failure here just means the worker falls back to GPS-estimated wind."""
-    try:
-        _, rows = wind_lookup.observations_in_window(lat, lng, start, end)
+
+def sample_wind_waypoints(points: "list[dict]", max_points: int = WIND_WAYPOINTS_MAX
+                          ) -> "list[tuple[float, float]]":
+    """Evenly-spaced ``(lat, lon)`` samples across a track (always including
+    the first and last point), so a session that moves several km resolves
+    to more than one wind station instead of just the start point — see
+    ``write_wind_cache``."""
+    if not points:
+        return []
+    if len(points) <= max_points:
+        idxs = range(len(points))
+    else:
+        step = (len(points) - 1) / (max_points - 1)
+        idxs = sorted({round(i * step) for i in range(max_points)})
+    return [(points[i]["lat"], points[i]["lon"]) for i in idxs]
+
+
+def write_wind_cache(prefix: str, waypoints: "list[tuple[float, float]]",
+                     start: datetime, end: datetime) -> None:
+    """Pre-fetch the region's wind for a session's time window, sampled at
+    several points along the track (``waypoints`` — see
+    ``sample_wind_waypoints``) rather than just the start, and drop it in the
+    processed prefix as ``wind_cache.json`` so the (DB-blind) worker can use
+    it as the true-wind source when the session has no onboard wind sensor.
+    Each cached row carries its source station's ``station_lat``/
+    ``station_lng`` so the worker can pick the spatially nearest one per GPS
+    point instead of assuming a single location for the whole session.
+
+    Best-effort per waypoint: resolving a station triggers a historical
+    backfill when the cache is empty for an old date (see
+    ``wind_lookup.observations_in_window``). A waypoint that fails to resolve
+    just contributes nothing — the worker falls back to GPS-estimated wind
+    only if every waypoint fails."""
+    payload: list[dict] = []
+    seen_station_ids: set = set()
+    for lat, lng in waypoints:
+        try:
+            station, rows = wind_lookup.observations_in_window(lat, lng, start, end)
+        except Exception:
+            logger.warning("wind cache pre-fetch failed for waypoint (%s, %s) prefix %s",
+                           lat, lng, prefix, exc_info=True)
+            continue
+        if station.id in seen_station_ids:
+            continue  # nearby waypoints resolve to the same station — no need to repeat it
+        seen_station_ids.add(station.id)
         # Only the fields the worker needs, as JSON primitives — the blob store's
         # put_json uses plain json.dumps (no UUID/datetime encoder like FastAPI).
-        payload = [{
+        payload.extend({
+            "station_lat": station.lat,
+            "station_lng": station.lng,
             "observed_at": o.observed_at.isoformat(),
             "twd_deg": o.twd_deg,
             "tws_kts": o.tws_kts,
             "gust_kts": o.gust_kts,
-        } for o in rows]
-        get_blob_store().put_json(f"{prefix}wind_cache.json", payload)
+        } for o in rows)
+    if payload:
+        try:
+            get_blob_store().put_json(f"{prefix}wind_cache.json", payload)
+        except Exception:
+            logger.warning("wind cache write failed for prefix %s", prefix, exc_info=True)
+
+
+def refresh_wind_cache(session_id: uuid.UUID) -> str:
+    """Recompute ``wind_cache.json`` for a session's most recently uploaded
+    processed prefix, sampling waypoints from its already-stored
+    ``gps.json`` — for a session ingested before the multi-waypoint
+    sampling / tighter Open-Meteo grid (``GRID_RADIUS_KM``) landed, so it can
+    pick up the improvement without a full re-import. Re-dispatches analysis
+    afterwards so VMG/polar/true-wind reflect the refreshed cache. Raises
+    ``ValueError`` (caller's job to turn into an HTTP error) if there's
+    nothing to refresh from.
+
+    Works for both manual GPX imports and device uploads: the worker
+    normalizes every source to the same ``{lat, lon, ...}`` shape in
+    ``gps.json`` (see ``workers/process_upload/analyzer.py::parse_gps``)."""
+    repos = get_repos()
+    session = repos.sessions.get(session_id)
+    if session is None:
+        raise ValueError("Session not found")
+    uploads = repos.ingest.list_uploads(session_id=session_id)
+    if not uploads:
+        raise ValueError("No processed data for this session")
+    upload = max(uploads, key=lambda u: u.uploaded_at)
+    prefix = processed_prefix(upload.id)
+    try:
+        points = get_blob_store().get_json(f"{prefix}gps.json")
     except Exception:
-        logger.warning("wind cache pre-fetch failed for prefix %s", prefix, exc_info=True)
+        raise ValueError("No GPS track to sample wind from")
+    if not points:
+        raise ValueError("No GPS track to sample wind from")
+    waypoints = sample_wind_waypoints(points)
+    end = session.ended_at or session.started_at
+    write_wind_cache(prefix, waypoints, session.started_at, end)
+    dispatch_analysis(bucket_name(), prefix)
+    return prefix

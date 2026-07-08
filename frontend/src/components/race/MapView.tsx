@@ -281,7 +281,10 @@ export function MapView({
         <div className="sf-map__wind" title={fmtKnots(observation.tws_kts)}>
           <span
             className="sf-map__wind-arrow"
-            style={{ transform: `rotate(${observation.twd_deg}deg)` }}
+            // twd_deg is where the wind comes FROM; rotate by +180 so the
+            // arrow shows the direction it's blowing TOWARD (flow), not the
+            // bearing to its source.
+            style={{ transform: `rotate(${(observation.twd_deg + 180) % 360}deg)` }}
           >
             ↑
           </span>

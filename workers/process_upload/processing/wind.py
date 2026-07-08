@@ -11,6 +11,7 @@ from typing import Optional
 import numpy as np
 
 from .models import GpsPoint, ImuReading, WindReading
+from .straight_lines import _haversine_nm
 
 
 def _to_timestamp(t) -> float:
@@ -118,38 +119,58 @@ def true_wind_from_cached(
     """Build a true-wind series from coarse cached wind observations (a nearby
     weather station / forecast grid) when there is no onboard wind sensor.
 
-    ``cached_obs`` are hourly, sparse rows ``{observed_at, twd_deg, tws_kts}``
-    (from the backend's ``wind_cache.json``). We interpolate them onto every
-    GPS point — TWS linearly, TWD circularly — then derive TWA from the boat's
-    heading, yielding the same dict shape as ``compute_true_wind_series`` so
-    polar/VMG/leg analysis can consume it. Marked ``source="cache"`` so callers
-    can flag it as modelled rather than measured.
+    ``cached_obs`` are hourly, sparse rows ``{observed_at, twd_deg, tws_kts,
+    station_lat, station_lng}`` (from the backend's ``wind_cache.json``) —
+    the backend now samples several points along the track rather than just
+    the start, so rows may come from more than one station. For each GPS
+    point we pick the spatially nearest station (``station_lat``/
+    ``station_lng`` missing → treated as one shared station, for cache files
+    written before this field existed), then interpolate its series in time
+    — TWS linearly, TWD circularly — and derive TWA from the boat's heading,
+    yielding the same dict shape as ``compute_true_wind_series`` so
+    polar/VMG/leg analysis can consume it. Marked ``source="cache"`` so
+    callers can flag it as modelled rather than measured.
     """
     if not gps or not cached_obs:
         return []
 
-    obs = sorted(
-        ((_to_timestamp(o["observed_at"]), o.get("twd_deg"), o.get("tws_kts"))
-         for o in cached_obs if o.get("twd_deg") is not None and o.get("tws_kts") is not None),
-        key=lambda x: x[0],
-    )
-    if not obs:
+    by_station: dict = {}
+    for o in cached_obs:
+        if o.get("twd_deg") is None or o.get("tws_kts") is None:
+            continue
+        key = (o.get("station_lat"), o.get("station_lng"))
+        by_station.setdefault(key, []).append(
+            (_to_timestamp(o["observed_at"]), o["twd_deg"], o["tws_kts"])
+        )
+    if not by_station:
         return []
 
-    obs_times = np.array([o[0] for o in obs])
-    obs_twd = np.radians([o[1] for o in obs])
-    obs_tws = np.array([o[2] for o in obs])
-    # Circular interpolation of direction: interpolate the unit vector, not the
-    # raw degrees (which wrap at 360 and would average 350°+10° to 180°).
-    obs_sin, obs_cos = np.sin(obs_twd), np.cos(obs_twd)
+    series = {}
+    for key, obs in by_station.items():
+        obs.sort(key=lambda x: x[0])
+        times = np.array([o[0] for o in obs])
+        twd = np.radians([o[1] for o in obs])
+        # Circular interpolation of direction: interpolate the unit vector,
+        # not the raw degrees (which wrap at 360 and would average 350°+10°
+        # to 180°).
+        series[key] = (times, np.sin(twd), np.cos(twd), np.array([o[2] for o in obs]))
+
+    single_station = len(series) == 1
+    only_key = next(iter(series)) if single_station else None
 
     results = []
     for p in gps:
+        if single_station:
+            key = only_key
+        else:
+            key = min(series, key=lambda k: _haversine_nm(p.lat, p.lon, k[0], k[1]))
+        times, obs_sin, obs_cos, obs_tws = series[key]
+
         t = _to_timestamp(p.timestamp)
-        tws = float(np.interp(t, obs_times, obs_tws))
+        tws = float(np.interp(t, times, obs_tws))
         twd = math.degrees(math.atan2(
-            float(np.interp(t, obs_times, obs_sin)),
-            float(np.interp(t, obs_times, obs_cos)),
+            float(np.interp(t, times, obs_sin)),
+            float(np.interp(t, times, obs_cos)),
         )) % 360
         # TWA: signed angle of the wind (from) relative to the bow, in (-180,180].
         twa = ((twd - p.heading_deg + 180) % 360) - 180

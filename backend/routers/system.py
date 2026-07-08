@@ -15,7 +15,7 @@ from pydantic import AwareDatetime, BaseModel
 
 from ..auth import require_system
 from ..schemas import WindFetchModel
-from ..services import ingestion, media
+from ..services import ingestion, media, wind_lookup
 from ..services.wind_providers import PROVIDERS
 from ._common import repos
 
@@ -247,3 +247,13 @@ def wind_fetch(payload: WindFetchModel, request: Request):
             except Exception as exc:  # one bad station must not stop the sweep
                 errors.append(f"{provider}/{station.external_station_id}: {exc}")
     return {"stations": stations_hit, "inserted": inserted, "errors": errors}
+
+
+@router.post("/wind/reconcile")
+def wind_reconcile(request: Request):
+    """Periodic reconciliation trigger (wind-scheduler service): replaces
+    provisional Open-Meteo forecast readings with the archive's settled
+    (reanalysis) values once they're old enough for it to have caught up —
+    see ``services/wind_lookup.reconcile_forecasts``."""
+    require_system(request)
+    return wind_lookup.reconcile_forecasts()

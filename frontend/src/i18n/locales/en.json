@@ -222,7 +222,9 @@
     "showLegs": "Show legs",
     "showManeuvers": "Show maneuvers",
     "reanalyze": "Re-run analysis",
-    "reanalyzeQueued": "Analysis re-run queued"
+    "reanalyzeQueued": "Analysis re-run queued",
+    "refreshWind": "Refresh wind data",
+    "refreshWindQueued": "Wind data refresh queued"
   },
   "activities": {
     "title": "Activities",
