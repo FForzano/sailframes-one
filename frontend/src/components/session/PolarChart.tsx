@@ -118,13 +118,20 @@ export function PolarChart({
   } | null>(null);
 
   const { groups, maxSpeed } = useMemo(() => {
+    // Average-curve buckets come only from `points` — mixing in `targetPoints`
+    // here (keyed only by tws_kts, sorted only by twa_deg) used to interleave
+    // an average row and a max row at the same angle, drawing a sawtooth
+    // between the two radii instead of a single average curve.
     const byTws = new Map<number, PolarPoint[]>();
     let mx = 1;
-    for (const p of [...points, ...(targetPoints ?? [])]) {
+    for (const p of points) {
       if (p.speed_kts > mx) mx = p.speed_kts;
       const g = byTws.get(p.tws_kts) ?? [];
       g.push(p);
       byTws.set(p.tws_kts, g);
+    }
+    for (const p of targetPoints ?? []) {
+      if (p.speed_kts > mx) mx = p.speed_kts;
     }
     const gs = [...byTws.entries()]
       .sort((a, b) => a[0] - b[0])
@@ -197,6 +204,12 @@ export function PolarChart({
               <path d={segmentedPath(g.pts, maxSpeed, -1)} fill="none" stroke={color} strokeWidth={2} opacity={0.5} />
               {target.length > 1 && (
                 <>
+                  <path
+                    d={fillPath(target, maxSpeed)}
+                    fill={lighten(color, 0.5)}
+                    fillOpacity={0.15}
+                    stroke="none"
+                  />
                   <path
                     d={segmentedPath(target, maxSpeed, 1)}
                     fill="none"

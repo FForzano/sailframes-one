@@ -6,8 +6,6 @@ export interface TrackPoint {
   lat: number;
   lon: number;
   sog: number;
-  /** Course over ground, degrees — null when the fix didn't carry one. */
-  cog: number | null;
 }
 export interface Track {
   id: string;
@@ -131,7 +129,7 @@ export function speedRange(track: Track): [number, number] {
 }
 
 /** One track from a processed GPS stream (canonical point shape
- * `{t, lat, lon, speed_kn, course}` — worker output / GPX parse). */
+ * `{t, lat, lon, speed_kn}` — worker output / GPX parse). */
 export function buildTrack(id: string, name: string, points: GpsPoint[], color: string): Track {
   const pts: TrackPoint[] = points
     .filter((p) => p.lat != null && p.lon != null)
@@ -140,7 +138,6 @@ export function buildTrack(id: string, name: string, points: GpsPoint[], color: 
       lat: p.lat,
       lon: p.lon,
       sog: p.speed_kn ?? 0,
-      cog: p.course ?? null,
     }))
     .sort((a, b) => a.ms - b.ms);
   return { id, name, color, pts };

@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -18,10 +17,10 @@ import { Spinner } from "@/components/ui/Spinner";
 import { fmtDuration, fmtDistanceNm, fmtKnots, fmtSeconds } from "@/utils/format";
 import { PolarChart } from "./PolarChart";
 import { legSequence } from "@/utils/legSequence";
-import type { CorrelationMatrix, SensorStats, SessionLeg, SessionManeuver, UUID } from "@/types";
+import type { SessionLeg, SessionManeuver, UUID } from "@/types";
 
-/** Rich per-session analysis (maneuvers, polar, VMG, correlations, …), assembled
- * from its normalized DB homes. 404 until the processing pipeline has run. */
+/** Rich per-session analysis (maneuvers, polar, VMG, …), assembled from its
+ * normalized DB homes. 404 until the processing pipeline has run. */
 export function SessionAnalysis({ sessionId }: { sessionId: UUID }) {
   const { t } = useTranslation();
   const analysis = useQuery({
@@ -60,16 +59,6 @@ export function SessionAnalysis({ sessionId }: { sessionId: UUID }) {
         {a.violin && (
           <Section title={t("sessions.maneuverCompare")}>
             <ViolinBars violin={a.violin} />
-          </Section>
-        )}
-        {a.correlations && (
-          <Section title={t("sessions.correlations")}>
-            <CorrelationHeatmap data={a.correlations} />
-          </Section>
-        )}
-        {a.sensor_stats && (
-          <Section title={t("sessions.distributions")}>
-            <SensorStatsTable stats={a.sensor_stats} />
           </Section>
         )}
       </div>
@@ -222,63 +211,3 @@ function ViolinBars({ violin }: { violin: Record<string, Record<string, { mean: 
   );
 }
 
-// --- correlations ----------------------------------------------------------------------
-
-function corrColor(v: number): string {
-  // Diverging: blue (+1) … neutral … red (−1).
-  const a = Math.min(1, Math.abs(v));
-  return v >= 0 ? `rgba(47,155,224,${a})` : `rgba(224,101,79,${a})`;
-}
-
-function CorrelationHeatmap({ data }: { data: CorrelationMatrix }) {
-  const { variables, matrix } = data;
-  return (
-    <div className="sf-heatmap" style={{ gridTemplateColumns: `auto repeat(${variables.length}, 1fr)` }}>
-      <div />
-      {variables.map((v) => <div key={`h-${v}`} className="sf-heatmap__lbl">{v}</div>)}
-      {variables.map((row) => (
-        <Fragment key={`r-${row}`}>
-          <div className="sf-heatmap__lbl">{row}</div>
-          {variables.map((col) => {
-            const val = matrix[row]?.[col] ?? 0;
-            return (
-              <div key={`${row}-${col}`} className="sf-heatmap__cell"
-                style={{ background: corrColor(val) }}>
-                {val.toFixed(2)}
-              </div>
-            );
-          })}
-        </Fragment>
-      ))}
-    </div>
-  );
-}
-
-// --- sensor distributions --------------------------------------------------------------
-
-const STAT_COLS = ["mean", "max", "std", "median"];
-
-function SensorStatsTable({ stats }: { stats: SensorStats }) {
-  return (
-    <div className="sf-tablewrap">
-      <table className="sf-table">
-        <thead>
-          <tr>
-            <th />
-            {STAT_COLS.map((c) => <th key={c}>{c}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(stats).map(([variable, metrics]) => (
-            <tr key={variable}>
-              <th>{variable}</th>
-              {STAT_COLS.map((c) => (
-                <td key={c}>{metrics[c] != null ? metrics[c] : "—"}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}

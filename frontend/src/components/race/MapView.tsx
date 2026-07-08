@@ -79,6 +79,7 @@ export function MapView({
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Record<string, L.Marker>>({});
+  const marksLayerRef = useRef<L.LayerGroup | null>(null);
   // Tracks currently being drag-scrubbed — the cursor-sync effect below
   // skips these so it doesn't fight Leaflet's own drag handler.
   const draggingRef = useRef<Set<string>>(new Set());
@@ -150,9 +151,14 @@ export function MapView({
       }
       // Speed/VMG/course at a point, instantaneous (nearest sample), not a
       // time series — shared by the click popup and the drag-scrub popup.
+      // "Course" here is the true wind angle, not raw compass heading — kept
+      // to 0-180° + tack side (like the polar chart) rather than a 0-360°
+      // bearing, since TWA is signed (+ = starboard, - = port).
       const popupContent = (p: TrackPoint) => {
         const vp = vmgAt(vmg, p.ms);
-        const course = p.cog != null ? `${Math.round(p.cog)}°` : "—";
+        const course = vp
+          ? `${Math.round(Math.abs(vp.twa_deg))}° ${t(vp.twa_deg >= 0 ? "race.starboard" : "race.port")}`
+          : "—";
         return (
           `<strong>${fmtKnots(p.sog)}</strong>` +
           `<span>${t("sessions.vmg")} ${vp ? fmtKnots(vp.vmg_kts) : "—"}</span>` +
@@ -209,6 +215,31 @@ export function MapView({
       markersRef.current[tr.id] = m;
     }
 
+    // Marks are drawn by their own effect (below) so toggling them — e.g. the
+    // legs/maneuvers checkboxes — doesn't tear down and rebuild the whole map
+    // (tiles, pan/zoom, tracks). Just fold their positions into the initial fit.
+    for (const mk of marks) bounds.push([mk.lat, mk.lng]);
+
+    if (bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.1));
+    else map.setView([20, 0], 2); // neutral world view when there is no data
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      markersRef.current = {};
+      marksLayerRef.current = null;
+      draggingRef.current.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `marks` intentionally
+    // excluded: only used above for the one-time initial bounds fit.
+  }, [tracks, vmg, t]);
+
+  // Marks (legs/maneuvers/race marks) on their own layer group, redrawn
+  // whenever they change without touching the map/tiles/tracks above.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const layer = L.layerGroup().addTo(map);
     for (const mk of marks) {
       const icon =
         mk.kind === "leg"
@@ -220,20 +251,13 @@ export function MapView({
                 html: "◆",
                 iconSize: [16, 16],
               });
-      L.marker([mk.lat, mk.lng], { icon }).bindTooltip(mk.mark_role).addTo(map);
-      bounds.push([mk.lat, mk.lng]);
+      L.marker([mk.lat, mk.lng], { icon }).bindTooltip(mk.mark_role).addTo(layer);
     }
-
-    if (bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.1));
-    else map.setView([20, 0], 2); // neutral world view when there is no data
-
+    marksLayerRef.current = layer;
     return () => {
-      map.remove();
-      mapRef.current = null;
-      markersRef.current = {};
-      draggingRef.current.clear();
+      layer.remove();
     };
-  }, [tracks, marks, vmg, t]);
+  }, [marks, tracks]);
 
   // Move position markers to the cursor time (skipping any mid-drag).
   useEffect(() => {

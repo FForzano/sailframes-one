@@ -281,6 +281,8 @@
     "results": "Results",
     "speed": "Speed (kn)",
     "course": "Course",
+    "starboard": "starboard",
+    "port": "port",
     "play": "Play",
     "pause": "Pause",
     "manage": "Race management",

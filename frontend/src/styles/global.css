@@ -818,6 +818,18 @@ h1, h2, h3 {
   right: 10px;
   z-index: 1000;
 }
+/* Fixed opaque background regardless of variant/what's underneath — a plain
+   ghost button (transparent bg) reads fine on the page but disappears or
+   clashes depending on which map tile happens to sit behind it. */
+.sf-map__options .sf-btn {
+  background: rgba(20, 50, 77, 0.85);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.sf-map__options .sf-btn:hover:not(:disabled) {
+  background: rgba(20, 50, 77, 1);
+}
 .sf-map__controls {
   position: absolute;
   bottom: 10px;

@@ -281,6 +281,8 @@
     "results": "Risultati",
     "speed": "Velocità (kn)",
     "course": "Rotta",
+    "starboard": "dritta",
+    "port": "sinistra",
     "play": "Play",
     "pause": "Pausa",
     "manage": "Gestione prova",
