@@ -224,7 +224,22 @@
     "reanalyze": "Re-run analysis",
     "reanalyzeQueued": "Analysis re-run queued",
     "refreshWind": "Refresh wind data",
-    "refreshWindQueued": "Wind data refresh queued"
+    "refreshWindQueued": "Wind data refresh queued",
+    "bestTack": "Best tack",
+    "bestLeg": "Best leg",
+    "bestVmg": "Best VMG",
+    "longestLeg": "Longest leg",
+    "avgDistance": "Avg distance",
+    "tackVmgStarboard": "Avg VMG (starboard)",
+    "tackVmgPort": "Avg VMG (port)",
+    "tackSpeedStarboard": "Avg speed (starboard)",
+    "tackSpeedPort": "Avg speed (port)",
+    "tackSide": {
+      "starboard": "Starboard",
+      "port": "Port"
+    },
+    "target": "Target",
+    "optimalAnglesNote": "From your recorded performance in this session (not the boat's reference polar)."
   },
   "activities": {
     "title": "Activities",

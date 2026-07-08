@@ -93,6 +93,7 @@ def segment_legs(
         # VMG from true wind
         avg_vmg = 0.0
         avg_twa = None
+        tack = None
         leg_type = LegType.REACH  # default
 
         if tw_times is not None:
@@ -100,6 +101,11 @@ def segment_legs(
             if tw_mask.sum() > 0:
                 seg_twa = tw_twa[tw_mask]
                 seg_tws = tw_tws[tw_mask]
+                # Sign before the abs() below is which side the wind is on —
+                # a straight leg never crosses a tack/gybe (that's a maneuver,
+                # segmented out above), so a plain mean is safe here (no
+                # wraparound across the +/-180 boundary within one leg).
+                tack = "starboard" if float(np.mean(seg_twa)) >= 0 else "port"
                 avg_twa = float(np.mean(np.abs(seg_twa)))
 
                 # Classify leg type by average TWA
@@ -132,6 +138,7 @@ def segment_legs(
             avg_vmg_kts=round(avg_vmg, 2),
             avg_heel_deg=round(avg_heel, 1) if avg_heel is not None else None,
             avg_twa_deg=round(avg_twa, 1) if avg_twa is not None else None,
+            tack=tack,
             std_heading_deg=round(heading_std, 1),
             num_points=len(seg_gps),
             start_lat=seg_gps[0].lat,

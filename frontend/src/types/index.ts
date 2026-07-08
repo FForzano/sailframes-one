@@ -305,6 +305,7 @@ export interface SessionLeg {
   avg_vmg_kts: number;
   avg_heel_deg: number | null;
   avg_twa_deg: number | null;
+  tack: "port" | "starboard" | null;
   std_heading_deg: number;
   num_points: number;
   start_lat: number | null;

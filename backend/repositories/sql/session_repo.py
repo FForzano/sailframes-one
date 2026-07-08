@@ -34,7 +34,7 @@ _MANEUVER_FIELDS = ("maneuver_type", "start_time", "end_time", "duration_sec",
                     "max_heel_deg", "distance_lost_m", "start_lat", "start_lon")
 _LEG_FIELDS = ("leg_type", "start_time", "end_time", "duration_sec", "distance_nm",
                "avg_speed_kts", "max_speed_kts", "avg_vmg_kts", "avg_heel_deg",
-               "avg_twa_deg", "std_heading_deg", "num_points", "start_lat",
+               "avg_twa_deg", "tack", "std_heading_deg", "num_points", "start_lat",
                "start_lon", "end_lat", "end_lon")
 _ANALYSIS_FIELDS = ("correlations", "violin", "maneuver_summary", "leg_comparison",
                     "sensor_stats", "vmg_series", "polar_target", "thumbnail_image_id",

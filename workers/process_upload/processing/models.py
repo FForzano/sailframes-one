@@ -106,6 +106,7 @@ class StraightLineLeg:
     avg_vmg_kts: float
     avg_heel_deg: Optional[float] = None
     avg_twa_deg: Optional[float] = None
+    tack: Optional[str] = None  # "port" | "starboard" — which side the wind is on
     std_heading_deg: float = 0.0  # heading stability
     num_points: int = 0
     start_lat: Optional[float] = None

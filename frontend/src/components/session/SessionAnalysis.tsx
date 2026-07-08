@@ -17,7 +17,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { fmtDuration, fmtDistanceNm, fmtKnots, fmtSeconds } from "@/utils/format";
 import { PolarChart } from "./PolarChart";
 import { legSequence } from "@/utils/legSequence";
-import type { SessionLeg, SessionManeuver, UUID } from "@/types";
+import type { PolarPoint, SessionLeg, SessionManeuver, UUID } from "@/types";
 
 /** Rich per-session analysis (maneuvers, polar, VMG, …), assembled from its
  * normalized DB homes. 404 until the processing pipeline has run. */
@@ -44,11 +44,13 @@ export function SessionAnalysis({ sessionId }: { sessionId: UUID }) {
         {!!polar.data?.length && (
           <Section title={t("sessions.polar")}>
             <PolarChart points={polar.data} targetPoints={a.polar_target} />
+            <OptimalAngles points={polar.data} targetPoints={a.polar_target} />
           </Section>
         )}
         {!!a.legs.length && (
           <Section title={t("sessions.legs")}>
             <LegsTable legs={a.legs} />
+            <TackBreakdown legs={a.legs} />
           </Section>
         )}
         {!!a.maneuvers.length && (
@@ -177,6 +179,151 @@ function LegsTable({ legs }: { legs: SessionLeg[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// --- tack breakdown (per point-of-sail: best tack, longest leg, port vs starboard) -----
+
+function tackAvg(legs: SessionLeg[], tack: "port" | "starboard",
+                 key: "avg_vmg_kts" | "avg_speed_kts"): number | null {
+  const vals = legs.filter((l) => l.tack === tack).map((l) => l[key]);
+  return vals.length ? vals.reduce((sum, v) => sum + v, 0) / vals.length : null;
+}
+
+function TackBreakdown({ legs }: { legs: SessionLeg[] }) {
+  const { t } = useTranslation();
+  const seq = legSequence(legs);
+  const byType = new Map<string, SessionLeg[]>();
+  for (const l of legs) {
+    if (l.leg_type === "reach") continue; // port/starboard comparison is only meaningful upwind/downwind
+    byType.set(l.leg_type, [...(byType.get(l.leg_type) ?? []), l]);
+  }
+  if (!byType.size) return null;
+
+  return (
+    <>
+      {[...byType.entries()].map(([legType, group]) => {
+        const bestVmgLeg = group.reduce((a, b) => (b.avg_vmg_kts > a.avg_vmg_kts ? b : a));
+        const bestSpeed = Math.max(...group.map((l) => l.max_speed_kts));
+        const longest = group.reduce((a, b) => (b.distance_nm > a.distance_nm ? b : a));
+        const avgDistance = group.reduce((sum, l) => sum + l.distance_nm, 0) / group.length;
+        const avgDuration = group.reduce((sum, l) => sum + l.duration_sec, 0) / group.length;
+        const stbdVmg = tackAvg(group, "starboard", "avg_vmg_kts");
+        const portVmg = tackAvg(group, "port", "avg_vmg_kts");
+        const stbdSpeed = tackAvg(group, "starboard", "avg_speed_kts");
+        const portSpeed = tackAvg(group, "port", "avg_speed_kts");
+        const bestTack: "starboard" | "port" =
+          (stbdVmg ?? -Infinity) >= (portVmg ?? -Infinity) ? "starboard" : "port";
+
+        return (
+          <div key={legType} className="sf-tackblock">
+            <h5 className="sf-tackblock__title">
+              {t(`sessions.${legType}`)} <span className="sf-muted">({group.length})</span>
+            </h5>
+            <div className="sf-tablewrap">
+              <table className="sf-table">
+                <tbody>
+                  <tr>
+                    <th>{t("sessions.bestTack")}</th>
+                    <td>{t(`sessions.tackSide.${bestTack}`)}</td>
+                    <th>{t("sessions.bestLeg")}</th>
+                    <td>#{seq.get(bestVmgLeg.id)}</td>
+                  </tr>
+                  <tr>
+                    <th>{t("sessions.bestVmg")}</th>
+                    <td>{fmtKnots(bestVmgLeg.avg_vmg_kts)}</td>
+                    <th>{t("sessions.maxSpeed")}</th>
+                    <td>{fmtKnots(bestSpeed)}</td>
+                  </tr>
+                  <tr>
+                    <th>{t("sessions.longestLeg")}</th>
+                    <td>#{seq.get(longest.id)} — {fmtDistanceNm(longest.distance_nm)}</td>
+                    <th>{t("sessions.avgDuration")}</th>
+                    <td>{fmtDuration(avgDuration)}</td>
+                  </tr>
+                  <tr>
+                    <th>{t("sessions.avgDistance")}</th>
+                    <td colSpan={3}>{fmtDistanceNm(avgDistance)}</td>
+                  </tr>
+                  <tr>
+                    <th>{t("sessions.tackVmgStarboard")}</th>
+                    <td>{stbdVmg != null ? fmtKnots(stbdVmg) : "—"}</td>
+                    <th>{t("sessions.tackVmgPort")}</th>
+                    <td>{portVmg != null ? fmtKnots(portVmg) : "—"}</td>
+                  </tr>
+                  <tr>
+                    <th>{t("sessions.tackSpeedStarboard")}</th>
+                    <td>{stbdSpeed != null ? fmtKnots(stbdSpeed) : "—"}</td>
+                    <th>{t("sessions.tackSpeedPort")}</th>
+                    <td>{portSpeed != null ? fmtKnots(portSpeed) : "—"}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+// --- optimal angles (best VMG angle from THIS session's own polar, not a reference polar) --
+
+// No monohull sustains closer than this — below it, a bucket almost always
+// means the session's wind direction (estimated from a model when there's no
+// onboard sensor, see wind_lookup.py) is biased rather than genuine pointing.
+const MIN_REALISTIC_UPWIND_TWA_DEG = 30;
+
+function bestPolarAngle(
+  points: PolarPoint[],
+  targetPoints: PolarPoint[] | null | undefined,
+  predicate: (twaDeg: number) => boolean,
+): { angle: number; vmg: number; target: number } | null {
+  const candidates = points.filter((p) => predicate(p.twa_deg) && p.vmg_kts != null);
+  if (!candidates.length) return null;
+  const best = candidates.reduce((a, b) => (b.vmg_kts! > a.vmg_kts! ? b : a));
+  const sameAngle = (targetPoints ?? []).filter((p) => p.twa_deg === best.twa_deg);
+  const target =
+    sameAngle.find((p) => p.tws_kts === best.tws_kts) ??
+    sameAngle.slice().sort((a, b) => Math.abs(a.tws_kts - best.tws_kts) - Math.abs(b.tws_kts - best.tws_kts))[0];
+  return { angle: best.twa_deg, vmg: best.vmg_kts!, target: target?.speed_kts ?? best.speed_kts };
+}
+
+function OptimalAngles({
+  points,
+  targetPoints,
+}: {
+  points: PolarPoint[];
+  targetPoints?: PolarPoint[] | null;
+}) {
+  const { t } = useTranslation();
+  const upwind = bestPolarAngle(points, targetPoints,
+    (twa) => twa >= MIN_REALISTIC_UPWIND_TWA_DEG && twa < 90);
+  const downwind = bestPolarAngle(points, targetPoints, (twa) => twa >= 90);
+  if (!upwind && !downwind) return null;
+
+  return (
+    <div className="sf-optimal-angles">
+      <p className="sf-muted sf-optimal-angles__note">{t("sessions.optimalAnglesNote")}</p>
+      <div className="sf-optimal-angles__row">
+        {[
+          ["upwind", upwind] as const,
+          ["downwind", downwind] as const,
+        ].map(
+          ([type, res]) =>
+            res && (
+              <div key={type} className="sf-optimal-angles__tile">
+                <span className="sf-optimal-angles__label">{t(`sessions.${type}`)}</span>
+                <strong className="sf-optimal-angles__angle">{res.angle}°</strong>
+                <span className="sf-muted">
+                  {t("sessions.target")}: {fmtKnots(res.target)}
+                </span>
+                <span className="sf-muted">VMG: {fmtKnots(res.vmg)}</span>
+              </div>
+            ),
+        )}
+      </div>
     </div>
   );
 }
