@@ -12,13 +12,24 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, CreatedAtMixin, UUIDPKMixin, enum_check
 
 SESSION_STATUSES = ("pending", "processing", "processed", "failed")
 SESSION_SAILING_ROLES = ("skipper", "crew", "guest")
+MANEUVER_TYPES = ("tack", "gybe")
+LEG_TYPES = ("upwind", "downwind", "reach")
 
 
 class SessionORM(UUIDPKMixin, Base):
@@ -107,6 +118,95 @@ class SessionStatsORM(Base):
     # Require wind data (onboard or wind_observations).
     avg_polar_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     max_polar_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class SessionManeuverORM(UUIDPKMixin, Base):
+    """One detected tack/gybe. Discrete, finite per session (a handful to a few
+    dozen) — normalized into rows so it stays queryable, unlike the series/
+    matrix parts of the analysis which live in ``session_analysis`` as JSON.
+    ``*_time`` are unix-epoch seconds (the worker's native shape), not TZ."""
+
+    __tablename__ = "session_maneuvers"
+    __table_args__ = (enum_check("maneuver_type", MANEUVER_TYPES),)
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    maneuver_type: Mapped[str] = mapped_column(String, nullable=False)
+    start_time: Mapped[float] = mapped_column(Float, nullable=False)
+    end_time: Mapped[float] = mapped_column(Float, nullable=False)
+    duration_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    speed_loss_kts: Mapped[float] = mapped_column(Float, nullable=False)
+    speed_before_kts: Mapped[float] = mapped_column(Float, nullable=False)
+    speed_min_kts: Mapped[float] = mapped_column(Float, nullable=False)
+    speed_after_kts: Mapped[float] = mapped_column(Float, nullable=False)
+    recovery_time_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    heading_change_deg: Mapped[float] = mapped_column(Float, nullable=False)
+    max_heel_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    distance_lost_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    start_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    start_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
+class SessionLegORM(UUIDPKMixin, Base):
+    """One straight-line leg between maneuvers (upwind/downwind/reach). Same
+    rationale as ``session_maneuvers``: discrete and queryable."""
+
+    __tablename__ = "session_legs"
+    __table_args__ = (enum_check("leg_type", LEG_TYPES),)
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    leg_type: Mapped[str] = mapped_column(String, nullable=False)
+    start_time: Mapped[float] = mapped_column(Float, nullable=False)
+    end_time: Mapped[float] = mapped_column(Float, nullable=False)
+    duration_sec: Mapped[float] = mapped_column(Float, nullable=False)
+    distance_nm: Mapped[float] = mapped_column(Float, nullable=False)
+    avg_speed_kts: Mapped[float] = mapped_column(Float, nullable=False)
+    max_speed_kts: Mapped[float] = mapped_column(Float, nullable=False)
+    avg_vmg_kts: Mapped[float] = mapped_column(Float, nullable=False)
+    avg_heel_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_twa_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    std_heading_deg: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    num_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    start_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    start_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    end_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    end_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
+class SessionAnalysisORM(Base):
+    """The parts of the analysis that aren't naturally relational — a small
+    correlation matrix, per-maneuver-type distributions, and the VMG/true-wind
+    series — kept as JSON (1:1 with the session). Scalars live in
+    ``session_stats``, the polar curve in ``polar_points``, discrete events in
+    ``session_maneuvers``/``session_legs``."""
+
+    __tablename__ = "session_analysis"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    correlations: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    violin: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    maneuver_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    leg_comparison: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # Per-variable distributions (speed/apparent wind/heel/pitch mean-max-std).
+    sensor_stats: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    vmg_series: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Max-speed-per-bucket "target" polar (vs. the avg/actual polar in
+    # `polar_points`) — same shape, kept alongside the other derived series
+    # rather than as its own table since it isn't a relational/queryable datum.
+    polar_target: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Small track-preview PNG rendered once by the worker from gps.json, so
+    # the sessions list can show it without re-rendering the track per view.
+    thumbnail_image_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

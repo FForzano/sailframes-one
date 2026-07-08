@@ -38,6 +38,7 @@ export interface User {
   is_superadmin: boolean;
   status: string;
   profile_image_id: UUID | null;
+  unit_system: "nautical" | "metric";
   created_at?: string;
 }
 
@@ -46,6 +47,7 @@ export interface UserSummary {
   first_name: string | null;
   last_name: string | null;
   email: string;
+  profile_image: ImageRef | null;
 }
 
 export interface Capabilities {
@@ -208,12 +210,25 @@ export interface Activity {
   created_by: UUID | null;
   started_at: string | null;
   ended_at: string | null;
+  thumbnail: ImageRef | null;
 }
+
+// Fixed set enforced by a DB check constraint (backend/db/models/activity.py
+// MARK_ROLES) — mirrored in frontend/src/utils/markRoles.ts for the dropdown.
+export type MarkRole =
+  | "pin"
+  | "rc"
+  | "windward"
+  | "leeward"
+  | "gate_port"
+  | "gate_stbd"
+  | "offset"
+  | "drill";
 
 export interface Mark {
   id: UUID;
   activity_id: UUID;
-  mark_role: string; // start_pin | start_rc | windward | leeward | gate | finish…
+  mark_role: MarkRole;
   lat: number;
   lng: number;
   set_at: string | null;
@@ -228,6 +243,7 @@ export interface Session {
   started_at: string | null;
   ended_at: string | null;
   status: SessionStatus;
+  thumbnail: ImageRef | null;
 }
 
 export interface SessionStream {
@@ -247,10 +263,107 @@ export interface SessionStats {
   computed_at: string | null;
 }
 
+export type SailingRole = "skipper" | "crew" | "guest";
+
 export interface SessionCrew {
   user_id: UUID;
-  sailing_role: string;
+  sailing_role: SailingRole;
   user?: UserSummary | null;
+}
+
+// --- session analysis ------------------------------------------------------------------
+
+/** One detected tack/gybe. `*_time` are unix-epoch seconds (worker native). */
+export interface SessionManeuver {
+  id: UUID;
+  maneuver_type: "tack" | "gybe";
+  start_time: number;
+  end_time: number;
+  duration_sec: number;
+  speed_loss_kts: number;
+  speed_before_kts: number;
+  speed_min_kts: number;
+  speed_after_kts: number;
+  recovery_time_sec: number;
+  heading_change_deg: number;
+  max_heel_deg: number | null;
+  distance_lost_m: number | null;
+  start_lat: number | null;
+  start_lon: number | null;
+}
+
+/** One straight-line leg between maneuvers. */
+export interface SessionLeg {
+  id: UUID;
+  leg_type: "upwind" | "downwind" | "reach";
+  start_time: number;
+  end_time: number;
+  duration_sec: number;
+  distance_nm: number;
+  avg_speed_kts: number;
+  max_speed_kts: number;
+  avg_vmg_kts: number;
+  avg_heel_deg: number | null;
+  avg_twa_deg: number | null;
+  std_heading_deg: number;
+  num_points: number;
+  start_lat: number | null;
+  start_lon: number | null;
+  end_lat: number | null;
+  end_lon: number | null;
+}
+
+export interface VmgPoint {
+  timestamp: number;
+  vmg_kts: number;
+  twa_deg: number;
+  boat_speed_kts: number;
+  tws_kts: number | null;
+}
+
+/** Per-variable {mean,max,std,…} distributions (speed/apparent wind/heel/pitch). */
+export type SensorStats = Record<string, Record<string, number>>;
+
+export interface CorrelationMatrix {
+  variables: string[];
+  matrix: Record<string, Record<string, number>>;
+}
+
+/** `GET /sessions/{id}/analysis` — the DB-assembled analysis. Polar and scalar
+ * stats come from their own endpoints (`/polar-points`, `/stats`). */
+export interface SessionAnalysis {
+  maneuvers: SessionManeuver[];
+  legs: SessionLeg[];
+  maneuver_summary: Record<string, unknown> | null;
+  leg_comparison: Record<string, unknown> | null;
+  correlations: CorrelationMatrix | null;
+  violin: Record<string, Record<string, ViolinMetric>> | null;
+  sensor_stats: SensorStats | null;
+  vmg_series: VmgPoint[] | null;
+  /** Max-speed-per-bucket "target" polar (vs. `points` from `/polar-points`,
+   * which is the average/actual-performance polar). */
+  polar_target: PolarPoint[] | null;
+  computed_at: string | null;
+}
+
+export interface ViolinMetric {
+  values: number[];
+  mean: number;
+  median: number;
+  std: number;
+  min: number;
+  max: number;
+  q25: number;
+  q75: number;
+}
+
+/** Empirical per-session polar point (`GET /polar-points?session_id=`). */
+export interface PolarPoint {
+  twa_deg: number;
+  tws_kts: number;
+  speed_kts: number;
+  vmg_kts: number | null;
+  sample_count: number | null;
 }
 
 /** Canonical processed GPS point (worker output / GPX parse). */
@@ -324,18 +437,26 @@ export interface RaceResult {
   status: string; // finished | dnf | dns | dsq…
 }
 
+export type ActivitySessionData = Record<
+  UUID,
+  {
+    session_id: UUID;
+    boat: { id: UUID; name: string; sail_number: string | null } | null;
+    sensors: Record<string, GpsPoint[]>;
+  }
+>;
+
 /** `GET /races/{id}/data` — per-session windowed sensor data. */
 export interface RaceData {
   race_id: UUID;
   activity_id: UUID | null;
-  sessions: Record<
-    UUID,
-    {
-      session_id: UUID;
-      boat: { id: UUID; name: string; sail_number: string | null } | null;
-      sensors: Record<string, GpsPoint[]>;
-    }
-  >;
+  sessions: ActivitySessionData;
+}
+
+/** `GET /activities/{id}/data` — same shape as `RaceData` minus `race_id`. */
+export interface ActivityData {
+  activity_id: UUID;
+  sessions: ActivitySessionData;
 }
 
 // --- wind ----------------------------------------------------------------------------

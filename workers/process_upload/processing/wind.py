@@ -111,6 +111,62 @@ def compute_true_wind_series(
     return results
 
 
+def true_wind_from_cached(
+    gps: list[GpsPoint],
+    cached_obs: list[dict],
+) -> list[dict]:
+    """Build a true-wind series from coarse cached wind observations (a nearby
+    weather station / forecast grid) when there is no onboard wind sensor.
+
+    ``cached_obs`` are hourly, sparse rows ``{observed_at, twd_deg, tws_kts}``
+    (from the backend's ``wind_cache.json``). We interpolate them onto every
+    GPS point — TWS linearly, TWD circularly — then derive TWA from the boat's
+    heading, yielding the same dict shape as ``compute_true_wind_series`` so
+    polar/VMG/leg analysis can consume it. Marked ``source="cache"`` so callers
+    can flag it as modelled rather than measured.
+    """
+    if not gps or not cached_obs:
+        return []
+
+    obs = sorted(
+        ((_to_timestamp(o["observed_at"]), o.get("twd_deg"), o.get("tws_kts"))
+         for o in cached_obs if o.get("twd_deg") is not None and o.get("tws_kts") is not None),
+        key=lambda x: x[0],
+    )
+    if not obs:
+        return []
+
+    obs_times = np.array([o[0] for o in obs])
+    obs_twd = np.radians([o[1] for o in obs])
+    obs_tws = np.array([o[2] for o in obs])
+    # Circular interpolation of direction: interpolate the unit vector, not the
+    # raw degrees (which wrap at 360 and would average 350°+10° to 180°).
+    obs_sin, obs_cos = np.sin(obs_twd), np.cos(obs_twd)
+
+    results = []
+    for p in gps:
+        t = _to_timestamp(p.timestamp)
+        tws = float(np.interp(t, obs_times, obs_tws))
+        twd = math.degrees(math.atan2(
+            float(np.interp(t, obs_times, obs_sin)),
+            float(np.interp(t, obs_times, obs_cos)),
+        )) % 360
+        # TWA: signed angle of the wind (from) relative to the bow, in (-180,180].
+        twa = ((twd - p.heading_deg + 180) % 360) - 180
+
+        results.append({
+            "timestamp": t,
+            "tws_kts": round(tws, 2),
+            "twa_deg": round(twa, 1),
+            "twd_deg": round(twd, 1),
+            "boat_speed_kts": round(p.speed_kts, 2),
+            "heading_deg": round(p.heading_deg, 1),
+            "source": "cache",
+        })
+
+    return results
+
+
 def estimate_wind_from_gps(
     gps: list[GpsPoint],
     min_speed_kts: float = 2.0,

@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { activitiesService, activityKeys } from "@/services/activities";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { fmtDateTime } from "@/utils/format";
+import { activityDisplayName } from "@/utils/activityName";
+import { fmtDate } from "@/utils/format";
 
 export function ActivitiesPage() {
   const { t } = useTranslation();
@@ -20,7 +22,14 @@ export function ActivitiesPage() {
   });
 
   return (
-    <Card title={t("activities.title")}>
+    <Card
+      title={t("activities.title")}
+      actions={
+        <Link to="/diario/activities/import">
+          <Button>{t("sessions.import")}</Button>
+        </Link>
+      }
+    >
       <div className="sf-form__row" style={{ alignItems: "end" }}>
         <Select
           label={t("activities.type")}
@@ -44,33 +53,23 @@ export function ActivitiesPage() {
       ) : activities.data?.length === 0 ? (
         <EmptyState>{t("activities.empty")}</EmptyState>
       ) : (
-        <div className="sf-tablewrap">
-          <table className="sf-table">
-            <thead>
-              <tr>
-                <th>{t("common.name")}</th>
-                <th>{t("activities.type")}</th>
-                <th>{t("gruppi.visibility")}</th>
-                <th>{t("sessions.start")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activities.data?.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <Link to={`/diario/activities/${a.id}`}>
-                      {a.name ?? t(`activities.types.${a.type}`)}
-                    </Link>
-                  </td>
-                  <td>
-                    <span className="sf-badge">{t(`activities.types.${a.type}`)}</span>
-                  </td>
-                  <td>{t(`activities.visibility.${a.visibility}`)}</td>
-                  <td className="sf-muted">{fmtDateTime(a.started_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="sf-activity-grid">
+          {activities.data?.map((a) => (
+            <Link key={a.id} to={`/diario/activities/${a.id}`} className="sf-activity-card">
+              {a.thumbnail ? (
+                <img src={a.thumbnail.url} alt="" className="sf-activity-card__thumb" />
+              ) : (
+                <span className="sf-activity-card__thumb sf-activity-card__thumb--empty" aria-hidden />
+              )}
+              <div className="sf-activity-card__body">
+                <strong>{activityDisplayName(a, t)}</strong>
+                <div className="sf-strip">
+                  <span className="sf-badge">{t(`activities.types.${a.type}`)}</span>
+                  <span className="sf-muted">{fmtDate(a.started_at)}</span>
+                </div>
+              </div>
+            </Link>
+          ))}
         </div>
       )}
     </Card>

@@ -36,6 +36,19 @@ def create_file_upload(user_id: uuid.UUID, *,
     return {"file_id": file.id, "upload_url": url}
 
 
+def register_processed_image(ref: str) -> Optional[uuid.UUID]:
+    """Register an image a worker already wrote directly to storage (system
+    callbacks, e.g. session track thumbnails) — no presigned-upload/confirm
+    dance, since the object is already sitting at `ref`. Returns None (and
+    creates no row) if the object isn't actually there."""
+    if not get_blob_store().exists(ref):
+        return None
+    repos = get_repos()
+    image = repos.media.create_image(created_by=None)
+    repos.media.update_image(image.id, {"ref": ref, "status": "processed"})
+    return image.id
+
+
 def confirm_image(image_id: uuid.UUID) -> bool:
     """Flip to processed once the client reports the PUT done (and the object
     actually exists)."""
@@ -60,12 +73,21 @@ def confirm_file(file_id: uuid.UUID) -> bool:
     return True
 
 
-def delete_image(image_id: uuid.UUID, deleted_by: Optional[uuid.UUID]) -> bool:
+def delete_image(image_id: uuid.UUID, deleted_by: Optional[uuid.UUID],
+                 keep_blob: bool = False) -> bool:
+    """``keep_blob``: skip deleting the underlying object. Needed when this
+    row's ``ref`` is a fixed, reused key (e.g. worker-rendered thumbnails
+    like ``{prefix}thumbnail.png``, always overwritten in place rather than
+    given a fresh key per render) and a *newer* image row already points at
+    that same key — deleting the blob here would delete the file the newer
+    row is supposed to serve, not some orphaned predecessor."""
     repos = get_repos()
     image = repos.media.get_image(image_id)
     if image is None:
         return False
     repos.media.soft_delete_image(image_id, deleted_by)
+    if keep_blob:
+        return True
     try:
         get_blob_store().delete(image.ref)
     except Exception:
@@ -104,3 +126,13 @@ def file_payload(file_id: Optional[uuid.UUID]) -> Optional[dict]:
     if file is None or file.status == "deleted":
         return None
     return {"file_id": file.id, "url": get_blob_store().download_ref(file.ref)}
+
+
+def session_thumbnail_payload(session) -> dict:
+    """Session dict + embedded track-preview thumbnail
+    (``session_analysis.thumbnail_image_id``) — shared by ``/sessions`` and
+    ``/activities/{id}/sessions`` so both list views show the same preview."""
+    d = session.to_dict()
+    analysis = get_repos().sessions.get_analysis(session.id)
+    d["thumbnail"] = image_payload(analysis.thumbnail_image_id if analysis else None)
+    return d

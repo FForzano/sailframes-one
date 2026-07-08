@@ -1,23 +1,40 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import { NavLink, Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { ToastViewport } from "@/components/ui/ToastViewport";
+import { Avatar } from "@/components/ui/Avatar";
+import { ProfileMenu } from "@/components/layout/ProfileMenu";
+import { usersService, userKeys } from "@/services/users";
+import { unitsStore } from "@/stores/unitsStore";
 
-// The main navigation exposes ONLY the 3 macro-sections (plus Profilo/Admin
-// utilities) — sub-pages are reached from inside each section
-// (docs/frontend-project.md, "Navigazione principale").
-//
-// Desktop: links inline in the top navbar. Mobile: the links move to a fixed
-// bottom action bar (thumb-reachable); the navbar keeps brand + logout.
+// The main navigation exposes ONLY the 3 macro-sections (plus Admin) as
+// inline links — sub-pages are reached from inside each section
+// (docs/frontend-project.md, "Navigazione principale"). Profilo isn't a
+// nav link: on desktop it's the avatar dropdown (ProfileMenu), on mobile
+// it's the avatar entry in the bottom action bar. Logout lives in the
+// ProfileMenu dropdown on desktop and at the bottom of the Profilo page on
+// mobile (see ProfiloLayout.tsx).
 export function AppShell() {
   const { t } = useTranslation();
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  // Resolved profile_image URL isn't on the auth capabilities payload, only
+  // on /users/me — same query key as AnagraficaPage so it's cached, not
+  // re-fetched.
+  const me = useQuery({
+    queryKey: userKeys.me,
+    queryFn: usersService.me,
+    enabled: !!user,
+  });
 
-  const onLogout = async () => {
-    await logout();
-    navigate("/login");
-  };
+  // The profile's unit_system is the source of truth; sync it into the
+  // local store once loaded so it follows the account across devices.
+  useEffect(() => {
+    if (me.data?.unit_system && me.data.unit_system !== unitsStore.get()) {
+      unitsStore.set(me.data.unit_system);
+    }
+  }, [me.data?.unit_system]);
 
   const sections = [
     { to: "/diario", label: t("nav.diario"), icon: "📔" },
@@ -27,6 +44,7 @@ export function AppShell() {
       ? [{ to: "/admin", label: t("nav.admin"), icon: "⚙️" }]
       : []),
   ];
+  const navLinkSections = sections.filter((s) => s.to !== "/profilo");
 
   return (
     <div className="sf-shell">
@@ -35,7 +53,7 @@ export function AppShell() {
           SailFrames
         </NavLink>
         <nav className="sf-navbar__links" aria-label="Main">
-          {sections.map((s) => (
+          {navLinkSections.map((s) => (
             <NavLink
               key={s.to}
               to={s.to}
@@ -46,12 +64,12 @@ export function AppShell() {
           ))}
         </nav>
         <div className="sf-navbar__spacer" />
-        <div className="sf-navbar__user">
-          <span className="sf-navbar__email">{user?.email}</span>
-          <button className="sf-btn sf-btn--ghost sf-btn--sm" onClick={onLogout}>
-            {t("auth.logout")}
-          </button>
-        </div>
+        <ProfileMenu
+          profileImage={me.data?.profile_image ?? null}
+          firstName={user?.first_name}
+          lastName={user?.last_name}
+          email={user?.email}
+        />
       </header>
       <main className="sf-main">
         <Outlet />
@@ -59,9 +77,19 @@ export function AppShell() {
       <nav className="sf-actionbar" aria-label="Main">
         {sections.map((s) => (
           <NavLink key={s.to} to={s.to} className="sf-actionbar__item">
-            <span className="sf-actionbar__icon" aria-hidden>
-              {s.icon}
-            </span>
+            {s.to === "/profilo" ? (
+              <Avatar
+                size="sm"
+                className="sf-actionbar__avatar"
+                profileImage={me.data?.profile_image ?? null}
+                firstName={user?.first_name}
+                lastName={user?.last_name}
+              />
+            ) : (
+              <span className="sf-actionbar__icon" aria-hidden>
+                {s.icon}
+              </span>
+            )}
             <span className="sf-actionbar__label">{s.label}</span>
           </NavLink>
         ))}

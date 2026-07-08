@@ -13,9 +13,8 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import current_user, require_user, session_visible_to, verify_csrf
 from ..schemas import SessionCrewModel, SessionWriteModel
-from ..services import media
-from ..storage import BlobNotFound
-from ._common import blob, repos
+from ..services import ingestion, media
+from ._common import blob, repos, with_user
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -62,9 +61,9 @@ def list_sessions(request: Request, activity_id: Optional[uuid.UUID] = None,
         if user is None:
             raise HTTPException(401, "Authentication required")
         # Boat membership / crew implies visibility — no extra filter needed.
-        return [s.to_dict() for s in repos.sessions.list_for_user(user.id)]
+        return [media.session_thumbnail_payload(s) for s in repos.sessions.list_for_user(user.id)]
     sessions = repos.sessions.list(activity_id=activity_id, boat_id=boat_id)
-    return [s.to_dict() for s in sessions if session_visible_to(s, user)]
+    return [media.session_thumbnail_payload(s) for s in sessions if session_visible_to(s, user)]
 
 
 @router.get("/{session_id}")
@@ -119,6 +118,27 @@ def delete_session(session_id: uuid.UUID, request: Request):
     return {"ok": True}
 
 
+@router.post("/{session_id}/reanalyze")
+def reanalyze_session(session_id: uuid.UUID, request: Request):
+    """Re-run the processing pipeline (maneuvers/legs/polar/VMG/…) on the
+    session's already-processed data — e.g. after a detection-logic change,
+    without re-importing. Same edit-level permission as PATCH; re-dispatches
+    to the most recently uploaded processed prefix, which already has
+    gps.json/wind_cache.json in place from the original import."""
+    verify_csrf(request)
+    user = require_user(request)
+    session = _require_session(session_id)
+    if not _can_edit(session, user):
+        raise HTTPException(403, "Not allowed")
+    uploads = repos.ingest.list_uploads(session_id=session_id)
+    if not uploads:
+        raise HTTPException(404, "No processed data to reanalyze")
+    upload = max(uploads, key=lambda u: u.uploaded_at)
+    prefix = ingestion.processed_prefix(upload.id)
+    ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
+    return {"ok": True, "session_upload_id": upload.id}
+
+
 # --- streams / stats / analysis --------------------------------------------------
 
 @router.get("/{session_id}/streams")
@@ -145,16 +165,22 @@ def get_stats(session_id: uuid.UUID, request: Request):
 
 @router.get("/{session_id}/analysis")
 def get_analysis(session_id: uuid.UUID, request: Request):
-    """analysis.json produced by the worker's analyze pass — one per upload;
-    the first found wins (single-upload sessions are the standard case)."""
+    """The worker's analysis, assembled from its normalized DB homes: discrete
+    tacks/gybes (``session_maneuvers``) and legs (``session_legs``) as rows, plus
+    the JSON matrices/series/distributions (``session_analysis``). The polar
+    curve and scalar stats have their own endpoints (``/polar-points``,
+    ``/stats``). 404 until the pipeline has run (like ``/stats``)."""
     user = current_user(request)
     _require_visible(session_id, user)
-    for upload in repos.ingest.list_uploads(session_id=session_id):
-        try:
-            return blob.get_json(f"processed/uploads/{upload.id}/analysis.json")
-        except BlobNotFound:
-            continue
-    raise HTTPException(404, "No analysis available")
+    analysis = repos.sessions.get_analysis(session_id)
+    maneuvers = repos.sessions.list_maneuvers(session_id)
+    legs = repos.sessions.list_legs(session_id)
+    if analysis is None and not maneuvers and not legs:
+        raise HTTPException(404, "No analysis available")
+    data = analysis.to_dict() if analysis is not None else {}
+    data["maneuvers"] = [m.to_dict() for m in maneuvers]
+    data["legs"] = [l.to_dict() for l in legs]
+    return data
 
 
 # --- crew ------------------------------------------------------------------------
@@ -163,7 +189,7 @@ def get_analysis(session_id: uuid.UUID, request: Request):
 def list_crew(session_id: uuid.UUID, request: Request):
     user = current_user(request)
     _require_visible(session_id, user)
-    return [c.to_dict() for c in repos.sessions.list_crew(session_id)]
+    return [with_user(c.to_dict(), c.user_id) for c in repos.sessions.list_crew(session_id)]
 
 
 @router.post("/{session_id}/crew")

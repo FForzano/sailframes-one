@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
 import { Spinner } from "@/components/ui/Spinner";
 import { ImageUploader } from "@/components/common/ImageUploader";
+import { Avatar } from "@/components/ui/Avatar";
+import { unitsStore, useUnits } from "@/stores/unitsStore";
 
 export function AnagraficaPage() {
   const { t } = useTranslation();
@@ -17,7 +19,18 @@ export function AnagraficaPage() {
   const queryClient = useQueryClient();
 
   const me = useQuery({ queryKey: userKeys.me, queryFn: usersService.me });
+  const units = useUnits();
   const [form, setForm] = useState({ first_name: "", last_name: "", dob: "" });
+
+  const saveUnits = useMutation({
+    mutationFn: (unit_system: "nautical" | "metric") =>
+      usersService.update(user!.id, { unit_system }),
+    onSuccess: async (_, unit_system) => {
+      unitsStore.set(unit_system);
+      await queryClient.invalidateQueries({ queryKey: userKeys.me });
+    },
+    onError: () => notify(t("errors.generic"), "error"),
+  });
 
   useEffect(() => {
     if (me.data) {
@@ -54,15 +67,17 @@ export function AnagraficaPage() {
     <div className="sf-grid" style={{ gridTemplateColumns: "minmax(280px, 480px)" }}>
       <Card title={t("profile.details")}>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
-          {me.data?.profile_image ? (
-            <img className="sf-avatar sf-avatar--lg" src={me.data.profile_image.url} alt="" />
-          ) : (
-            <div className="sf-avatar sf-avatar--lg" />
-          )}
+          <Avatar
+            size="lg"
+            profileImage={me.data?.profile_image ?? null}
+            firstName={me.data?.first_name}
+            lastName={me.data?.last_name}
+          />
           <ImageUploader
             label={t("profile.profileImage")}
             create={usersService.createProfileImage}
             confirm={(id) => usersService.confirmProfileImage(id)}
+            crop
             onDone={async () => {
               await queryClient.invalidateQueries({ queryKey: userKeys.me });
             }}
@@ -95,6 +110,26 @@ export function AnagraficaPage() {
             </Button>
           </div>
         </form>
+      </Card>
+      <Card title={t("profile.units")}>
+        <div className="sf-form__row">
+          <button
+            type="button"
+            className={`sf-btn sf-btn--sm ${units === "nautical" ? "sf-btn--primary" : "sf-btn--ghost"}`}
+            disabled={saveUnits.isPending}
+            onClick={() => saveUnits.mutate("nautical")}
+          >
+            {t("profile.unitsNautical")}
+          </button>
+          <button
+            type="button"
+            className={`sf-btn sf-btn--sm ${units === "metric" ? "sf-btn--primary" : "sf-btn--ghost"}`}
+            disabled={saveUnits.isPending}
+            onClick={() => saveUnits.mutate("metric")}
+          >
+            {t("profile.unitsMetric")}
+          </button>
+        </div>
       </Card>
     </div>
   );

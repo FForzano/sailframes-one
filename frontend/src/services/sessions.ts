@@ -4,7 +4,9 @@ import type {
   FileUploadTicket,
   ImageRef,
   ImageUploadTicket,
+  SailingRole,
   Session,
+  SessionAnalysis,
   SessionCrew,
   SessionStats,
   SessionStream,
@@ -16,6 +18,7 @@ export const sessionKeys = {
   detail: (id: UUID) => ["sessions", id] as const,
   streams: (id: UUID) => ["sessions", id, "streams"] as const,
   stats: (id: UUID) => ["sessions", id, "stats"] as const,
+  analysis: (id: UUID) => ["sessions", id, "analysis"] as const,
   crew: (id: UUID) => ["sessions", id, "crew"] as const,
   photos: (id: UUID) => ["sessions", id, "photos"] as const,
   videos: (id: UUID) => ["sessions", id, "videos"] as const,
@@ -27,13 +30,14 @@ export const sessionsService = {
   get: (id: UUID) => api.get<Session>(`/sessions/${id}`),
   update: (id: UUID, body: Partial<Session>) => api.patch<Session>(`/sessions/${id}`, body),
   remove: (id: UUID) => api.del(`/sessions/${id}`),
+  reanalyze: (id: UUID) => api.post<{ ok: boolean; session_upload_id: UUID }>(`/sessions/${id}/reanalyze`),
 
   streams: (id: UUID) => api.get<SessionStream[]>(`/sessions/${id}/streams`),
   stats: (id: UUID) => api.get<SessionStats>(`/sessions/${id}/stats`),
-  analysis: (id: UUID) => api.get<Record<string, unknown>>(`/sessions/${id}/analysis`),
+  analysis: (id: UUID) => api.get<SessionAnalysis>(`/sessions/${id}/analysis`),
 
   crew: (id: UUID) => api.get<SessionCrew[]>(`/sessions/${id}/crew`),
-  addCrew: (id: UUID, body: { user_id: UUID; sailing_role?: string }) =>
+  addCrew: (id: UUID, body: { user_id: UUID; sailing_role?: SailingRole }) =>
     api.post(`/sessions/${id}/crew`, body),
   removeCrew: (id: UUID, userId: UUID) => api.del(`/sessions/${id}/crew/${userId}`),
 

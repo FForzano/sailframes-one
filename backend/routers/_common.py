@@ -15,12 +15,15 @@ and that difference is load-bearing:
 """
 
 import os
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import HTTPException
 
 from ..storage import get_blob_store, BlobNotFound
 from ..repositories import get_repos
+from ..services import media
 
 # Process-wide singletons (both are lazy singletons internally, so importing
 # this module from many routers is cheap and shares one instance).
@@ -83,17 +86,78 @@ def delete_prefix(prefix: str) -> int:
 
 def user_summary(user_id) -> dict | None:
     """Minimal public user shape embedded in member/crew rows (boats, clubs,
-    groups) so rosters can render names without extra requests."""
+    groups) so rosters can render names (+ profile photo) without extra
+    requests."""
     u = repos.users.get_by_id(user_id)
     if u is None:
         return None
-    return {"id": u.id, "first_name": u.first_name,
-            "last_name": u.last_name, "email": u.email}
+    return {"id": u.id, "first_name": u.first_name, "last_name": u.last_name,
+            "email": u.email, "profile_image": media.image_payload(u.profile_image_id)}
 
 
 def with_user(row_dict: dict, user_id) -> dict:
     """Attach ``user_id`` + embedded ``user`` summary to a membership row."""
     return row_dict | {"user_id": user_id, "user": user_summary(user_id)}
+
+
+# --- Sensor data (activity/race replay) ------------------------------------
+
+def parse_point_t(t: str) -> Optional[datetime]:
+    """Parse a sensor point's ``t`` field (ISO timestamp), assuming UTC if no
+    offset is given."""
+    try:
+        dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def window_filter(points: list[dict], start: Optional[datetime],
+                  end: Optional[datetime]) -> list[dict]:
+    """Trim sensor points to ``[start, end]`` by their ``t`` field (no bounds
+    given: pass through unfiltered)."""
+    if start is None and end is None:
+        return points
+    out = []
+    for p in points:
+        ts = parse_point_t(p.get("t", ""))
+        if ts is None:
+            continue
+        if start is not None and ts < start:
+            continue
+        if end is not None and ts > end:
+            continue
+        out.append(p)
+    return out
+
+
+def activity_sensor_data(activity_id: uuid.UUID, sensors: str,
+                         start: Optional[datetime], end: Optional[datetime]) -> dict:
+    """Time-aligned sensor data for every session of an activity, keyed by
+    session id with boat info embedded — the shared body behind both the
+    race replay endpoint (``GET /races/{id}/data``, whose activity is
+    resolved via ``race_id``) and the plain activity replay endpoint
+    (``GET /activities/{id}/data``)."""
+    wanted = [s.strip() for s in sensors.split(",") if s.strip()]
+    out = {}
+    for session in repos.sessions.list(activity_id=activity_id):
+        boat = repos.boats.get(session.boat_id)
+        entry = {
+            "session_id": session.id,
+            "boat": {"id": boat.id, "name": boat.name, "sail_number": boat.sail_number}
+            if boat else None,
+            "sensors": {},
+        }
+        for stream in repos.ingest.list_streams_for_session(session.id):
+            if stream.sensor_type not in wanted or not stream.data_ref:
+                continue
+            try:
+                points = blob.get_json(stream.data_ref)
+            except BlobNotFound:
+                continue
+            entry["sensors"][stream.sensor_type] = window_filter(points, start, end)
+        out[str(session.id)] = entry
+    return out
 
 
 # --- Misc -----------------------------------------------------------------

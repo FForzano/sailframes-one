@@ -58,11 +58,11 @@
     "cancelRequest": "Cancel request"
   },
   "diario": {
-    "sessions": "Sessions",
     "activities": "Activities",
     "races": "Races"
   },
   "profile": {
+    "myProfile": "My profile",
     "details": "Details",
     "password": "Password",
     "boats": "Boats",
@@ -71,12 +71,17 @@
     "lastName": "Last name",
     "dob": "Date of birth",
     "profileImage": "Profile picture",
+    "cropImage": "Adjust profile picture",
+    "zoom": "Zoom",
     "changePassword": "Change password",
     "currentPassword": "Current password",
     "newPassword": "New password",
     "confirmPassword": "Confirm new password",
     "passwordMismatch": "Passwords do not match",
-    "passwordChanged": "Password changed"
+    "passwordChanged": "Password changed",
+    "units": "Units",
+    "unitsNautical": "Nautical (kn, nm)",
+    "unitsMetric": "Metric (km/h, km)"
   },
   "boats": {
     "title": "My boats",
@@ -173,6 +178,12 @@
     "noGps": "No GPS data for this session",
     "crew": "Crew",
     "addCrew": "Add crew",
+    "sailingRole": "Role",
+    "sailingRoles": {
+      "skipper": "Skipper",
+      "crew": "Crew",
+      "guest": "Guest"
+    },
     "photos": "Photos",
     "videos": "Videos",
     "processing": "Processing…",
@@ -184,7 +195,34 @@
     "importStart": "Start upload",
     "importDone": "Import processed",
     "importFailed": "Import failed",
-    "activity": "Activity"
+    "activity": "Activity",
+    "backToActivity": "Back to activity",
+    "analysis": "Analysis",
+    "polar": "Polar diagram",
+    "vmg": "VMG",
+    "legs": "Legs (ranked by VMG)",
+    "maneuvers": "Maneuvers",
+    "maneuverCompare": "Tacks vs gybes",
+    "correlations": "Correlations",
+    "distributions": "Sensor distributions",
+    "type": "Type",
+    "tacks": "Tacks",
+    "gybes": "Gybes",
+    "tack": "Tack",
+    "gybe": "Gybe",
+    "upwind": "Upwind",
+    "downwind": "Downwind",
+    "reach": "Reach",
+    "count": "Count",
+    "speedLoss": "Speed loss",
+    "recovery": "Recovery",
+    "avgSpeedLoss": "Avg speed loss",
+    "avgRecovery": "Avg recovery",
+    "avgDuration": "Avg duration",
+    "showLegs": "Show legs",
+    "showManeuvers": "Show maneuvers",
+    "reanalyze": "Re-run analysis",
+    "reanalyzeQueued": "Analysis re-run queued"
   },
   "activities": {
     "title": "Activities",
@@ -197,10 +235,30 @@
       "private": "Private"
     },
     "newActivity": "New activity",
-    "sessions": "Sessions",
+    "boats": "Boats",
+    "map": "Map",
+    "rename": "Rename",
+    "namePlaceholder": "Activity name",
     "marks": "Marks",
     "addMark": "Add mark",
     "markRole": "Mark role",
+    "markRoles": {
+      "pin": "Pin (start line)",
+      "rc": "Race committee",
+      "windward": "Windward",
+      "leeward": "Leeward",
+      "gate_port": "Gate (port)",
+      "gate_stbd": "Gate (starboard)",
+      "offset": "Offset",
+      "drill": "Drill"
+    },
+    "timeOfDay": {
+      "morning": "Morning",
+      "afternoon": "Afternoon",
+      "evening": "Evening",
+      "night": "Night"
+    },
+    "noGps": "No GPS data for this activity",
     "empty": "No activities.",
     "deleteConfirm": "Delete this activity?",
     "mine": "Mine only"
@@ -222,6 +280,9 @@
     "leaderboard": "Leaderboard",
     "results": "Results",
     "speed": "Speed (kn)",
+    "course": "Course",
+    "starboard": "starboard",
+    "port": "port",
     "play": "Play",
     "pause": "Pause",
     "manage": "Race management",

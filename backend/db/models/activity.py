@@ -47,6 +47,12 @@ class ActivityORM(UUIDPKMixin, Base):
     visibility: Mapped[str] = mapped_column(String, nullable=False, default="private")
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Overlay PNG (one track per session, different color each) rendered by
+    # the worker whenever a session in this activity finishes processing —
+    # shown as the card thumbnail in the unified Activities list.
+    thumbnail_image_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class MarkORM(UUIDPKMixin, Base):

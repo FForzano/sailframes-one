@@ -9,7 +9,7 @@ via the regatta's club; marks via ``mark.manage``.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
@@ -20,7 +20,9 @@ from ..services import course as course_service
 from ..services import gpx as gpx_service
 from ..services import ingestion
 from ..storage import BlobNotFound
-from ._common import blob, repos
+from ._common import activity_sensor_data, blob, repos
+from ._common import parse_point_t as _parse_point_t
+from ._common import window_filter as _window_filter
 
 router = APIRouter(prefix="/api/races", tags=["races"])
 
@@ -54,31 +56,6 @@ def _race_activity(race, *, create: bool = False):
         "started_at": started,
         "ended_at": ended,
     })
-
-
-def _parse_point_t(t: str) -> Optional[datetime]:
-    try:
-        dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return None
-
-
-def _window_filter(points: list[dict], start: Optional[datetime],
-                   end: Optional[datetime]) -> list[dict]:
-    if start is None and end is None:
-        return points
-    out = []
-    for p in points:
-        ts = _parse_point_t(p.get("t", ""))
-        if ts is None:
-            continue
-        if start is not None and ts < start:
-            continue
-        if end is not None and ts > end:
-            continue
-        out.append(p)
-    return out
 
 
 def _session_gps(session_id: uuid.UUID, sensor_type: str = "gps") -> list[dict]:
@@ -198,25 +175,7 @@ def get_race_data(race_id: uuid.UUID, sensors: str = "gps",
     start = activity.started_at - timedelta(seconds=pad_start) if activity.started_at else None
     end = activity.ended_at + timedelta(seconds=pad_end) if activity.ended_at else None
 
-    wanted = [s.strip() for s in sensors.split(",") if s.strip()]
-    out = {}
-    for session in repos.sessions.list(activity_id=activity.id):
-        boat = repos.boats.get(session.boat_id)
-        entry = {
-            "session_id": session.id,
-            "boat": {"id": boat.id, "name": boat.name, "sail_number": boat.sail_number}
-            if boat else None,
-            "sensors": {},
-        }
-        for stream in repos.ingest.list_streams_for_session(session.id):
-            if stream.sensor_type not in wanted or not stream.data_ref:
-                continue
-            try:
-                points = blob.get_json(stream.data_ref)
-            except BlobNotFound:
-                continue
-            entry["sensors"][stream.sensor_type] = _window_filter(points, start, end)
-        out[str(session.id)] = entry
+    out = activity_sensor_data(activity.id, sensors, start, end)
     return {"race_id": race_id, "activity_id": activity.id, "sessions": out}
 
 

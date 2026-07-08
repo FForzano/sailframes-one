@@ -1,14 +1,28 @@
 import { timeController, useTimeState } from "@/stores/timeController";
 import { fmtTime } from "@/utils/format";
 
-const SPEEDS = [1, 2, 4, 8];
-
-// Transport bar: play/pause, speed multipliers, a scrub range, and the clock.
-export function Timeline() {
+// Compact transport bar: step back, play/pause, step forward, a speed-cycle
+// button, and the clock. The speed chart itself is the scrubber (drag/tap to
+// seek) — no separate progress bar, so this row stays narrow on mobile.
+export function Timeline({
+  stepMs = 5000,
+  className = "",
+}: {
+  stepMs?: number;
+  /** Extra class, e.g. "sf-timeline--overlay" when floated on top of the map. */
+  className?: string;
+}) {
   const { tMin, tMax, cursor, playing, speed } = useTimeState();
 
   return (
-    <div className="sf-timeline">
+    <div className={`sf-timeline ${className}`}>
+      <button
+        className="sf-btn sf-btn--ghost sf-btn--sm"
+        onClick={() => timeController.step(-stepMs)}
+        aria-label="Step back"
+      >
+        ⏮
+      </button>
       <button
         className="sf-btn sf-btn--primary sf-btn--sm"
         onClick={() => timeController.toggle()}
@@ -16,25 +30,20 @@ export function Timeline() {
       >
         {playing ? "⏸" : "▶"}
       </button>
-      <div className="sf-timeline__speeds">
-        {SPEEDS.map((s) => (
-          <button
-            key={s}
-            className={`sf-timeline__speed ${speed === s ? "active" : ""}`}
-            onClick={() => timeController.setSpeed(s)}
-          >
-            {s}×
-          </button>
-        ))}
-      </div>
-      <input
-        type="range"
-        min={tMin}
-        max={tMax}
-        value={cursor}
-        step={100}
-        onChange={(e) => timeController.seek(Number(e.target.value))}
-      />
+      <button
+        className="sf-btn sf-btn--ghost sf-btn--sm"
+        onClick={() => timeController.step(stepMs)}
+        aria-label="Step forward"
+      >
+        ⏭
+      </button>
+      <button
+        className="sf-btn sf-btn--ghost sf-btn--sm sf-timeline__speed"
+        onClick={() => timeController.cycleSpeed()}
+        aria-label="Cycle playback speed"
+      >
+        {speed}×
+      </button>
       <span className="sf-timeline__clock">{tMax > tMin ? fmtTime(cursor) : "--:--:--"}</span>
     </div>
   );

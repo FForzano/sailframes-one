@@ -32,6 +32,11 @@ body,
   height: 100%;
 }
 
+html,
+body {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   font-family: var(--sf-font);
@@ -112,16 +117,15 @@ h1, h2, h3 {
 .sf-navbar__spacer {
   flex: 1;
 }
-.sf-navbar__user {
+.sf-navbar__avatarbtn {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 50%;
 }
-.sf-navbar__email {
-  color: var(--sf-muted);
-  font-size: 0.85rem;
-}
-
 /* ---------- Mobile action bar (bottom) ---------- */
 .sf-actionbar {
   display: none;
@@ -170,6 +174,10 @@ h1, h2, h3 {
     font-size: 1.25rem;
     line-height: 1;
   }
+  .sf-actionbar__avatar {
+    width: 22px;
+    height: 22px;
+  }
   /* Keep content clear of the fixed bar. */
   .sf-main {
     padding-bottom: calc(var(--sf-actionbar-h) + 2rem);
@@ -209,6 +217,10 @@ h1, h2, h3 {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+.sf-profilo__logout {
+  justify-content: center;
+  padding-top: 0.5rem;
 }
 
 /* ---------- Buttons ---------- */
@@ -274,6 +286,46 @@ h1, h2, h3 {
 .sf-card__actions {
   display: flex;
   gap: 0.5rem;
+}
+/* Click-to-rename title text (ActivityDetailPage) — a dashed underline hints
+   it's editable; the input that replaces it on click matches the title size. */
+.sf-card__title--editable {
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+}
+.sf-card__title--editable:hover {
+  border-bottom-color: var(--sf-muted);
+}
+.sf-card__title-input {
+  font: inherit;
+  font-size: 1.05rem;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  color: var(--sf-text);
+}
+/* A <select> styled to look like the badges around it (visibility editor). */
+.sf-badge--select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  cursor: pointer;
+}
+/* Zero side padding so a full-bleed map/media fills the card's width; content
+   that still needs the normal inset (controls below the map, etc.) wraps
+   itself in `.sf-card__pad`. */
+.sf-card--flush {
+  padding-left: 0;
+  padding-right: 0;
+}
+/* ...but keep the head's own inset — only the body should go edge-to-edge. */
+.sf-card--flush .sf-card__head {
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+}
+.sf-card__pad {
+  padding: 0 1.25rem;
 }
 
 .sf-field {
@@ -378,6 +430,66 @@ h1, h2, h3 {
 .sf-table tr:hover td {
   background: color-mix(in srgb, var(--sf-surface-2) 50%, transparent);
 }
+.sf-session-thumb {
+  display: block;
+  width: 56px;
+  height: 42px;
+  border-radius: 4px;
+  background: var(--sf-bg-2);
+  object-fit: contain;
+}
+.sf-session-thumb--empty {
+  border: 1px dashed var(--sf-border);
+}
+
+.sf-backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  color: var(--sf-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.sf-backlink:hover {
+  color: var(--sf-primary);
+}
+
+.sf-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.sf-activity-card {
+  display: block;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+.sf-activity-card:hover {
+  border-color: var(--sf-primary);
+}
+.sf-activity-card__thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4/3;
+  background: var(--sf-bg-2);
+  object-fit: contain;
+}
+.sf-activity-card__thumb--empty {
+  border-bottom: 1px dashed var(--sf-border);
+}
+.sf-activity-card__body {
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
 
 .sf-badge {
   display: inline-block;
@@ -433,6 +545,11 @@ h1, h2, h3 {
 .sf-strip__item--muted {
   background: var(--sf-surface);
   color: var(--sf-muted);
+}
+.sf-crew-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 .sf-strip__actions {
   display: flex;
@@ -555,6 +672,18 @@ h1, h2, h3 {
   width: 96px;
   height: 96px;
 }
+.sf-avatar--sm {
+  width: 32px;
+  height: 32px;
+}
+.sf-avatar--initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--sf-text);
+  font-size: 0.85em;
+}
 .sf-photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -623,53 +752,245 @@ h1, h2, h3 {
   border-radius: var(--sf-radius);
   border: 1px solid var(--sf-border);
   overflow: hidden;
+  position: relative;
+  /* Contain Leaflet's internal z-index stack (controls, panes, the wind
+     badge below) so it can never render above page chrome (nav, modals,
+     dropdowns) that sits outside this element. */
+  isolation: isolate;
 }
 .sf-race__map .leaflet-container {
   height: 100%;
   width: 100%;
-  background: #0a1826;
+  background: #e9e5dc;
 }
 .sf-map--session {
-  height: 360px;
+  height: clamp(260px, 45vh, 420px);
+}
+.sf-map__surface {
+  position: absolute;
+  inset: 0;
 }
 
+/* Zoom control: bottom-right, small, horizontal (instead of Leaflet's
+   default stacked top-left). */
+.sf-race__map .leaflet-control-zoom {
+  display: flex;
+  flex-direction: row;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.sf-race__map .leaflet-control-zoom a {
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  font-size: 14px;
+  border-bottom: none;
+}
+.sf-race__map .leaflet-control-zoom-in {
+  border-right: 1px solid var(--sf-border);
+}
+
+/* Recenter control: pans/fits the map back to the current playback position.
+   Box-model centering (not line-height) + an inline SVG rather than a glyph
+   — text/emoji glyphs are rarely optically centered in their em-box. */
+.sf-map__recenter {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  margin-top: 6px;
+}
+
+/* Map overlays: options popover (top-right) and playback transport (bottom-center). */
+.sf-map__options {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+}
+/* Fixed opaque background regardless of variant/what's underneath — a plain
+   ghost button (transparent bg) reads fine on the page but disappears or
+   clashes depending on which map tile happens to sit behind it. */
+.sf-map__options .sf-btn {
+  background: rgba(20, 50, 77, 0.85);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.sf-map__options .sf-btn:hover:not(:disabled) {
+  background: rgba(20, 50, 77, 1);
+}
+.sf-map__controls {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
+.sf-timeline--overlay {
+  background: rgba(20, 50, 77, 0.85);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+/* Draggable position marker — a colored dot matching the track's color,
+   dragged along the track to scrub playback (see MapView.tsx). */
+.sf-posmarker span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #1a1a1a;
+  box-sizing: border-box;
+}
+
+/* Click-track popup: a plain semi-transparent rounded rectangle instead of
+   Leaflet's default speech-bubble tail/shadow — dismissed by clicking
+   elsewhere on the map (Leaflet's default popup behavior), no close button. */
+.sf-map-popup .leaflet-popup-content-wrapper {
+  background: rgba(10, 24, 38, 0.85);
+  color: #fff;
+  border-radius: var(--sf-radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.sf-map-popup .leaflet-popup-content {
+  margin: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.sf-map-popup .leaflet-popup-tip-container {
+  display: none;
+}
+
+/* Wind indicator overlay: direction + speed for the session's region. */
+.sf-map__wind {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  background: rgba(10, 24, 38, 0.75);
+  border: 1px solid var(--sf-border);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.85rem;
+  backdrop-filter: blur(2px);
+}
+.sf-map__wind-arrow {
+  display: inline-block;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.sf-map__wind-speed {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---------- Session analysis ---------- */
+.sf-analysis__block {
+  margin-top: 0.5rem;
+}
+.sf-analysis__title {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+  color: var(--sf-muted);
+  opacity: 0.75;
+}
+.sf-polar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sf-polar__lbl {
+  fill: var(--sf-muted);
+  font-size: 10px;
+}
+.sf-polar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+}
+.sf-polar__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.sf-polar__legend i {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+.sf-polar__pick {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+.sf-heatmap {
+  display: grid;
+  gap: 2px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+.sf-heatmap__lbl {
+  color: var(--sf-muted);
+  padding: 0.2rem 0.35rem;
+  white-space: nowrap;
+  align-self: center;
+}
+.sf-heatmap__cell {
+  padding: 0.35rem 0.4rem;
+  text-align: center;
+  border-radius: 3px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Compact transport bar: step/play/step/speed-cycle + clock — no progress
+   bar (the speed chart is the scrubber), so this stays narrow on mobile. */
 .sf-timeline {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 1rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
-}
-.sf-timeline input[type="range"] {
-  flex: 1;
-  accent-color: var(--sf-primary);
+  width: fit-content;
+  max-width: 100%;
 }
 .sf-timeline__clock {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9rem;
   color: var(--sf-muted);
-  min-width: 70px;
+  min-width: 64px;
   text-align: right;
 }
-.sf-timeline__speeds {
-  display: flex;
-  gap: 0.25rem;
-}
 .sf-timeline__speed {
-  border: 1px solid var(--sf-border);
-  background: transparent;
-  color: var(--sf-muted);
-  border-radius: 6px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-.sf-timeline__speed.active {
-  background: var(--sf-primary);
-  color: var(--sf-primary-ink);
-  border-color: var(--sf-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-width: 2.4rem;
 }
 
 .sf-chart {
@@ -677,6 +998,94 @@ h1, h2, h3 {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
+}
+
+.sf-chartpanel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.sf-chartpanel__head .sf-muted {
+  opacity: 0.75;
+}
+.sf-options {
+  position: relative;
+}
+.sf-options__panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  margin-top: 0.3rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+.sf-options__panel .sf-check {
+  margin-bottom: 0;
+}
+.sf-optionsmenu__panel {
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+}
+.sf-optionsmenu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--sf-text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.sf-optionsmenu__item:hover:not(:disabled) {
+  background: var(--sf-bg-2);
+}
+.sf-optionsmenu__item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sf-optionsmenu__item--danger {
+  color: var(--sf-danger);
+}
+
+/* Live playback readouts: 4-up row on desktop, 2×2 on mobile. */
+.sf-indicators {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 700px) {
+  .sf-indicators {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.sf-indicators__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+}
+.sf-indicators__label {
+  font-size: 0.75rem;
+  color: var(--sf-muted);
+}
+.sf-indicators__value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .sf-markicon {
@@ -689,6 +1098,27 @@ h1, h2, h3 {
 .sf-markicon--preview {
   color: var(--sf-primary);
   opacity: 0.75;
+}
+.sf-markicon--leg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--sf-primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+.sf-markicon--maneuver {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sf-warning);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
 }
 
 .sf-legend__dot {

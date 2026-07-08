@@ -12,7 +12,6 @@ from .models import GpsPoint, ImuReading, Maneuver, ManeuverType
 
 
 # Detection thresholds
-MIN_HEADING_CHANGE_DEG = 40  # minimum heading change to qualify (lowered from 60)
 MAX_MANEUVER_DURATION_SEC = 30  # max time for heading change
 MIN_BOAT_SPEED_KTS = 1.5  # ignore turns while nearly stopped
 SPEED_RECOVERY_THRESHOLD = 0.9  # 90% of entry speed
@@ -20,6 +19,8 @@ MAX_RECOVERY_WINDOW_SEC = 60
 TURN_RATE_THRESHOLD = 3.0  # deg/sec to detect turn
 TURN_WINDOW_EXTEND_SEC = 5  # extend window before/after rapid portion
 MIN_MANEUVER_SPACING_SEC = 20  # minimum time between maneuvers to avoid duplicates
+HEADING_SMOOTH_WINDOW = 5  # samples, circular moving average before detection
+HOLD_WINDOW_SEC = 12  # min dwell time on a side for it to count as a real tack
 
 
 def detect_maneuvers(
@@ -29,15 +30,29 @@ def detect_maneuvers(
 ) -> list[Maneuver]:
     """Detect tacks and gybes from heading changes.
 
-    Uses sliding window to find significant heading changes in GPS course.
-    Classifies as tack vs gybe using true wind direction if provided.
+    A maneuver is a genuine tack-side change (port/starboard relative to the
+    wind axis), not just any rapid heading change — a tactical heading wiggle
+    or an aborted/failed maneuver that rounds back never really settles onto
+    the new side, so neither should count. This is enforced structurally: the
+    whole per-sample side sequence is first debounced (`_debounced_sides`),
+    absorbing any side run shorter than `HOLD_WINDOW_SEC` into its
+    predecessor, so every remaining transition is guaranteed to have *both* a
+    settled "before" and a settled "after" side — not just checked one-sided
+    after the fact. Only those transitions become maneuver candidates, each
+    then refined to its precise start/end (where the heading actually starts/
+    stops turning) for the duration/speed-loss metrics below. Without real
+    wind data (`twd_deg`), falls back to a synthetic axis (the track's
+    circular-mean heading) for the same side test, at reduced confidence.
     """
     if len(gps) < 20:
         return []
 
     # Use GPS course for heading - IMU heading often has mounting offset issues
     times = np.array([p.timestamp for p in gps])
-    headings = np.array([p.heading_deg for p in gps])
+    raw_headings = np.array([p.heading_deg for p in gps])
+    # Smoothed heading drives candidate detection — plain GPS-course jitter
+    # near head-to-wind/dead-downwind otherwise triggers spurious candidates.
+    headings = _smooth_heading(raw_headings)
 
     # GPS speed series for speed loss calculation
     gps_times = np.array([p.timestamp for p in gps])
@@ -45,41 +60,35 @@ def detect_maneuvers(
     gps_lats = np.array([p.lat for p in gps])
     gps_lons = np.array([p.lon for p in gps])
 
-    # Use sliding window to detect significant heading changes
-    # Window of 20-30 seconds captures typical tack/gybe duration
+    axis_deg = twd_deg if twd_deg is not None else _circular_mean(raw_headings)
+
+    # Window used only to refine each candidate's precise start/end once a
+    # real transition has already been located (see WINDOW_SIZE usage below).
     WINDOW_SIZE = 25  # samples (seconds at 1Hz)
+
+    sides = np.array([_tack_side(h, axis_deg) for h in headings])
+    sides = _debounced_sides(sides, times, HOLD_WINDOW_SEC)
+    transitions = np.where(np.diff(sides) != 0)[0]
 
     maneuvers = []
     last_maneuver_end = -999999
 
-    i = WINDOW_SIZE
-    while i < len(headings):
-        # Check heading change over window
-        heading_change = _angular_diff(headings[i], headings[i - WINDOW_SIZE])
-
-        # Skip if not a significant change
-        if abs(heading_change) < MIN_HEADING_CHANGE_DEG:
-            i += 1
-            continue
-
-        # Skip if too close to last maneuver
-        t_start = times[i - WINDOW_SIZE]
-        if t_start < last_maneuver_end + MIN_MANEUVER_SPACING_SEC:
-            i += 1
-            continue
-
-        # Found a potential maneuver - refine the boundaries
-        # Find the actual start (where heading started changing)
-        start_idx = i - WINDOW_SIZE
-        while start_idx < i - 5:
-            local_change = abs(_angular_diff(headings[start_idx + 5], headings[start_idx]))
-            if local_change > 10:  # Found where significant change starts
+    for pivot in transitions:
+        # Refine the actual turn boundaries around the debounced transition:
+        # scan backward for where the rapid heading change begins, forward
+        # for where it stabilizes on the new side (same rate-of-turn logic
+        # as before, just anchored on a confirmed real transition).
+        start_idx = pivot
+        floor = max(5, pivot - WINDOW_SIZE)
+        while start_idx > floor:
+            local_change = abs(_angular_diff(headings[start_idx], headings[start_idx - 5]))
+            if local_change < 10:
                 break
-            start_idx += 1
+            start_idx -= 1
 
-        # Find the actual end (where heading stabilized)
-        end_idx = i
-        while end_idx < min(len(headings) - 5, i + WINDOW_SIZE):
+        end_idx = pivot
+        ceiling = min(len(headings) - 5, pivot + WINDOW_SIZE)
+        while end_idx < ceiling:
             local_change = abs(_angular_diff(headings[end_idx + 5], headings[end_idx]))
             if local_change < 5:  # Heading stabilized
                 break
@@ -90,7 +99,8 @@ def detect_maneuvers(
         duration = t_end - t_start
 
         if duration > MAX_MANEUVER_DURATION_SEC:
-            i += 5
+            continue
+        if t_start < last_maneuver_end + MIN_MANEUVER_SPACING_SEC:
             continue
 
         heading_before = headings[start_idx]
@@ -100,8 +110,10 @@ def detect_maneuvers(
         # Speed metrics (interpolate GPS speed at maneuver boundaries)
         speed_before = float(np.interp(t_start, gps_times, gps_speeds))
         if speed_before < MIN_BOAT_SPEED_KTS:
-            i += 1
             continue
+
+        rel_before = _angular_diff(heading_before, axis_deg)
+        rel_after = _angular_diff(heading_after, axis_deg)
 
         # Find minimum speed during maneuver
         mask = (gps_times >= t_start) & (gps_times <= t_end)
@@ -116,9 +128,7 @@ def detect_maneuvers(
         )
 
         # Classify as tack or gybe
-        maneuver_type = _classify_maneuver(
-            heading_before, heading_after, twd_deg
-        )
+        maneuver_type = _classify_maneuver(rel_before, rel_after)
 
         # Heel during maneuver (from IMU)
         max_heel = None
@@ -150,10 +160,6 @@ def detect_maneuvers(
         ))
         last_maneuver_end = t_end
 
-        # Skip past this maneuver to avoid duplicate detection
-        i = end_idx + WINDOW_SIZE
-        continue
-
     return maneuvers
 
 
@@ -167,28 +173,68 @@ def _angular_diff(a: float | np.ndarray, b: float | np.ndarray) -> float | np.nd
     return d
 
 
-def _classify_maneuver(
-    heading_before: float,
-    heading_after: float,
-    twd_deg: float | None,
-) -> ManeuverType:
-    """Classify as tack (head through wind) or gybe (stern through wind)."""
-    if twd_deg is None:
-        # Without wind data, large heading changes >90° across likely wind axis
-        # Default to tack for heading changes in typical upwind range
-        change = abs(_angular_diff(heading_after, heading_before))
-        return ManeuverType.TACK if change < 120 else ManeuverType.GYBE
+def _circular_mean(angles_deg: np.ndarray) -> float:
+    """Mean of a set of angles via their unit vectors — a plain arithmetic
+    mean breaks near the 0°/360° wraparound."""
+    rad = np.radians(angles_deg)
+    return float(np.degrees(np.arctan2(np.mean(np.sin(rad)), np.mean(np.cos(rad)))) % 360)
 
-    # Relative to wind: tack if bow crosses wind, gybe if stern crosses
-    rel_before = _angular_diff(heading_before, twd_deg)
-    rel_after = _angular_diff(heading_after, twd_deg)
 
-    # Tack: both headings within ~90° of wind (upwind), different sides
-    if abs(rel_before) < 100 and abs(rel_after) < 100:
-        if (rel_before > 0) != (rel_after > 0):
-            return ManeuverType.TACK
+def _smooth_heading(headings_deg: np.ndarray, window: int = HEADING_SMOOTH_WINDOW) -> np.ndarray:
+    """Centered circular moving average (via unit vectors, to avoid
+    wraparound artifacts a plain arithmetic mean would introduce) — reduces
+    compass/GPS-course jitter that would otherwise trigger spurious
+    rate-of-turn candidates in the sliding-window scan."""
+    if len(headings_deg) < window:
+        return headings_deg
+    rad = np.radians(headings_deg)
+    kernel = np.ones(window) / window
+    pad_before, pad_after = window // 2, window - 1 - window // 2
+    cos_s = np.convolve(np.pad(np.cos(rad), (pad_before, pad_after), mode="edge"), kernel, mode="valid")
+    sin_s = np.convolve(np.pad(np.sin(rad), (pad_before, pad_after), mode="edge"), kernel, mode="valid")
+    return np.degrees(np.arctan2(sin_s, cos_s)) % 360
 
-    return ManeuverType.GYBE
+
+def _tack_side(heading_deg: float, axis_deg: float) -> int:
+    """+1 = starboard tack (wind from the right of the axis), -1 = port."""
+    return 1 if _angular_diff(heading_deg, axis_deg) > 0 else -1
+
+
+def _debounced_sides(sides: np.ndarray, times: np.ndarray, min_run_sec: float) -> np.ndarray:
+    """Minimum-dwell-time filter on a per-sample tack-side sequence: any run
+    shorter than `min_run_sec` is absorbed into the run before it. This is
+    what actually distinguishes a genuine maneuver from a brief wiggle or an
+    aborted attempt that rounds back — a transition only survives if *both*
+    neighboring sides were themselves genuinely settled, not just the side
+    after it (checking one side only would let an aborted maneuver's rebound
+    read as a fresh, valid transition). Iterates to convergence since
+    absorbing one short run can join two longer runs that then need
+    re-checking (rare in practice, bounded for safety)."""
+    sides = sides.copy()
+    n = len(sides)
+    for _ in range(5):
+        changed = False
+        i = 0
+        while i < n:
+            j = i
+            while j < n and sides[j] == sides[i]:
+                j += 1
+            run_sec = times[min(j, n - 1)] - times[i]
+            if run_sec < min_run_sec and 0 < i < n:
+                sides[i:j] = sides[i - 1]
+                changed = True
+            i = j
+        if not changed:
+            break
+    return sides
+
+
+def _classify_maneuver(rel_before: float, rel_after: float) -> ManeuverType:
+    """Tack = the bow crosses head-to-wind (both headings within 90° of the
+    wind axis); gybe = the stern crosses (both beyond 90°). Called only after
+    a real side change has already been confirmed by the caller."""
+    avg_abs_rel = (abs(rel_before) + abs(rel_after)) / 2
+    return ManeuverType.TACK if avg_abs_rel < 90 else ManeuverType.GYBE
 
 
 def _compute_recovery(

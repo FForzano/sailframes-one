@@ -143,6 +143,13 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+    # The local dev Lambda RIE panics (SIGSEGV) if a second invocation lands
+    # while the first hasn't fully unwound yet (see the activity-thumbnail
+    # dispatch in backend/routers/system.py) — without a restart policy that
+    # takes the whole container down for good, and every upload/reanalysis
+    # afterwards silently no-ops (dispatch failures there are best-effort and
+    # only logged, never surfaced to the user).
+    restart: unless-stopped
 
   video:
     build:

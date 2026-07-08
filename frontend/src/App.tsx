@@ -5,7 +5,6 @@ import { LoginPage } from "@/pages/Login";
 import { RegisterPage } from "@/pages/Register";
 import { NotFoundPage } from "@/pages/NotFound";
 import { DiarioLayout } from "@/pages/diario/DiarioLayout";
-import { SessionsPage } from "@/pages/diario/SessionsPage";
 import { SessionDetailPage } from "@/pages/diario/SessionDetailPage";
 import { ImportPage } from "@/pages/diario/ImportPage";
 import { ActivitiesPage } from "@/pages/diario/ActivitiesPage";
@@ -35,15 +34,14 @@ export default function App() {
       {/* Login mandatory everywhere: the entire shell sits behind RequireAuth. */}
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
-          <Route path="/" element={<Navigate to="/diario/sessioni" replace />} />
+          <Route path="/" element={<Navigate to="/diario/activities" replace />} />
 
           <Route path="/diario" element={<DiarioLayout />}>
-            <Route index element={<Navigate to="sessioni" replace />} />
-            <Route path="sessioni" element={<SessionsPage />} />
-            <Route path="sessioni/import" element={<ImportPage />} />
-            <Route path="sessioni/:sessionId" element={<SessionDetailPage />} />
+            <Route index element={<Navigate to="activities" replace />} />
             <Route path="activities" element={<ActivitiesPage />} />
+            <Route path="activities/import" element={<ImportPage />} />
             <Route path="activities/:activityId" element={<ActivityDetailPage />} />
+            <Route path="activities/:activityId/barche/:sessionId" element={<SessionDetailPage />} />
             <Route path="regate" element={<RegattasPage />} />
           </Route>
           {/* The race dashboard is full-width, outside the tabbed layout. */}

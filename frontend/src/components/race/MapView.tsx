@@ -1,8 +1,36 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { useTimeState } from "@/stores/timeController";
-import { pointAt, type Track } from "./raceModel";
+import { timeController, useTimeState } from "@/stores/timeController";
+import { useWindAt } from "@/hooks/useWindAt";
+import { fmtKnots } from "@/utils/format";
+import type { VmgPoint } from "@/types";
+import {
+  catmullRomInterval,
+  pointAt,
+  smoothTrackLine,
+  speedColor,
+  speedRange,
+  vmgAt,
+  type Track,
+  type TrackPoint,
+} from "./raceModel";
+
+// Nearest track point to a click/drag, by plain lat/lon distance (only used
+// to pick "which fix", not a real distance — squared error is fine).
+function nearestPoint(tr: Track, latlng: L.LatLng) {
+  let best = tr.pts[0];
+  let bestD = Infinity;
+  for (const p of tr.pts) {
+    const d = (p.lat - latlng.lat) ** 2 + (p.lon - latlng.lng) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return best;
+}
 
 export interface MapMark {
   id?: string;
@@ -11,6 +39,12 @@ export interface MapMark {
   lng: number;
   /** preview marks (suggest/auto-start-line before apply) render dashed */
   preview?: boolean;
+  /** "leg" marks render as a numbered circle (see `seq`); "maneuver" marks
+   * render as a small plain dot in a distinct color. Omit for the default
+   * diamond (race marks: start/windward/gate/finish…). */
+  kind?: "leg" | "maneuver";
+  /** Progressive number shown on "leg" marks (matches the LegsTable `#` column). */
+  seq?: number;
 }
 
 // Imperative Leaflet (not react-leaflet): tracks + marks are drawn once, and
@@ -21,23 +55,72 @@ export function MapView({
   tracks,
   marks = [],
   className = "sf-race__map",
+  wind,
+  vmg,
+  mapOptions,
+  controls,
 }: {
   tracks: Track[];
   marks?: MapMark[];
   className?: string;
+  /** Region to show a wind direction/speed overlay for (e.g. the session's
+   * start point + start time) — omit to hide the overlay entirely. */
+  wind?: { lat: number; lng: number; at?: string | null };
+  /** VMG series (session-scoped) — if given, the click-track popup shows VMG
+   * alongside speed/course. */
+  vmg?: VmgPoint[] | null;
+  /** Rendered as a floating ⚙-style overlay, top-left (e.g. legs/maneuvers
+   * toggles) — omit to show nothing there. */
+  mapOptions?: ReactNode;
+  /** Rendered as a floating overlay, bottom-center (the playback transport). */
+  controls?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<Record<string, L.CircleMarker>>({});
+  const markersRef = useRef<Record<string, L.Marker>>({});
+  const marksLayerRef = useRef<L.LayerGroup | null>(null);
+  // Tracks currently being drag-scrubbed — the cursor-sync effect below
+  // skips these so it doesn't fight Leaflet's own drag handler.
+  const draggingRef = useRef<Set<string>>(new Set());
   const { cursor } = useTimeState();
+  // Read from the recenter button's click handler (defined once at setup
+  // time) without forcing a full map rebuild on every playback tick.
+  const cursorRef = useRef(cursor);
+  const { data: windAt } = useWindAt(wind?.lat, wind?.lng, wind?.at);
 
   // One-time map + static layer setup (rebuilt when the data identity changes).
   useEffect(() => {
     if (!elRef.current) return;
-    const map = L.map(elRef.current, { zoomControl: true });
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: "© OpenStreetMap © CARTO",
-      maxZoom: 20,
+    const map = L.map(elRef.current, { zoomControl: false, preferCanvas: true });
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+
+    const RecenterControl = L.Control.extend({
+      onAdd() {
+        const btn = L.DomUtil.create("button", "sf-map__recenter leaflet-bar");
+        btn.type = "button";
+        btn.title = "Recenter";
+        btn.innerHTML =
+          '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
+          '<circle cx="8" cy="8" r="2.5" fill="currentColor"/>' +
+          '<path d="M8 0v3.5M8 12.5V16M0 8h3.5M12.5 8H16" stroke="currentColor" stroke-width="1.5"/>' +
+          "</svg>";
+        L.DomEvent.disableClickPropagation(btn);
+        btn.onclick = () => {
+          const pts = tracks
+            .map((tr) => pointAt(tr, cursorRef.current))
+            .filter((p): p is TrackPoint => p != null);
+          if (!pts.length) return;
+          if (pts.length === 1) map.panTo([pts[0].lat, pts[0].lon]);
+          else map.fitBounds(L.latLngBounds(pts.map((p) => [p.lat, p.lon] as [number, number])).pad(0.2));
+        };
+        return btn;
+      },
+    });
+    new RecenterControl({ position: "bottomright" }).addTo(map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors",
+      maxZoom: 19,
     }).addTo(map);
     mapRef.current = map;
 
@@ -45,32 +128,97 @@ export function MapView({
     for (const tr of tracks) {
       const latlngs = tr.pts.map((p) => [p.lat, p.lon] as [number, number]);
       if (!latlngs.length) continue;
-      L.polyline(latlngs, { color: tr.color, weight: 2, opacity: 0.8 }).addTo(map);
+      // The drawn line is lightly smoothed, then curved through a Catmull-Rom
+      // interpolation per interval — bounds/markers stay on the raw fixes so
+      // the true recorded track/position is never altered, only how the line
+      // connecting it looks (still one color per original interval, just
+      // drawn as a curve through it instead of a straight chord).
+      const smoothed = smoothTrackLine(tr.pts);
+      // Colored by speed (per-segment) rather than a single flat track color,
+      // so a glance at the line shows where the boat was fast vs. slow.
+      const [minSog, maxSog] = speedRange(tr);
+      for (let i = 1; i < tr.pts.length; i++) {
+        const avgSog = (tr.pts[i - 1].sog + tr.pts[i].sog) / 2;
+        const color = speedColor(avgSog, minSog, maxSog);
+        const p0 = smoothed[Math.max(0, i - 2)];
+        const p1 = smoothed[i - 1];
+        const p2 = smoothed[i];
+        const p3 = smoothed[Math.min(smoothed.length - 1, i + 1)];
+        const curve = catmullRomInterval(p0, p1, p2, p3);
+        for (let k = 1; k < curve.length; k++) {
+          L.polyline([curve[k - 1], curve[k]], { color, weight: 3, opacity: 0.85 }).addTo(map);
+        }
+      }
+      // Speed/VMG/course at a point, instantaneous (nearest sample), not a
+      // time series — shared by the click popup and the drag-scrub popup.
+      // "Course" here is the true wind angle, not raw compass heading — kept
+      // to 0-180° + tack side (like the polar chart) rather than a 0-360°
+      // bearing, since TWA is signed (+ = starboard, - = port).
+      const popupContent = (p: TrackPoint) => {
+        const vp = vmgAt(vmg, p.ms);
+        const course = vp
+          ? `${Math.round(Math.abs(vp.twa_deg))}° ${t(vp.twa_deg >= 0 ? "race.starboard" : "race.port")}`
+          : "—";
+        return (
+          `<strong>${fmtKnots(p.sog)}</strong>` +
+          `<span>${t("sessions.vmg")} ${vp ? fmtKnots(vp.vmg_kts) : "—"}</span>` +
+          `<span>${t("race.course")} ${course}</span>`
+        );
+      };
+
+      // Invisible wide hit-test line over the raw fixes — the drawn line is
+      // too fragmented (many tiny curved segments) to bind clicks on
+      // directly. Clicking anywhere near the track seeks playback to the
+      // nearest fix and shows its info in a popup.
+      L.polyline(latlngs, { color: "#000", weight: 16, opacity: 0 })
+        .addTo(map)
+        .on("click", (e: L.LeafletMouseEvent) => {
+          const p = nearestPoint(tr, e.latlng);
+          timeController.seek(p.ms);
+          L.popup({ closeButton: false, className: "sf-map-popup" })
+            .setLatLng([p.lat, p.lon])
+            .setContent(popupContent(p))
+            .openOn(map);
+        });
+
       bounds.push(...latlngs);
-      const m = L.circleMarker(latlngs[0], {
-        radius: 6,
-        color: "#fff",
-        weight: 2,
-        fillColor: tr.color,
-        fillOpacity: 1,
+      const icon = L.divIcon({
+        className: "sf-posmarker",
+        html: `<span style="background:${tr.color}"></span>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
       });
-      m.bindTooltip(tr.name);
+      const m = L.marker(latlngs[0], { icon, draggable: true });
+      // Boat-name tooltip only makes sense with more than one track (Activity/
+      // Race overlays) — a single-boat Session map would just repeat itself.
+      if (tracks.length > 1) m.bindTooltip(tr.name);
+      // Dragging is constrained to the track: on every drag tick, snap the
+      // marker to the nearest real fix, seek playback there, and follow with
+      // a popup that updates live (same content as the click popup).
+      let dragPopup: L.Popup | null = null;
+      m.on("dragstart", () => {
+        draggingRef.current.add(tr.id);
+        const p = nearestPoint(tr, m.getLatLng());
+        dragPopup = L.popup({ closeButton: false, className: "sf-map-popup" })
+          .setLatLng([p.lat, p.lon])
+          .setContent(popupContent(p))
+          .openOn(map);
+      });
+      m.on("drag", () => {
+        const p = nearestPoint(tr, m.getLatLng());
+        m.setLatLng([p.lat, p.lon]);
+        timeController.seek(p.ms);
+        dragPopup?.setLatLng([p.lat, p.lon]).setContent(popupContent(p));
+      });
+      m.on("dragend", () => draggingRef.current.delete(tr.id));
       m.addTo(map);
       markersRef.current[tr.id] = m;
     }
 
-    for (const mk of marks) {
-      L.marker([mk.lat, mk.lng], {
-        icon: L.divIcon({
-          className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
-          html: "◆",
-          iconSize: [16, 16],
-        }),
-      })
-        .bindTooltip(mk.mark_role)
-        .addTo(map);
-      bounds.push([mk.lat, mk.lng]);
-    }
+    // Marks are drawn by their own effect (below) so toggling them — e.g. the
+    // legs/maneuvers checkboxes — doesn't tear down and rebuild the whole map
+    // (tiles, pan/zoom, tracks). Just fold their positions into the initial fit.
+    for (const mk of marks) bounds.push([mk.lat, mk.lng]);
 
     if (bounds.length) map.fitBounds(L.latLngBounds(bounds).pad(0.1));
     else map.setView([20, 0], 2); // neutral world view when there is no data
@@ -79,12 +227,43 @@ export function MapView({
       map.remove();
       mapRef.current = null;
       markersRef.current = {};
+      marksLayerRef.current = null;
+      draggingRef.current.clear();
     };
-  }, [tracks, marks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `marks` intentionally
+    // excluded: only used above for the one-time initial bounds fit.
+  }, [tracks, vmg, t]);
 
-  // Move position markers to the cursor time.
+  // Marks (legs/maneuvers/race marks) on their own layer group, redrawn
+  // whenever they change without touching the map/tiles/tracks above.
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const layer = L.layerGroup().addTo(map);
+    for (const mk of marks) {
+      const icon =
+        mk.kind === "leg"
+          ? L.divIcon({ className: "sf-markicon sf-markicon--leg", html: `${mk.seq ?? ""}`, iconSize: [18, 18] })
+          : mk.kind === "maneuver"
+            ? L.divIcon({ className: "sf-markicon sf-markicon--maneuver", html: "", iconSize: [10, 10] })
+            : L.divIcon({
+                className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
+                html: "◆",
+                iconSize: [16, 16],
+              });
+      L.marker([mk.lat, mk.lng], { icon }).bindTooltip(mk.mark_role).addTo(layer);
+    }
+    marksLayerRef.current = layer;
+    return () => {
+      layer.remove();
+    };
+  }, [marks, tracks]);
+
+  // Move position markers to the cursor time (skipping any mid-drag).
+  useEffect(() => {
+    cursorRef.current = cursor;
     for (const tr of tracks) {
+      if (draggingRef.current.has(tr.id)) continue;
       const marker = markersRef.current[tr.id];
       if (!marker) continue;
       const p = pointAt(tr, cursor);
@@ -92,5 +271,23 @@ export function MapView({
     }
   }, [cursor, tracks]);
 
-  return <div ref={elRef} className={className} />;
+  const observation = windAt?.observation;
+  return (
+    <div className={`${className} sf-map`}>
+      <div ref={elRef} className="sf-map__surface" />
+      {mapOptions && <div className="sf-map__options">{mapOptions}</div>}
+      {controls && <div className="sf-map__controls">{controls}</div>}
+      {observation?.twd_deg != null && (
+        <div className="sf-map__wind" title={fmtKnots(observation.tws_kts)}>
+          <span
+            className="sf-map__wind-arrow"
+            style={{ transform: `rotate(${observation.twd_deg}deg)` }}
+          >
+            ↑
+          </span>
+          <span className="sf-map__wind-speed">{fmtKnots(observation.tws_kts)}</span>
+        </div>
+      )}
+    </div>
+  );
 }

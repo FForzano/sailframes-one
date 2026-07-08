@@ -1,7 +1,7 @@
 """User profile request DTOs."""
 
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -11,3 +11,4 @@ class UserUpdateModel(BaseModel):
     last_name: Optional[str] = None
     dob: Optional[date] = None
     password: Optional[str] = None  # change-password path (router re-hashes)
+    unit_system: Optional[Literal["nautical", "metric"]] = None

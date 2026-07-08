@@ -15,11 +15,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..base import Base, TimestampMixin, UUIDPKMixin, enum_check
 
 USER_STATUSES = ("inactive", "active", "deleted")
+USER_UNIT_SYSTEMS = ("nautical", "metric")
 
 
 class UserORM(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "users"
-    __table_args__ = (enum_check("status", USER_STATUSES),)
+    __table_args__ = (
+        enum_check("status", USER_STATUSES),
+        enum_check("unit_system", USER_UNIT_SYSTEMS),
+    )
     # Secrets never leave the repo on the wire.
     __wire_exclude__ = ("password_hash", "password_reset_token")
 
@@ -37,6 +41,7 @@ class UserORM(UUIDPKMixin, TimestampMixin, Base):
         ForeignKey("images.id", ondelete="SET NULL", use_alter=True), nullable=True
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    unit_system: Mapped[str] = mapped_column(String, nullable=False, default="nautical")
     password_reset_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

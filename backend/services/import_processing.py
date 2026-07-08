@@ -12,7 +12,6 @@ it to a boat/activity/session:
   standard storage-event → worker → callback pipeline takes over.
 """
 
-import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -23,10 +22,6 @@ from ..repositories import get_repos
 from ..storage import BlobNotFound, get_blob_store
 from . import gpx as gpx_service
 from . import ingestion
-
-
-def _bucket() -> str:
-    return os.environ.get("SAILFRAMES_BUCKET", "sailframes-fleet-data-prod")
 
 
 def _parse_ts(iso: str) -> datetime:
@@ -112,7 +107,12 @@ def complete_import(import_row, *, boat_id: uuid.UUID,
         repos.ingest.update_import(import_row.id, {"status": "processed"})
         repos.sessions.rollup_status(session.id)
         try:
-            ingestion.dispatch_analysis(_bucket(), prefix)
+            # Pre-fetch the region's wind for the session window so the worker can
+            # build true-wind/polar/VMG even without an onboard wind sensor.
+            first = points[0]
+            ingestion.write_wind_cache(prefix, first["lat"], first["lon"],
+                                       started_at, ended_at)
+            ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
         except Exception:
             pass  # analysis is best-effort; the gps stream is already registered
     else:

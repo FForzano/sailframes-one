@@ -20,13 +20,34 @@ Struttura semplificata del frontend, dopo la ristrutturazione descritta in
 
 ### 1. Diario
 
-Sottopagine: **sessioni**, **activities**, **race/regate**
+Sottopagine: **activities**, **race/regate** — "sessioni" non è più una
+sottopagina di primo livello: le sessioni (una per barca) restano
+un'entità di dati (`sessions`) ma in UI si vedono solo dentro il
+dettaglio di un'activity, mai come lista a sé stante. Questo perché a
+livello di dati un'activity raggruppa già N sessioni della stessa uscita
+(vedi `er-project.md`), quindi è il livello naturale da mostrare come
+elenco principale — avere due liste separate sullo stesso piano
+(sessioni e activities) duplicava lo stesso concetto e confondeva
+l'utente.
 
-- **Sessioni** — elenco/dettaglio delle proprie sessioni (barche proprie
-  o dove si è `session_crew`): stats (`session_stats`), playback dati
-  (`session_streams`), foto/video (`session_photos`/`session_videos`).
-- **Activities** — elenco/dettaglio attività (raggruppano N sessioni),
-  filtrabili per `type` (race/training/solo) e `visibility`.
+- **Activities** — nuova pagina di atterraggio del Diario. Elenco ad
+  card/griglia (non tabella) delle proprie attività, filtrabile per
+  `type` (race/training/solo) e `visibility`. Ogni card mostra
+  `activities.thumbnail_image_id`: le tracce di tutte le sessioni
+  dell'activity sovrapposte in colori diversi (una per barca), più
+  data/tipo. Il caricamento di una nuova traccia (`sessioni/import` di
+  prima) diventa un'azione dentro questa sezione, non una sottopagina di
+  "sessioni".
+- **Dettaglio activity** — apre da una card. Mostra i dati aggregati
+  dell'activity e, sotto, un blocco per ciascuna barca partecipante
+  (dati: `sessions`) — in UI etichettato **"Barche"**/**"Dettaglio
+  barca"**, non "sessioni": è il nome più vicino a come l'utente pensa
+  a quel blocco (chi ha navigato con quale barca in quell'uscita), pur
+  restando una `session` a livello di modello. Cliccando una barca si
+  apre il dettaglio sessione esistente (stats, playback, foto/video,
+  crew) — stessa pagina di prima, raggiunta da un URL diverso
+  (`/diario/activities/:activityId/barche/:sessionId` invece di
+  `/diario/sessioni/:sessionId`).
 - **Race/Regate** — pagina ampia dedicata, dashboard live/replay completa
   (mappa, leaderboard, grafici Speed/Heel/TWD, playback, laylines, wind
   rose, overlay polare, drawer dettaglio barca) — eredita le feature già

@@ -4,7 +4,7 @@ import type { UUID, WindObservation, WindStation } from "@/types";
 export const windKeys = {
   stations: ["wind", "stations"] as const,
   observations: (id: UUID, params = "") => ["wind", "stations", id, "observations", params] as const,
-  nearest: (lat: number, lng: number) => ["wind", "nearest", lat, lng] as const,
+  nearest: (lat: number, lng: number, at?: string) => ["wind", "nearest", lat, lng, at ?? "now"] as const,
 };
 
 export const windService = {
@@ -24,7 +24,12 @@ export const windService = {
     return api.get<WindObservation[]>(`/wind/stations/${id}/observations${s ? `?${s}` : ""}`);
   },
   /** Get-or-create the best station for a coordinate (real sensor > grid
-   * point > auto-created Open-Meteo point) — any authenticated user. */
-  nearest: (lat: number, lng: number) =>
-    api.get<WindStation>(`/wind/nearest?lat=${lat}&lng=${lng}`),
+   * point > auto-created Open-Meteo point) — any authenticated user. Pass
+   * `at` (a session/race's real time) so a real sensor with no historical
+   * data for that date falls through to the Open-Meteo grid tier instead. */
+  nearest: (lat: number, lng: number, at?: string) => {
+    const p = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+    if (at) p.set("at", at);
+    return api.get<WindStation>(`/wind/nearest?${p.toString()}`);
+  },
 };
