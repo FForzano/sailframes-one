@@ -1,99 +1,139 @@
 # Device Protocol
 
-Specifica del protocollo che un device hardware (E1, B, o qualunque device
-custom futuro) deve implementare per registrarsi e inviare dati alla
-piattaforma. Riferimenti: `er-project.md` (schema dati) e `api-project.md`
-(endpoint ad alto livello). Questo file è il dettaglio pensato per chi
-scrive firmware.
+A practical guide for firmware authors integrating a hardware device
+(SailFrames E1, a third-party tracker, or any future custom device)
+with SailFrames One. It documents the actual, implemented endpoints —
+every request/response shape below matches the backend code exactly
+(`backend/routers/devices.py`, `backend/routers/device_api.py`,
+`backend/auth/device.py`, `backend/schemas/device.py`).
+
+SailFrames One is hardware-agnostic: any device that implements this
+protocol can integrate, regardless of what board or firmware stack it
+runs. Device/PCB/firmware design itself lives outside this repository.
+
+All requests/responses are JSON unless noted. All IDs (`device_id`,
+`session_id`, `session_upload_id`, `boat_id`, ...) are UUID strings.
 
 ---
 
-## 1. Identità del device
+## 1. Device identity
 
-Ogni device è identificato da un `external_id` univoco e stabile nel tempo
-— seriale hardware, UUID BLE, o MAC address, a seconda di cosa il
-`device_type` espone in modo affidabile. **Non deve cambiare tra un boot e
-l'altro**: è la chiave con cui il server riconosce il device nel claim e in
-tutte le richieste successive.
+Every device is identified by an `external_id`: a stable string —
+hardware serial number, BLE UUID, or MAC address, whatever the device
+can reliably expose. **It must not change across reboots** — it is the
+value the device sends on claim, and the server rejects a second claim
+for an `external_id` that's already claimed.
 
-Il device deve conoscere anche il proprio `device_type_id` (o un nome
-mappabile server-side, es. `"SailFrames E1"`), comunicato all'atto del
-claim.
+The device type (e.g. `"SailFrames E1"`) is chosen when the claim is
+created by the user (§2), not by the device — the device only needs to
+know its `external_id`.
 
 ---
 
 ## 2. Provisioning (claim flow)
 
-Un device **non può inviare dati prima di essere reclamato** — non esiste
-percorso di auto-registrazione al primo upload (vedi `api-project.md`,
-sezione "Registrazione device e ingestion dati").
+A device **cannot send data before it is claimed** — there is no
+auto-registration on first upload.
 
-Sequenza:
+1. **User creates a claim** (from the app, authenticated):
 
-1. Un utente, dall'app, avvia il claim: `POST /api/devices/claims` con
-   `{device_type_id, nickname?, claim_target}`. Il server risponde con
-   `{claim_code, expires_at}` (finestra tipica: 15 minuti).
-2. L'utente comunica il `claim_code` al device fuori banda — per l'E1,
-   scrivendolo in `config.txt` su SD (`claim_code=XXXXXX`) prima del boot,
-   o via comando seriale (`claim <codice>`) se il device è già acceso e in
-   modalità provisioning.
-3. Il device chiama **una sola volta**, appena ha un `claim_code` in
-   config e connettività:
+   ```
+   POST /api/devices/claims
+   Content-Type: application/json
+
+   {
+     "device_type_id": "3f2a1c...-uuid",
+     "nickname": "Optimist 12 tracker",   // optional
+     "owner_user_id": null,               // exactly one of these three
+     "owner_boat_id": "42a1...-uuid",     // must be non-null
+     "owner_club_id": null
+   }
+   ```
+
+   Response 200:
+
+   ```
+   { "device_id": "1234...-uuid", "claim_code": "K7XMPQR2", "expires_at": "2026-07-08T10:15:00Z" }
+   ```
+
+   `claim_code` is an 8-character code drawn from an unambiguous
+   alphabet (no `0/O/1/I`, easy to hand-type). It expires 15 minutes
+   after creation.
+
+2. **The user passes `claim_code` to the device out of band** — for
+   the E1, by writing it into `config.txt` on the SD card before boot
+   (`claim_code=K7XMPQR2`), or via a serial command
+   (`claim K7XMPQR2`) if the device is already powered on and in
+   provisioning mode. How the code reaches the device is
+   device-specific; only the confirm call below is part of the
+   protocol.
+
+3. **The device confirms the claim, exactly once**, as soon as it has
+   a `claim_code` and connectivity. This call needs **no user
+   authentication** — possession of a valid, unexpired `claim_code` is
+   the credential:
 
    ```
    POST /api/devices/claim/confirm
    Content-Type: application/json
 
-   { "external_id": "AA:BB:CC:DD:EE:FF", "claim_code": "482913" }
+   { "external_id": "AA:BB:CC:DD:EE:FF", "claim_code": "K7XMPQR2" }
    ```
 
-   Risposta 200:
+   Response 200:
 
    ```
-   { "device_id": 1234, "device_api_key": "sk_live_...", "issued_at": "2026-07-03T10:00:00Z" }
+   { "device_id": "1234...-uuid", "device_api_key": "sfd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "issued_at": "2026-07-08T10:01:00Z" }
    ```
 
-4. Il device **deve persistere `device_api_key` su storage non volatile**
-   (SD/NVS) — è mostrata dal server una sola volta, non è recuperabile in
-   chiaro in seguito. Se il device la perde, serve un `rotate-key` lato
-   utente (§5) e riscrivere la nuova key sul device.
+4. **The device must persist `device_api_key` to non-volatile storage**
+   (SD card, NVS, ...). The server stores only a hash of it — it
+   cannot be recovered in plaintext after this response. If the device
+   loses the key, the user must trigger a key rotation (§5) and
+   rewrite the new key onto the device.
 
-Errori attesi su `claim/confirm`:
+Errors on `claim/confirm`:
 
-| Status | Causa | Comportamento atteso del device |
+| Status | Cause | Expected device behavior |
 |---|---|---|
-| 400 | `claim_code` malformato | non ritentare, richiede intervento utente |
-| 404 | `claim_code` non trovato | idem |
-| 409 | `claim_code` scaduto | richiede all'utente un nuovo claim (torna a §2.1) |
-| 429 | troppi tentativi | backoff, ritenta più tardi |
+| 400 | missing/blank `external_id` or `claim_code` | do not retry — firmware bug |
+| 404 | `claim_code` not found | do not retry — needs a fresh claim from the user |
+| 409 | `claim_code` expired, or `external_id` already claimed by another device | needs a fresh claim from the user |
+| 429 | more than 10 confirm attempts/minute from this IP | back off, retry later |
 
 ---
 
-## 3. Autenticazione delle chiamate successive
+## 3. Authenticating subsequent calls
 
-Ogni chiamata del device (upload, health) porta:
+Every call under `/api/devices/me/...` (§4) carries:
 
 ```
-Authorization: DeviceKey <device_api_key>
+Authorization: DeviceKey sfd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-**Nota per hardware senza TLS affidabile** (es. ESP32 Arduino Core 3.3.7 —
-vedi CLAUDE.md, TLS rotto su RSA/BIGNUM): la key viaggia su HTTP in
-chiaro per questa classe di device. Non è crittograficamente forte, ma
-scopa l'accesso al singolo device invece che a un intero path S3 come
-nell'architettura attuale. Se il device supporta TLS in modo affidabile,
-**deve** usarlo.
+The header name is `Authorization`, the scheme is the literal word
+`DeviceKey` (case-insensitive), followed by a space and the raw key —
+not `Bearer`, not JWT.
 
-Risposta `401` su qualunque chiamata autenticata → la key non è più
-valida (revocata, ruotata, o device con `status=revoked`). Il device deve
-smettere di ritentare quella chiamata e segnalare l'errore (LED/TFT/log)
-finché non riceve una nuova key via riprovisioning manuale.
+A `401` response means the key is not valid right now — wrong,
+revoked (`DELETE /api/devices/{id}`), or rotated (§5). There is no way
+to distinguish these cases from the response; on `401` the device must
+stop retrying and surface the error (LED/display/log) until it
+receives a new key through manual reprovisioning. It must not attempt
+to re-run the claim flow automatically.
+
+**Transport security**: use TLS whenever the device's network stack
+supports it reliably. If a given hardware/SDK combination cannot do
+TLS reliably, the key travels in the clear over plain HTTP for that
+device — it is not cryptographically strong in that case, but it still
+scopes an attacker to a single device's uploads rather than to a whole
+storage bucket.
 
 ---
 
-## 4. Invio dati
+## 4. Sending data
 
-### 4.1 Apertura/aggiornamento di un `session_upload`
+### 4.1 Open/append to a `session_upload`
 
 ```
 POST /api/devices/me/session-uploads
@@ -101,68 +141,80 @@ Authorization: DeviceKey <device_api_key>
 Content-Type: application/json
 
 {
-  "boat_id": 42,                 // opzionale per device category=boat_tracker
-                                  // (default: devices.owner_boat_id); obbligatorio
-                                  // per category=wearable
-  "activity_id": null,           // opzionale — se assente il server ne crea/associa una
-  "started_at": "2026-07-03T14:05:00Z",
-  "sequence_number": 0,          // 0 = primo/unico chunk
-  "is_final": true,              // true = caricamento singolo (caso standard oggi)
-  "subject_type": "boat",        // "boat" | "crew_member"
-  "subject_user_id": null        // valorizzato solo se subject_type=crew_member
+  "boat_id": "42a1...-uuid",         // required unless the device's type is
+                                      // category="boat_tracker" (then it
+                                      // defaults to the device's own boat)
+  "activity_id": null,               // optional — omit to let the server
+                                      // create/attach one automatically
+  "started_at": "2026-07-08T14:05:00Z",  // required, ISO 8601 with offset
+  "ended_at": null,                  // optional
+  "sequence_number": 0,              // 0 = first/only chunk (default)
+  "is_final": true,                  // true = single upload (default, standard case)
+  "subject_type": "boat",            // "boat" | "crew_member" (default "boat")
+  "subject_user_id": null,           // required if subject_type="crew_member"
+  "filename": "data.csv"             // object name for the uploaded bundle (default "data.csv")
 }
 ```
 
-Risposta 201:
+Response 201:
 
 ```
 {
-  "session_upload_id": 987,
-  "session_id": 555,
-  "upload_url": "https://s3.../raw/E1/2026-07-03/E1_20260703_140500_bundle?X-Amz-...",
-  "upload_url_expires_at": "2026-07-03T15:05:00Z"
+  "session_upload_id": "987f...-uuid",
+  "session_id": "555a...-uuid",
+  "activity_id": "111b...-uuid",
+  "upload_url": "https://.../raw/uploads/987f.../data.csv?X-Amz-...",
+  "upload_url_expires_at": "2026-07-08T15:05:00Z"
 }
 ```
 
-Il device fa **PUT diretto** del bundle raw a `upload_url` — questa
-chiamata non passa dall'API, va dritta a S3/minio (stesso schema della
-sezione "Caricamento file raw e grandi" in `api-project.md`). Nessun
-header `Authorization` custom su questa PUT: l'autorizzazione è nella URL
-firmata stessa.
+The device then does a **direct `PUT`** of the raw file bytes to
+`upload_url`. This call bypasses the API entirely (goes straight to
+the object store) and needs **no `Authorization` header** — the
+authorization is already embedded in the signed URL, which expires one
+hour after issuance.
 
-### 4.2 Caricamenti incrementali (opzionale, live tracking)
+This call is **idempotent** on `(session, device, sequence_number)`:
+calling it again with the same `sequence_number` for the same session
+returns the same `session_upload_id` with a freshly-signed
+`upload_url` — safe to call again after a timeout or a lost response
+(see retry guidance, §6).
 
-Se il device vuole inviare chunk progressivi durante la sessione invece
-di un unico bundle a fine sessione:
+### 4.2 Incremental uploads (optional, live tracking)
 
-- ogni chunk è una nuova chiamata a `POST .../session-uploads` con lo
-  stesso `(session_id implicito via boat_id+timeframe)`, `sequence_number`
-  incrementale, `is_final=false`
-- l'ultimo chunk ha `is_final=true`
-- il server consolida in `session_streams` solo dopo aver ricevuto il
-  chunk con `is_final=true` per quel device in quella sessione (vedi
-  `er-project.md`, nota su `session_uploads.is_final`)
+To stream a session as multiple chunks instead of one bundle at the
+end:
 
-Il caso "un solo caricamento a fine sessione" resta il default: basta non
-implementare questa sezione e mandare sempre `sequence_number=0,
-is_final=true`.
+- send one `POST .../session-uploads` per chunk, same session
+  (implied by `boat_id` + `started_at`/timeframe), with an
+  incrementing `sequence_number` and `is_final=false`
+- the last chunk uses `is_final=true`
+- the backend only finalizes the session's stream once it has
+  received the `is_final=true` chunk for that device
 
-### 4.3 Chiusura/errore di un upload
+If you don't need live tracking, ignore this section: the default
+(`sequence_number=0, is_final=true`) already sends a single upload at
+the end of the session.
+
+### 4.3 Closing or failing an upload after the fact
 
 ```
-PATCH /api/devices/me/session-uploads/{id}
+PATCH /api/devices/me/session-uploads/{session_upload_id}
 Authorization: DeviceKey <device_api_key>
 Content-Type: application/json
 
 { "is_final": true }
 ```
 
-oppure, se il device rileva un fallimento locale (es. file corrotto sulla
-SD prima dell'upload):
+or, if the device detects a local failure (e.g. a corrupted file on
+the SD card before upload completed):
 
 ```
 { "status": "failed" }
 ```
+
+`"failed"` is the only status a device is allowed to report — any
+other value is rejected with `422`.
 
 ### 4.4 Health snapshot
 
@@ -180,42 +232,64 @@ Content-Type: application/json
 }
 ```
 
-Analogo a `_health.json` già usato dalla fleet E1 (vedi CLAUDE.md, Stage
-3). Frequenza consigliata: ogni 5 minuti, o on-demand via comando
-seriale/telnet (`statusup`).
+Response: `{ "ok": true }`. All fields are optional — send whatever the
+device can measure. Each call **replaces** the previous snapshot
+(latest-wins); the device owner reads it back via
+`GET /api/devices/{device_id}/health` from the app. Recommended
+frequency: every 5 minutes, or on-demand.
 
 ---
 
-## 5. Recovery — chiave persa o device sostituito
+## 5. Recovery — lost key or replaced device
 
-Il device **non** può auto-rigenerare la propria key. Serve intervento
-utente dall'app:
+The device cannot regenerate its own key. This always requires user
+action from the app, by whoever manages the device (owner, or the
+boat/club admin it's claimed under):
 
 ```
-POST /api/devices/{device_id}/rotate-key      (auth: owner del device)
+POST /api/devices/{device_id}/rotate-key
 ```
 
-Risposta: nuova `device_api_key` (una tantum, come al claim). L'utente la
-riscrive sul device (config/seriale) — `external_id`, owner, nickname,
-`claimed_at` restano invariati: non è un nuovo claim, solo un nuovo
-segreto.
+Response: a new `device_api_key` (shown once, exactly like at claim
+time — §2.4). `external_id`, owner, nickname and `claimed_at` are
+unchanged; only the secret changes. The user must rewrite the new key
+onto the device (config file, serial command, however the device
+accepts it). Rotating fails with `409` if the device isn't currently in
+`claimed` status.
 
-Se il device fisico viene sostituito (hardware nuovo, stesso ruolo su
-barca), il flusso corretto è: `DELETE` del vecchio device (`status=
-revoked`) + nuovo claim completo (§2) per il nuovo `external_id` — non un
-rotate-key, perché l'`external_id` cambia.
+**If the physical device itself is replaced** (new hardware taking
+over the same role on the same boat), don't rotate the key: the old
+`external_id` and the new one are different values, so instead the
+user should `DELETE /api/devices/{device_id}` (revokes the old device)
+and create a brand-new claim (§2) for the new device's `external_id`.
 
 ---
 
-## 6. Retry e backoff
+## 6. Retry and backoff
 
-- Upload fallito (PUT alla presigned URL in errore, o URL scaduta): il
-  device **non deve rifare `POST .../session-uploads` con lo stesso
-  `sequence_number`** se non ha ricevuto risposta 2xx dal passo
-  precedente — rischia doppioni. Deve rifare la `POST` da capo per
-  ottenere una nuova `upload_url` fresca, poi ritentare la PUT.
-- Backoff consigliato: esponenziale, partendo da 5s, tetto a 5 minuti —
-  coerente con la finestra di retry già usata per l'upload S3 diretto
-  nella fleet E1 attuale.
-- Le richieste di health possono fallire silenziosamente (non critiche):
-  nessun retry aggressivo, si riprova al prossimo ciclo schedulato.
+- If the `PUT` to `upload_url` fails or the URL has expired, **do not
+  retry `POST .../session-uploads` with the same `sequence_number`
+  from scratch expecting a new object** — you'll get back the *same*
+  `session_upload_id` (§4.1 is idempotent), which is exactly what you
+  want: call it again to get a fresh `upload_url`, then retry the
+  `PUT`. Never invent a new `sequence_number` just to work around a
+  failed upload — that creates a duplicate chunk.
+- Recommended backoff for both the `POST` and the `PUT`: exponential,
+  starting at 5s, capped at 5 minutes.
+- Health snapshot (§4.4) failures are non-critical: don't retry
+  aggressively, just send the next scheduled snapshot.
+
+---
+
+## 7. Endpoint quick reference
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `POST /api/devices/claims` | user cookie | Create a claim code for a device type + owner target |
+| `POST /api/devices/claim/confirm` | none (claim code is the credential) | Device redeems the code, receives its API key |
+| `POST /api/devices/me/session-uploads` | `DeviceKey` | Open/append a session upload, get a presigned upload URL |
+| `PATCH /api/devices/me/session-uploads/{id}` | `DeviceKey` | Mark an upload final, or report a local failure |
+| `POST /api/devices/me/health` | `DeviceKey` | Push a health snapshot |
+| `POST /api/devices/{id}/rotate-key` | user cookie (owner) | Invalidate the current key, issue a new one |
+| `DELETE /api/devices/{id}` | user cookie (owner) | Revoke a device |
+| `GET /api/devices/{id}/health` | user cookie (owner) | Read back the latest health snapshot |
