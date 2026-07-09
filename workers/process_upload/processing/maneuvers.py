@@ -21,6 +21,15 @@ TURN_WINDOW_EXTEND_SEC = 5  # extend window before/after rapid portion
 MIN_MANEUVER_SPACING_SEC = 20  # minimum time between maneuvers to avoid duplicates
 HEADING_SMOOTH_WINDOW = 5  # samples, circular moving average before detection
 HOLD_WINDOW_SEC = 12  # min dwell time on a side for it to count as a real tack
+# A genuine tack/gybe is a real rotation, not just a slow drift that happens
+# to cross the wind-axis boundary the side-debounce logic tracks (e.g. a
+# zero-duration/zero-change "maneuver" is a detection glitch, not a real
+# one). Gybes have no dead zone the way tacking does — a boat already
+# sailing deep can gybe with a fairly modest heading change — so this floor
+# is only high enough to reject the degenerate cases, not to demand a wide
+# rotation.
+MIN_TACK_HEADING_CHANGE_DEG = 40
+MIN_GYBE_HEADING_CHANGE_DEG = 20
 
 
 def detect_maneuvers(
@@ -129,6 +138,11 @@ def detect_maneuvers(
 
         # Classify as tack or gybe
         maneuver_type = _classify_maneuver(rel_before, rel_after)
+
+        min_change = (MIN_GYBE_HEADING_CHANGE_DEG if maneuver_type == ManeuverType.GYBE
+                     else MIN_TACK_HEADING_CHANGE_DEG)
+        if abs(heading_change) < min_change:
+            continue
 
         # Heel during maneuver (from IMU)
         max_heel = None

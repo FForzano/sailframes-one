@@ -109,9 +109,8 @@ def complete_import(import_row, *, boat_id: uuid.UUID,
         try:
             # Pre-fetch the region's wind for the session window so the worker can
             # build true-wind/polar/VMG even without an onboard wind sensor.
-            first = points[0]
-            ingestion.write_wind_cache(prefix, first["lat"], first["lon"],
-                                       started_at, ended_at)
+            waypoints = ingestion.sample_wind_waypoints(points)
+            ingestion.write_wind_cache(prefix, waypoints, started_at, ended_at)
             ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
         except Exception:
             pass  # analysis is best-effort; the gps stream is already registered

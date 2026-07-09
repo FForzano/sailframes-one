@@ -7,7 +7,12 @@
 # the unique (station, observed_at) key makes re-runs idempotent, so an
 # occasional double fire is harmless.
 #
-# Cadence env (minutes), one per provider:
+# Real, fixed-position stations only (NOAA NDBC/METAR, custom devices) —
+# Open-Meteo is never persisted, it's queried on demand (see
+# backend/services/wind_providers/open_meteo.py), so there's nothing for
+# this scheduler to do for it.
+#
+# Cadence env (minutes):
 #   WIND_FETCH_INTERVAL_MIN_NOAA_NDBC   (default 30)
 set -eu
 

@@ -31,6 +31,7 @@ export const sessionsService = {
   update: (id: UUID, body: Partial<Session>) => api.patch<Session>(`/sessions/${id}`, body),
   remove: (id: UUID) => api.del(`/sessions/${id}`),
   reanalyze: (id: UUID) => api.post<{ ok: boolean; session_upload_id: UUID }>(`/sessions/${id}/reanalyze`),
+  refreshWind: (id: UUID) => api.post<{ ok: boolean }>(`/sessions/${id}/wind/refresh`),
 
   streams: (id: UUID) => api.get<SessionStream[]>(`/sessions/${id}/streams`),
   stats: (id: UUID) => api.get<SessionStats>(`/sessions/${id}/stats`),

@@ -948,6 +948,44 @@ h1, h2, h3 {
   border-radius: 999px;
   font-size: 0.85rem;
 }
+.sf-tackblock {
+  margin-top: 0.75rem;
+}
+.sf-tackblock__title {
+  font-size: 0.9rem;
+  margin: 0 0 0.35rem;
+}
+.sf-optimal-angles {
+  margin-top: 0.5rem;
+}
+.sf-optimal-angles__note {
+  font-size: 0.8rem;
+  font-style: italic;
+  margin: 0 0 0.5rem;
+}
+.sf-optimal-angles__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+.sf-optimal-angles__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.9rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  min-width: 8rem;
+}
+.sf-optimal-angles__label {
+  font-size: 0.8rem;
+  color: var(--sf-muted);
+}
+.sf-optimal-angles__angle {
+  font-size: 1.3rem;
+}
 .sf-heatmap {
   display: grid;
   gap: 2px;

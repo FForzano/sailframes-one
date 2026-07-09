@@ -222,7 +222,24 @@
     "showLegs": "Mostra bordi",
     "showManeuvers": "Mostra manovre",
     "reanalyze": "Ricalcola analisi",
-    "reanalyzeQueued": "Ricalcolo analisi avviato"
+    "reanalyzeQueued": "Ricalcolo analisi avviato",
+    "refreshWind": "Aggiorna dati vento",
+    "refreshWindQueued": "Aggiornamento dati vento avviato",
+    "bestTack": "Mure migliori",
+    "bestLeg": "Lato migliore",
+    "bestVmg": "Miglior VMG",
+    "longestLeg": "Bordo più lungo",
+    "avgDistance": "Distanza media",
+    "tackVmgStarboard": "VMG medio (dritta)",
+    "tackVmgPort": "VMG medio (sinistra)",
+    "tackSpeedStarboard": "Velocità media (dritta)",
+    "tackSpeedPort": "Velocità media (sinistra)",
+    "tackSide": {
+      "starboard": "Dritta",
+      "port": "Sinistra"
+    },
+    "target": "Target",
+    "optimalAnglesNote": "Dalla tua performance registrata in questa sessione (non dal polare della barca)."
   },
   "activities": {
     "title": "Attività",

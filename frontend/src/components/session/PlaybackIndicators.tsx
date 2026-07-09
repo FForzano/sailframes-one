@@ -31,7 +31,7 @@ export function PlaybackIndicators({ track, vmg }: { track: Track; vmg?: VmgPoin
       <div className="sf-indicators__tile">
         <span className="sf-indicators__label">TWA</span>
         <span className="sf-indicators__value">
-          {at?.twa_deg != null ? `${at.twa_deg.toFixed(0)}°` : "—"}
+          {at?.twa_deg != null ? `${Math.abs(at.twa_deg).toFixed(0)}°` : "—"}
         </span>
       </div>
       <div className="sf-indicators__tile">

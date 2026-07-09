@@ -203,6 +203,11 @@ export function SessionDetailPage() {
     onSuccess: () => notify(t("sessions.reanalyzeQueued"), "success"),
     onError: () => notify(t("errors.generic"), "error"),
   });
+  const refreshWind = useMutation({
+    mutationFn: () => sessionsService.refreshWind(sessionId!),
+    onSuccess: () => notify(t("sessions.refreshWindQueued"), "success"),
+    onError: () => notify(t("errors.generic"), "error"),
+  });
   const removePhoto = useMutation({
     mutationFn: (imageId: UUID) => sessionsService.removePhoto(sessionId!, imageId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionKeys.photos(sessionId!) }),
@@ -238,6 +243,11 @@ export function SessionDetailPage() {
                   disabled: reanalyze.isPending,
                 },
                 {
+                  label: t("sessions.refreshWind"),
+                  onClick: () => refreshWind.mutate(),
+                  disabled: refreshWind.isPending,
+                },
+                {
                   label: t("common.delete"),
                   danger: true,
                   onClick: () => setDeleting(true),
@@ -264,6 +274,7 @@ export function SessionDetailPage() {
               marks={marks}
               className="sf-race__map sf-map--session"
               vmg={analysis.data?.vmg_series}
+              sessionWind={analysis.data?.true_wind}
               wind={
                 tracks[0]?.pts[0]
                   ? { lat: tracks[0].pts[0].lat, lng: tracks[0].pts[0].lon, at: s.started_at }

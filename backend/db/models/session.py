@@ -30,6 +30,7 @@ SESSION_STATUSES = ("pending", "processing", "processed", "failed")
 SESSION_SAILING_ROLES = ("skipper", "crew", "guest")
 MANEUVER_TYPES = ("tack", "gybe")
 LEG_TYPES = ("upwind", "downwind", "reach")
+TACK_SIDES = ("port", "starboard")
 
 
 class SessionORM(UUIDPKMixin, Base):
@@ -156,7 +157,7 @@ class SessionLegORM(UUIDPKMixin, Base):
     rationale as ``session_maneuvers``: discrete and queryable."""
 
     __tablename__ = "session_legs"
-    __table_args__ = (enum_check("leg_type", LEG_TYPES),)
+    __table_args__ = (enum_check("leg_type", LEG_TYPES), enum_check("tack", TACK_SIDES))
 
     session_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
@@ -171,6 +172,11 @@ class SessionLegORM(UUIDPKMixin, Base):
     avg_vmg_kts: Mapped[float] = mapped_column(Float, nullable=False)
     avg_heel_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     avg_twa_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Which side the wind is on (sign of the *signed* mean TWA before the
+    # abs() that produces avg_twa_deg above) — port/starboard, not derivable
+    # from avg_twa_deg alone since that's already unsigned. Null if the leg
+    # had no true-wind data to classify from (see segment_legs).
+    tack: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     std_heading_deg: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     num_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     start_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -202,6 +208,13 @@ class SessionAnalysisORM(Base):
     # `polar_points`) — same shape, kept alongside the other derived series
     # rather than as its own table since it isn't a relational/queryable datum.
     polar_target: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Per-timestamp true wind (twd_deg/tws_kts/source) this session's own
+    # analysis settled on — see workers/process_upload/processing/
+    # wind_estimation.py. The map/session views prefer this over the
+    # ephemeral WindCard/live snapshot (services/wind_lookup.live_snapshot)
+    # when present, since it's what VMG/polar/legs were actually computed
+    # against.
+    true_wind: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     # Small track-preview PNG rendered once by the worker from gps.json, so
     # the sessions list can show it without re-rendering the track per view.
     thumbnail_image_id: Mapped[Optional[uuid.UUID]] = mapped_column(
