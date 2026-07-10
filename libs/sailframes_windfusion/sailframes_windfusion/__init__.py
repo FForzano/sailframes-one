@@ -25,8 +25,10 @@ numpy-free backend image as well as the worker.
 """
 
 import math
+from dataclasses import dataclass, field
 
-# --- reliability policy (tune empirically; see Fase 4 leave-one-out) --------
+# --- reliability policy (starting values; calibrate with the leave-one-out
+# harness in ``sailframes_windfusion.calibration``) --------------------------
 
 # Base reliability per source type, before any spatial/temporal decay.
 # Onboard sensor and a real fixed station are the most trustworthy; regional
@@ -46,6 +48,22 @@ _DEFAULT_PRIOR = 0.1  # unknown source type — trusted little, never zero
 # factor 1/e of its weight per this much distance / time offset.
 DISTANCE_DECAY_KM = 15.0
 TIME_DECAY_SECONDS = 30.0 * 60.0  # 30 minutes
+
+
+@dataclass(frozen=True)
+class WeightConfig:
+    """A full parameterization of the reliability policy — the priors and
+    decay scales ``source_weight`` uses. Defaults reproduce the module
+    constants exactly, so ``source_weight(...)`` with no ``config`` is
+    unchanged. Calibration (``calibration.calibrate``) searches over instances
+    of this to fit the weighting to real held-out station data."""
+    priors: "dict[str, float]" = field(default_factory=lambda: dict(SOURCE_PRIORS))
+    default_prior: float = _DEFAULT_PRIOR
+    distance_decay_km: float = DISTANCE_DECAY_KM
+    time_decay_seconds: float = TIME_DECAY_SECONDS
+
+
+DEFAULT_CONFIG = WeightConfig()
 
 
 def to_uv(twd_deg: float, tws_kts: float) -> "tuple[float, float]":
@@ -69,6 +87,7 @@ def source_weight(
     distance_km: "float | None" = None,
     dt_seconds: "float | None" = None,
     internal_confidence: "float | None" = None,
+    config: "WeightConfig | None" = None,
 ) -> float:
     """Reliability weight for one contribution: a per-type prior, decayed
     exponentially by how far the source is from the point of interest
@@ -76,12 +95,16 @@ def source_weight(
     time (``dt_seconds``), and scaled by the source's own confidence if it
     reports one. Monotonically non-increasing in ``distance_km`` and
     ``|dt_seconds|``. Any argument left ``None`` is simply not applied (e.g.
-    Open-Meteo is queried at the point, so it has no spatial offset)."""
-    w = SOURCE_PRIORS.get(source_type, _DEFAULT_PRIOR)
+    Open-Meteo is queried at the point, so it has no spatial offset).
+
+    ``config`` overrides the priors/decay scales (used by calibration); it
+    defaults to the shipped policy (``DEFAULT_CONFIG``)."""
+    cfg = config or DEFAULT_CONFIG
+    w = cfg.priors.get(source_type, cfg.default_prior)
     if distance_km is not None:
-        w *= math.exp(-max(distance_km, 0.0) / DISTANCE_DECAY_KM)
+        w *= math.exp(-max(distance_km, 0.0) / cfg.distance_decay_km)
     if dt_seconds is not None:
-        w *= math.exp(-abs(dt_seconds) / TIME_DECAY_SECONDS)
+        w *= math.exp(-abs(dt_seconds) / cfg.time_decay_seconds)
     if internal_confidence is not None:
         w *= max(internal_confidence, 0.0)
     return w
@@ -120,6 +143,8 @@ __all__ = [
     "SOURCE_PRIORS",
     "DISTANCE_DECAY_KM",
     "TIME_DECAY_SECONDS",
+    "WeightConfig",
+    "DEFAULT_CONFIG",
     "to_uv",
     "from_uv",
     "source_weight",
