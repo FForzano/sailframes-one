@@ -128,8 +128,10 @@ services:
 
   process_upload:
     build:
-      context: ./workers/process_upload
-      dockerfile: Dockerfile
+      # Context is the repo root (not the worker dir) so the build can reach
+      # the shared libs/sailframes_windfusion package. See the worker Dockerfile.
+      context: .
+      dockerfile: workers/process_upload/Dockerfile
     environment:
       DATA_BUCKET: ${SAILFRAMES_BUCKET:-sailframes-fleet-data-prod}
       SAILFRAMES_S3_ENDPOINT: "http://minio:9000"

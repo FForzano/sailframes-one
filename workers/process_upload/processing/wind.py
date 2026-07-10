@@ -192,6 +192,28 @@ def true_wind_from_cached(
     return results
 
 
+# Gating thresholds for reading a wind axis off a GPS track (tune empirically).
+_AXIS_CONCENTRATION_MIN = 0.5     # double-angle resultant length: how clearly headings lie on one line
+_TACK_MIN_HALF_ANGLE_DEG = 12.0   # a point counts as "on a tack" if this far off the axis
+_TACK_MIN_FRACTION = 0.15         # each tack must hold at least this fraction of moving points
+
+
+def _tack_axis(headings_rad: "np.ndarray") -> "tuple[float, float]":
+    """Double-angle circular mean of headings → ``(axis_rad, concentration)``.
+
+    Doubling the angle collapses a heading and its reciprocal onto the same
+    point, so two opposite tacks reinforce instead of cancelling — the result
+    is the *axis* (a line, ``axis_rad`` in ``[-pi/2, pi/2)``), not a direction.
+    ``concentration`` is the resultant length in ``[0, 1]``: ~1 when headings
+    lie tightly on one line (a clean beat/run), ~0 when they're scattered."""
+    sin_sum = float(np.sum(np.sin(2 * headings_rad)))
+    cos_sum = float(np.sum(np.cos(2 * headings_rad)))
+    n = max(len(headings_rad), 1)
+    axis_rad = math.atan2(sin_sum, cos_sum) / 2
+    concentration = math.hypot(sin_sum, cos_sum) / n
+    return axis_rad, concentration
+
+
 def estimate_wind_from_gps(
     gps: list[GpsPoint],
     min_speed_kts: float = 2.0,
@@ -199,7 +221,11 @@ def estimate_wind_from_gps(
     """Fallback: estimate true wind direction from GPS tracks.
 
     Assumes upwind legs have lower speeds and clusters heading around
-    the wind direction. Returns (estimated_twd_deg, confidence 0-1).
+    the wind direction. Returns (estimated_twd_deg, confidence 0-1). The
+    result is a tack *axis*, so it carries an unresolved 180° ambiguity —
+    acceptable for this last-resort tier; the fusion path uses the gated
+    ``estimate_wind_axis_from_gps`` below and resolves the ambiguity against
+    other sources instead.
     """
     if len(gps) < 60:
         return None
@@ -223,11 +249,8 @@ def estimate_wind_from_gps(
     if len(upwind_headings) < 10:
         return None
 
-    # Find the heading that upwind legs cluster around (two tacks)
-    # Use circular mean of upwind headings ± 180
-    sin_sum = np.sum(np.sin(2 * upwind_headings))  # double angle to find axis
-    cos_sum = np.sum(np.cos(2 * upwind_headings))
-    axis_rad = math.atan2(sin_sum, cos_sum) / 2
+    # Find the axis the upwind legs (two tacks) cluster around.
+    axis_rad, _ = _tack_axis(upwind_headings)
     estimated_twd = math.degrees(axis_rad) % 360
 
     # Confidence based on how bimodal the upwind headings are
@@ -235,6 +258,51 @@ def estimate_wind_from_gps(
     confidence = min(1.0, max(0.0, 1.0 - spread))
 
     return estimated_twd, confidence
+
+
+def estimate_wind_axis_from_gps(
+    gps: list[GpsPoint],
+    min_speed_kts: float = 2.0,
+) -> Optional[tuple[float, float]]:
+    """Gated tack-axis estimate, for use as a low-weight *direction* signal in
+    the fusion. Returns ``(axis_deg in [0, 180), confidence)`` or ``None``.
+
+    Unlike ``estimate_wind_from_gps`` (an unconditional last resort), this
+    only returns a value when the track actually *works a wind axis* —
+    tacking or gybing across a consistent line, with both tacks genuinely
+    sailed. A boat motoring straight, reaching steadily, or drifting reveals
+    no wind axis and yields ``None`` (its GPS heading would otherwise inject
+    noise into the blend). The 180° ambiguity is deliberately left in — the
+    caller resolves it against the other, speed-bearing sources."""
+    if len(gps) < 60:
+        return None
+
+    speeds = np.array([p.speed_kts for p in gps])
+    headings = np.array([p.heading_deg for p in gps])
+    mask = speeds > min_speed_kts
+    if mask.sum() < 30:
+        return None
+
+    headings_rad = np.radians(headings[mask])
+    axis_rad, concentration = _tack_axis(headings_rad)
+    if concentration < _AXIS_CONCENTRATION_MIN:
+        return None  # no clear single axis — not a beat/run
+
+    # Signed offset of each heading from the axis, folded onto the line
+    # ([-90°, 90°]) since up/down the same axis are equivalent.
+    off = np.angle(np.exp(1j * (headings_rad - axis_rad)))          # [-pi, pi]
+    off = (off + math.pi / 2) % math.pi - math.pi / 2               # [-pi/2, pi/2]
+    half = math.radians(_TACK_MIN_HALF_ANGLE_DEG)
+    n = len(off)
+    one_side = int(np.sum(off > half))
+    other_side = int(np.sum(off < -half))
+    # Both tacks must be meaningfully sailed, else it's a one-way track
+    # (a reach or a straight line), whose heading doesn't reveal the wind.
+    if one_side < _TACK_MIN_FRACTION * n or other_side < _TACK_MIN_FRACTION * n:
+        return None
+
+    axis_deg = math.degrees(axis_rad) % 180.0
+    return axis_deg, min(1.0, max(0.0, concentration))
 
 
 def smooth_wind_direction(

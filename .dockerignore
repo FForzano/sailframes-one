@@ -1,0 +1,26 @@
+# Applies to builds whose context is the repo root — i.e. the backend
+# (deploy/Dockerfile.backend) and the process_upload worker
+# (workers/process_upload/Dockerfile). The frontend builds from ./frontend,
+# so this file does not affect it (Docker resolves .dockerignore relative to
+# each build's own context root).
+#
+# Keeps the build context lean: without this, the whole repo (incl. .git and
+# frontend/node_modules) is sent to the daemon on every backend/worker build.
+.git
+.gitignore
+.dockerignore
+.claude
+.env
+*.md
+docs/
+
+# Python caches / tooling
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Frontend build artifacts (irrelevant to the backend/worker images)
+frontend/node_modules/
+frontend/dist/

@@ -23,7 +23,8 @@ build() {
 
 build backend        "$ROOT"                        "$ROOT/deploy/Dockerfile.backend"
 build frontend       "$ROOT/frontend"               "$ROOT/frontend/Dockerfile"
-build process-upload "$ROOT/workers/process_upload" "$ROOT/workers/process_upload/Dockerfile"
+# process-upload builds from the repo root so it can reach libs/sailframes_windfusion.
+build process-upload "$ROOT"                        "$ROOT/workers/process_upload/Dockerfile"
 build video          "$ROOT/workers/video"          "$ROOT/workers/video/Dockerfile"
 
 echo "done."

@@ -21,6 +21,7 @@ from typing import Optional
 
 from ..repositories import get_repos
 from . import wind_estimates
+from .geo import haversine_m
 from .wind_providers import open_meteo
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,17 @@ def gather_raw_wind(lat: float, lng: float, start: datetime, end: datetime,
 
     station, rows = _real_station_observations(lat, lng, start, end)
     if station is not None:
+        # Carry the station's own position and its distance from this
+        # waypoint so the worker can distance-weight it (a station is a fixed
+        # point offset from the track; the wind field differs across a bay).
+        # lat/lng are nullable on the station, so distance may be None.
+        distance_km = None
+        if station.lat is not None and station.lng is not None:
+            distance_km = round(haversine_m(lat, lng, station.lat, station.lng) / 1000.0, 3)
         bundle["real_stations"] = [{
             "station_id": station.id, "provider": station.provider,
+            "station_lat": station.lat, "station_lng": station.lng,
+            "distance_km": distance_km,
             "observed_at": o.observed_at, "twd_deg": o.twd_deg,
             "tws_kts": o.tws_kts, "gust_kts": o.gust_kts,
         } for o in rows]
