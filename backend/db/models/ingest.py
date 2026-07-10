@@ -32,6 +32,10 @@ from ..base import Base, UUIDPKMixin, enum_check
 
 IMPORT_STATUSES = ("pending", "processed", "failed")
 UPLOAD_STATUSES = ("pending", "processing", "processed", "failed")
+# Re-analysis / wind-refresh job state — separate from ``status`` above,
+# which tracks the ingestion pipeline (and feeds ``sessions.rollup_status``).
+# NULL means idle (no job running / last job succeeded).
+REANALYSIS_STATUSES = ("running", "failed")
 UPLOAD_SOURCE_TYPES = ("device", "manual_import")
 UPLOAD_SUBJECT_TYPES = ("boat", "crew_member")
 STREAM_SENSOR_TYPES = ("gps", "imu", "wind", "pressure", "heart_rate",
@@ -61,6 +65,7 @@ class SessionUploadORM(UUIDPKMixin, Base):
         enum_check("source_type", UPLOAD_SOURCE_TYPES),
         enum_check("subject_type", UPLOAD_SUBJECT_TYPES),
         enum_check("status", UPLOAD_STATUSES),
+        enum_check("reanalysis_status", REANALYSIS_STATUSES),
         CheckConstraint(
             "(source_type = 'device' AND device_id IS NOT NULL AND import_id IS NULL)"
             " OR (source_type = 'manual_import' AND import_id IS NOT NULL AND device_id IS NULL)",
@@ -103,6 +108,11 @@ class SessionUploadORM(UUIDPKMixin, Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    # Re-analysis / wind-refresh job tracking (``POST .../reanalyze``,
+    # ``POST .../wind/refresh``) — NULL/"running"/"failed", see
+    # REANALYSIS_STATUSES. Independent of ``status`` above.
+    reanalysis_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    reanalysis_error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class SessionStreamORM(UUIDPKMixin, Base):

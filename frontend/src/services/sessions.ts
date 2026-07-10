@@ -19,6 +19,7 @@ export const sessionKeys = {
   streams: (id: UUID) => ["sessions", id, "streams"] as const,
   stats: (id: UUID) => ["sessions", id, "stats"] as const,
   analysis: (id: UUID) => ["sessions", id, "analysis"] as const,
+  reanalysisStatus: (id: UUID) => ["sessions", id, "reanalysis-status"] as const,
   crew: (id: UUID) => ["sessions", id, "crew"] as const,
   photos: (id: UUID) => ["sessions", id, "photos"] as const,
   videos: (id: UUID) => ["sessions", id, "videos"] as const,
@@ -30,8 +31,12 @@ export const sessionsService = {
   get: (id: UUID) => api.get<Session>(`/sessions/${id}`),
   update: (id: UUID, body: Partial<Session>) => api.patch<Session>(`/sessions/${id}`, body),
   remove: (id: UUID) => api.del(`/sessions/${id}`),
-  reanalyze: (id: UUID) => api.post<{ ok: boolean; session_upload_id: UUID }>(`/sessions/${id}/reanalyze`),
-  refreshWind: (id: UUID) => api.post<{ ok: boolean }>(`/sessions/${id}/wind/refresh`),
+  reanalyze: (id: UUID) =>
+    api.post<{ ok: boolean; session_upload_id: UUID; status: "running" }>(`/sessions/${id}/reanalyze`),
+  refreshWind: (id: UUID) =>
+    api.post<{ ok: boolean; session_upload_id: UUID; status: "running" }>(`/sessions/${id}/wind/refresh`),
+  reanalysisStatus: (id: UUID) =>
+    api.get<{ status: "running" | "failed" | null; error: string | null }>(`/sessions/${id}/reanalysis-status`),
 
   streams: (id: UUID) => api.get<SessionStream[]>(`/sessions/${id}/streams`),
   stats: (id: UUID) => api.get<SessionStats>(`/sessions/${id}/stats`),

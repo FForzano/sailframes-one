@@ -1,4 +1,5 @@
 import { useToast } from "@/hooks/useToast";
+import { Spinner } from "@/components/ui/Spinner";
 
 export function ToastViewport() {
   const { toasts, dismiss } = useToast();
@@ -11,6 +12,7 @@ export function ToastViewport() {
           className={`sf-toast sf-toast--${t.kind}`}
           onClick={() => dismiss(t.id)}
         >
+          {t.pending && <Spinner inline />}
           {t.message}
         </button>
       ))}
