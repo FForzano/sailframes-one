@@ -99,7 +99,7 @@ class SqlIngestRepo:
             return list(s.scalars(q).all())
 
     def update_upload(self, upload_id: uuid.UUID, changes: dict) -> Optional[SessionUploadORM]:
-        allowed = ("status", "is_final", "raw_ref")
+        allowed = ("status", "is_final", "raw_ref", "reanalysis_status", "reanalysis_error")
         with self.Session() as s:
             orm = s.get(SessionUploadORM, upload_id)
             if orm is None:
@@ -112,6 +112,14 @@ class SqlIngestRepo:
 
     def set_upload_status(self, upload_id: uuid.UUID, status: str) -> bool:
         return self.update_upload(upload_id, {"status": status}) is not None
+
+    def set_reanalysis_status(self, upload_id: uuid.UUID, status: Optional[str],
+                              error: Optional[str] = None) -> bool:
+        """Track the background job started by reanalyze/wind-refresh
+        (``routers/sessions.py``) — NULL status means idle/done."""
+        return self.update_upload(
+            upload_id, {"reanalysis_status": status, "reanalysis_error": error}
+        ) is not None
 
     # --- session_streams ---
 

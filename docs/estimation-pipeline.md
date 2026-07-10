@@ -82,9 +82,18 @@ point-level SQL queries across sessions.
 
 ## 2. Wind
 
-Wind estimation spans two processes (backend + worker, no shared Python
-package between them — separate Docker images), so it's necessarily two
-seams, not one. Same distinction as above: acquisition, then estimation.
+Wind estimation spans two processes (backend + worker, separate Docker
+images), so it's necessarily two seams, not one. Same distinction as above:
+acquisition, then estimation.
+
+The two processes deliberately share **one** small pure-Python package,
+`libs/sailframes_windfusion` (blend math + source-reliability weighting),
+installed into both images — because the per-session estimate (worker) and
+the grid refinement (backend) must weigh sources identically or they'd
+disagree. It's dependency-free (stdlib `math` only) so it doesn't pull numpy
+into the otherwise numpy-free backend image. Both images build from the repo
+root so the build can reach it (see `docker-compose.yml` /
+`scripts/build-images.sh`). Everything else stays unshared.
 
 ### Acquisition — two very different kinds of source
 
@@ -116,16 +125,19 @@ A spatiotemporal grid (cell size `WIND_GRID_CELL_DEG`, time bucket
 `WIND_TIME_BUCKET_MIN`, both in `backend/services/wind_estimates.py`, no
 "official" default yet — tune them empirically). Two sessions passing
 through the same cell/bucket share (and can refine) the same row. Refining
-is a **deliberately bare skeleton** —
-`backend/services/wind_estimate_refinement.py`:
+is a pluggable strategy — `backend/services/wind_estimate_refinement.py`:
 
 ```python
 WindEstimateRefiner = Callable[[Optional[dict], dict], dict]
 # (existing_row_or_None, new_observation) -> new row to write
 ```
 
-The shipped `first_write_wins` strategy does the simplest possible thing
-(write once, never touch again) — see §3 below for how to replace it.
+The shipped `weighted_merge` strategy blends the existing row with the new
+observation as a reliability-weighted vector mean (same
+`libs/sailframes_windfusion` weighting the per-session `weighted_fusion`
+uses), accumulating provenance in `sources` and evidence in `confidence`.
+The trivial `first_write_wins` (write once, never touch again) stays
+registered as a baseline — see §3 for how to swap strategies.
 
 **b) Per session — `session_analysis.true_wind`.**
 
@@ -151,22 +163,29 @@ station's cached observations if one's in range, every Open-Meteo candidate
 model, and any existing `wind_estimates` rows for that cell — no selection,
 just acquisition, same principle as above.
 
-The shipped `sensor_then_cache_then_gps` strategy, in order:
+The shipped `weighted_fusion` strategy, in order:
 
 1. onboard sensor (`compute_true_wind_series` in `processing/wind.py`) —
    real measurement, tagged `"source": "sensor"`;
-2. the raw bundle, flattened to one representative series per waypoint
-   (`_flatten_bundle` — real station if present, else the first Open-Meteo
-   model with data, else a grid estimate) and interpolated onto the track
-   (`true_wind_from_cached`) — tagged `"source": "cache"`;
+2. the raw bundle *blended* per waypoint (`_fuse_bundle`): every source —
+   the real station, each Open-Meteo model, the grid estimate — is
+   interpolated in time and combined with a reliability-weighted vector mean
+   (`sailframes_windfusion.weighted_wind_mean`/`source_weight`), then
+   interpolated onto the track (`true_wind_from_cached`) — tagged
+   `"source": "fusion"`. When the GPS track is a genuine windward beat/run
+   (`estimate_wind_axis_from_gps`), its tack axis additionally nudges the
+   fused *direction* with a small weight, its 180° ambiguity resolved
+   against the speed-bearing sources (`_nudge_with_gps_axis`);
 3. a rough direction from the GPS tack pattern alone
    (`estimate_wind_from_gps`) — tagged `"source": "gps_estimate"`, no speed
    data (`tws_kts: None`).
 
-`_flatten_bundle` is *a* choice, not the only sensible one — a smarter
-strategy sees the whole unflattened bundle (every model, every station) and
-can do better (weight by distance, blend models, cross-check against the
-GPS track).
+The reliability weighting (per-source priors, spatial/temporal decay) lives
+in the shared `libs/sailframes_windfusion` package, so the per-session blend
+here and the grid refinement on the backend
+(`wind_estimate_refinement.weighted_merge`) weigh sources identically. The
+legacy pick-first `sensor_then_cache_then_gps`/`_flatten_bundle` strategy is
+still registered for A/B comparison (`ACTIVE_STRATEGY`).
 
 ### Closing the loop: sensor readings refine the grid
 

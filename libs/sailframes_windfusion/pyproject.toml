@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sailframes-windfusion"
+version = "0.1.0"
+description = "Pure wind-vector fusion + source-reliability weighting, shared by the SailFrames backend and the process_upload worker."
+requires-python = ">=3.10"
+# Intentionally dependency-free (stdlib math only): the backend image is kept
+# numpy-free (see deploy/requirements.txt), so this package must not pull numpy
+# into it. The worker still uses its own numpy for track interpolation, but the
+# blend math here is plain scalar trigonometry.
+dependencies = []
+
+[tool.setuptools]
+packages = ["sailframes_windfusion"]

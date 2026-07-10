@@ -512,6 +512,11 @@ h1, h2, h3 {
   background: color-mix(in srgb, var(--sf-danger) 25%, transparent);
   color: var(--sf-danger);
 }
+.sf-badge--pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
 
 .sf-empty {
   color: var(--sf-muted);
@@ -609,6 +614,10 @@ h1, h2, h3 {
   min-height: 60vh;
   align-items: center;
 }
+.sf-spinner--inline {
+  display: inline-flex;
+  padding: 0;
+}
 .sf-spinner__dot {
   width: 28px;
   height: 28px;
@@ -616,6 +625,12 @@ h1, h2, h3 {
   border-top-color: var(--sf-primary);
   border-radius: 50%;
   animation: sf-spin 0.8s linear infinite;
+}
+.sf-spinner--inline .sf-spinner__dot {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  border-top-color: currentColor;
 }
 @keyframes sf-spin {
   to {
@@ -633,6 +648,9 @@ h1, h2, h3 {
   z-index: 200;
 }
 .sf-toast {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   border: none;
   border-radius: var(--sf-radius);
   padding: 0.7rem 1.1rem;

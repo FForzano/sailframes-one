@@ -6,10 +6,11 @@ sessions (``session_visible_to``). Data ingestion happens through the device
 API / imports — here it's CRUD, crew, media, streams and stats reads.
 """
 
+import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ..auth import current_user, require_user, session_visible_to, verify_csrf
 from ..schemas import SessionCrewModel, SessionWriteModel
@@ -17,6 +18,7 @@ from ..services import ingestion, media
 from ._common import blob, repos, with_user
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+logger = logging.getLogger(__name__)
 
 
 def _require_session(session_id: uuid.UUID):
@@ -118,44 +120,95 @@ def delete_session(session_id: uuid.UUID, request: Request):
     return {"ok": True}
 
 
-@router.post("/{session_id}/reanalyze")
-def reanalyze_session(session_id: uuid.UUID, request: Request):
+def _latest_upload_or_404(session_id: uuid.UUID):
+    uploads = repos.ingest.list_uploads(session_id=session_id)
+    if not uploads:
+        raise HTTPException(404, "No processed data for this session")
+    return max(uploads, key=lambda u: u.uploaded_at)
+
+
+def _start_reanalysis_job(upload) -> None:
+    """Guard against overlapping reanalyze/wind-refresh runs on the same
+    upload — both jobs touch ``wind_cache.json``/``analysis.json`` and
+    running two at once would race on those blobs."""
+    if upload.reanalysis_status == "running":
+        raise HTTPException(409, "A reanalysis is already in progress for this session")
+    repos.ingest.set_reanalysis_status(upload.id, "running", error=None)
+
+
+def _run_reanalyze(upload_id: uuid.UUID, prefix: str) -> None:
+    try:
+        ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
+        repos.ingest.set_reanalysis_status(upload_id, None)
+    except Exception as exc:
+        logger.warning("reanalyze job failed for upload %s", upload_id, exc_info=True)
+        repos.ingest.set_reanalysis_status(upload_id, "failed", str(exc))
+
+
+def _run_wind_refresh(session_id: uuid.UUID, upload_id: uuid.UUID) -> None:
+    try:
+        ingestion.refresh_wind_cache(session_id)
+        repos.ingest.set_reanalysis_status(upload_id, None)
+    except Exception as exc:
+        logger.warning("wind refresh job failed for session %s", session_id, exc_info=True)
+        repos.ingest.set_reanalysis_status(upload_id, "failed", str(exc))
+
+
+@router.post("/{session_id}/reanalyze", status_code=202)
+def reanalyze_session(session_id: uuid.UUID, request: Request, background_tasks: BackgroundTasks):
     """Re-run the processing pipeline (maneuvers/legs/polar/VMG/…) on the
     session's already-processed data — e.g. after a detection-logic change,
     without re-importing. Same edit-level permission as PATCH; re-dispatches
     to the most recently uploaded processed prefix, which already has
-    gps.json/wind_cache.json in place from the original import."""
+    gps.json/wind_cache.json in place from the original import.
+
+    Runs in the background (worker dispatch can take up to
+    ``WORKER_TIMEOUT_SEC``) — the response only confirms the job started;
+    poll ``GET .../reanalysis-status`` for completion."""
     verify_csrf(request)
     user = require_user(request)
     session = _require_session(session_id)
     if not _can_edit(session, user):
         raise HTTPException(403, "Not allowed")
-    uploads = repos.ingest.list_uploads(session_id=session_id)
-    if not uploads:
-        raise HTTPException(404, "No processed data to reanalyze")
-    upload = max(uploads, key=lambda u: u.uploaded_at)
+    upload = _latest_upload_or_404(session_id)
+    _start_reanalysis_job(upload)
     prefix = ingestion.processed_prefix(upload.id)
-    ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
-    return {"ok": True, "session_upload_id": upload.id}
+    background_tasks.add_task(_run_reanalyze, upload.id, prefix)
+    return {"ok": True, "session_upload_id": upload.id, "status": "running"}
 
 
-@router.post("/{session_id}/wind/refresh")
-def refresh_session_wind(session_id: uuid.UUID, request: Request):
+@router.post("/{session_id}/wind/refresh", status_code=202)
+def refresh_session_wind(session_id: uuid.UUID, request: Request, background_tasks: BackgroundTasks):
     """Recompute the session's ``wind_cache.json`` (multi-waypoint sampling,
     tighter Open-Meteo grid — see ``services/ingestion.refresh_wind_cache``)
     and re-run analysis. For sessions ingested before those improvements
     landed; new sessions get them automatically. Same edit-level permission
-    as PATCH/reanalyze."""
+    as PATCH/reanalyze.
+
+    Runs in the background — the multi-source wind fetch plus worker
+    dispatch can take a while; poll ``GET .../reanalysis-status``."""
     verify_csrf(request)
     user = require_user(request)
     session = _require_session(session_id)
     if not _can_edit(session, user):
         raise HTTPException(403, "Not allowed")
-    try:
-        ingestion.refresh_wind_cache(session_id)
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
-    return {"ok": True}
+    upload = _latest_upload_or_404(session_id)
+    _start_reanalysis_job(upload)
+    background_tasks.add_task(_run_wind_refresh, session_id, upload.id)
+    return {"ok": True, "session_upload_id": upload.id, "status": "running"}
+
+
+@router.get("/{session_id}/reanalysis-status")
+def get_reanalysis_status(session_id: uuid.UUID, request: Request):
+    """Poll target for the reanalyze/wind-refresh background job — see
+    ``_start_reanalysis_job``. ``status`` is ``null`` when idle (no job
+    running, or the last one finished successfully)."""
+    session = _require_visible(session_id, current_user(request))
+    uploads = repos.ingest.list_uploads(session_id=session.id)
+    if not uploads:
+        return {"status": None, "error": None}
+    upload = max(uploads, key=lambda u: u.uploaded_at)
+    return {"status": upload.reanalysis_status, "error": upload.reanalysis_error}
 
 
 # --- streams / stats / analysis --------------------------------------------------

@@ -70,7 +70,7 @@ export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: UUID }>();
   const { t } = useTranslation();
   const { isBoatManager } = useCapabilities();
-  const { notify } = useToast();
+  const { notify, update } = useToast();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [addingCrew, setAddingCrew] = useState(false);
@@ -79,12 +79,41 @@ export function SessionDetailPage() {
   const [gps, setGps] = useState<GpsPoint[] | null>(null);
   const [showLegs, setShowLegs] = useState(true);
   const [showManeuvers, setShowManeuvers] = useState(true);
+  // Sticky toast id for the reanalyze/wind-refresh job — created "pending"
+  // when triggered, resolved to success/error once the poll below lands.
+  const [reanalysisToastId, setReanalysisToastId] = useState<number | null>(null);
+  const reanalysisPolling = reanalysisToastId !== null;
 
   const session = useQuery({
     queryKey: sessionKeys.detail(sessionId!),
     queryFn: () => sessionsService.get(sessionId!),
     enabled: !!sessionId,
   });
+  // Reanalyze/wind-refresh run in the background (backend/routers/sessions.py)
+  // — poll the job status every 3s while one is running, same pattern as
+  // ImportPage's upload-processing poll.
+  const reanalysisStatus = useQuery({
+    queryKey: sessionKeys.reanalysisStatus(sessionId!),
+    queryFn: () => sessionsService.reanalysisStatus(sessionId!),
+    enabled: !!sessionId && reanalysisPolling,
+    refetchInterval: reanalysisPolling ? 3000 : false,
+  });
+  useEffect(() => {
+    if (reanalysisToastId === null) return;
+    const data = reanalysisStatus.data;
+    if (!data || data.status === "running") return;
+    const toastId = reanalysisToastId;
+    setReanalysisToastId(null);
+    if (data.status === "failed") {
+      update(toastId, data.error || t("errors.generic"), "error");
+      return;
+    }
+    update(toastId, t("sessions.reanalyzeDone"), "success");
+    queryClient.invalidateQueries({ queryKey: sessionKeys.detail(sessionId!) });
+    queryClient.invalidateQueries({ queryKey: sessionKeys.analysis(sessionId!) });
+    queryClient.invalidateQueries({ queryKey: sessionKeys.stats(sessionId!) });
+    queryClient.invalidateQueries({ queryKey: sessionKeys.streams(sessionId!) });
+  }, [reanalysisToastId, reanalysisStatus.data, sessionId, queryClient, update, t]);
   const streams = useQuery({
     queryKey: sessionKeys.streams(sessionId!),
     queryFn: () => sessionsService.streams(sessionId!),
@@ -198,14 +227,22 @@ export function SessionDetailPage() {
     onSuccess: () => navigate(session.data ? `/diario/activities/${session.data.activity_id}` : "/diario/activities"),
     onError: () => notify(t("errors.generic"), "error"),
   });
+  // Seed the status query with "running" the instant the job is accepted:
+  // without this, starting a second job right after the first one finished
+  // would briefly poll with the previous (already-resolved) cached result
+  // still in place, and the effect below would mistake it for "already done".
+  const startReanalysisPolling = () => {
+    queryClient.setQueryData(sessionKeys.reanalysisStatus(sessionId!), { status: "running", error: null });
+    setReanalysisToastId(notify(t("sessions.reanalyzing"), "info", null));
+  };
   const reanalyze = useMutation({
     mutationFn: () => sessionsService.reanalyze(sessionId!),
-    onSuccess: () => notify(t("sessions.reanalyzeQueued"), "success"),
+    onSuccess: startReanalysisPolling,
     onError: () => notify(t("errors.generic"), "error"),
   });
   const refreshWind = useMutation({
     mutationFn: () => sessionsService.refreshWind(sessionId!),
-    onSuccess: () => notify(t("sessions.refreshWindQueued"), "success"),
+    onSuccess: startReanalysisPolling,
     onError: () => notify(t("errors.generic"), "error"),
   });
   const removePhoto = useMutation({
@@ -230,7 +267,13 @@ export function SessionDetailPage() {
         title={
           <>
             {boat?.name ?? t("sessions.boat")} — {fmtDateTime(s.started_at)}{" "}
-            <span className={sessionStatusBadge(s.status)}>{s.status}</span>
+            {reanalysisPolling ? (
+              <span className="sf-badge sf-badge--pending">
+                <Spinner inline /> {t("sessions.reanalyzing")}
+              </span>
+            ) : (
+              <span className={sessionStatusBadge(s.status)}>{s.status}</span>
+            )}
           </>
         }
         actions={
@@ -240,12 +283,12 @@ export function SessionDetailPage() {
                 {
                   label: t("sessions.reanalyze"),
                   onClick: () => reanalyze.mutate(),
-                  disabled: reanalyze.isPending,
+                  disabled: reanalyze.isPending || reanalysisPolling,
                 },
                 {
                   label: t("sessions.refreshWind"),
                   onClick: () => refreshWind.mutate(),
-                  disabled: refreshWind.isPending,
+                  disabled: refreshWind.isPending || reanalysisPolling,
                 },
                 {
                   label: t("common.delete"),
