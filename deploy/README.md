@@ -76,6 +76,50 @@ URLs (`http://{s3_host}/{bucket}/raw/...`). MinIO does not serve virtual-host
 buckets without DNS wildcard config. This is tracked separately from the
 compose stack — until then, use the `curl` simulation above.
 
+## Production deploy (VM + Docker Hub + Cloudflare Tunnel)
+
+`deploy/docker-compose.prod.yml` runs the same stack pulling prebuilt
+images from Docker Hub (`fforzano99/xgsail`, pushed by
+`.github/workflows/docker-publish.yml` on every push to `main`) instead of
+building locally, plus `watchtower` and `cloudflared`:
+
+```bash
+cp .env.example .env   # fill in real production secrets, incl.
+                        # CLOUDFLARE_TUNNEL_TOKEN and SAILFRAMES_S3_PUBLIC_ENDPOINT
+docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d
+```
+
+Once that's up, deploys are hands-off: pushing to `main` publishes new
+`*-latest` images, and `watchtower` polls Docker Hub every 5 minutes and
+redeploys the changed containers on its own — no SSH/manual pull needed.
+`cloudflared` opens an outbound tunnel with TLS terminated at Cloudflare's
+edge, so the VM needs no inbound ports open. Old image tags are pruned
+weekly by `.github/workflows/docker-cleanup.yml`
+(`scripts/dockerhub-prune-tags.sh`), keeping the newest 10 per service.
+
+The tunnel token is created once in the Cloudflare Zero Trust dashboard
+(Networks > Tunnels), and both public hostnames are routed there — not in
+this repo, since a token-based tunnel's routing lives in the dashboard:
+
+| Public hostname | Origin service |
+|---|---|
+| `xgsail.com` | `http://frontend:80` |
+| `minio.xgsail.com` | `http://minio:9000` |
+| `api.xgsail.com` | `http://backend:8000` |
+
+`minio.xgsail.com` is what browsers use for presigned upload/download URLs
+(`SAILFRAMES_S3_PUBLIC_ENDPOINT` in `.env`) — safe to expose publicly since
+presigned URLs are self-authenticating, same as real S3.
+
+`api.xgsail.com` gives native apps (mobile/desktop) a stable base URL that
+hits the backend directly — bypassing the frontend's nginx proxy (and its
+10 MB `client_max_body_size` cap on `/api/`, see `frontend/nginx.conf`).
+The web SPA keeps using its same-origin `/api` (via `frontend`), so this
+hostname is additive, not a replacement. If a browser-based client (not
+just native apps) ever calls `api.xgsail.com` directly, add its origin to
+`SAILFRAMES_CORS_ORIGINS` (CSV, see `backend/main.py`) — native HTTP
+clients aren't subject to CORS, so no change is needed for them.
+
 ## Notes / gotchas
 
 - numpy/pandas need the Debian `python:3.12-slim` base (precompiled wheels).

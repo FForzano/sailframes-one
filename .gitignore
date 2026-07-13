@@ -13,6 +13,7 @@ venv/
 .env
 .env.*
 !.env.example
+.pytest_cache
 
 # Node.js
 node_modules/
