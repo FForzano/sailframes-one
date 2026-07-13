@@ -116,8 +116,10 @@ def analyze_session(data_dir: Path) -> dict:
     if true_wind:
         avg_twd = float(np.mean([tw["twd_deg"] for tw in true_wind]))
 
-    # Maneuver detection
-    maneuvers = detect_maneuvers(gps, imu, avg_twd)
+    # Maneuver detection. avg_twd sets the wind axis (detection/classification);
+    # the full true_wind series only feeds the TWA/VMG-based maneuver features,
+    # so passing it does not change which maneuvers are detected.
+    maneuvers = detect_maneuvers(gps, imu, avg_twd, true_wind)
     m_summary = maneuver_summary(maneuvers)
 
     # Leg segmentation

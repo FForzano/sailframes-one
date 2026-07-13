@@ -31,7 +31,8 @@ _STATS_FIELDS = ("distance_m", "avg_speed_kts", "max_speed_kts", "duration_s",
 _MANEUVER_FIELDS = ("maneuver_type", "start_time", "end_time", "duration_sec",
                     "speed_loss_kts", "speed_before_kts", "speed_min_kts",
                     "speed_after_kts", "recovery_time_sec", "heading_change_deg",
-                    "max_heel_deg", "distance_lost_m", "start_lat", "start_lon")
+                    "distance_lost_m", "start_lat", "start_lon",
+                    "features")
 _LEG_FIELDS = ("leg_type", "start_time", "end_time", "duration_sec", "distance_nm",
                "avg_speed_kts", "max_speed_kts", "avg_vmg_kts", "avg_heel_deg",
                "avg_twa_deg", "tack", "std_heading_deg", "num_points", "start_lat",

@@ -286,10 +286,12 @@ export interface SessionManeuver {
   speed_after_kts: number;
   recovery_time_sec: number;
   heading_change_deg: number;
-  max_heel_deg: number | null;
   distance_lost_m: number | null;
   start_lat: number | null;
   start_lon: number | null;
+  // Statistical feature vector computed at detection (e.g. max_heel_deg) —
+  // see workers/process_upload/processing/maneuver_features.py.
+  features: Record<string, unknown> | null;
 }
 
 /** One straight-line leg between maneuvers. */

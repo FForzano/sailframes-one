@@ -28,7 +28,10 @@ from ..base import Base, CreatedAtMixin, UUIDPKMixin, enum_check
 
 SESSION_STATUSES = ("pending", "processing", "processed", "failed")
 SESSION_SAILING_ROLES = ("skipper", "crew", "guest")
-MANEUVER_TYPES = ("tack", "gybe")
+# "course_change" is a significant course change that isn't a tack or gybe.
+# Allowed by the schema but not produced by the current worker (the geometric
+# classifier only emits tack/gybe) — reserved for the future ML classifier.
+MANEUVER_TYPES = ("tack", "gybe", "course_change")
 LEG_TYPES = ("upwind", "downwind", "reach")
 TACK_SIDES = ("port", "starboard")
 
@@ -146,10 +149,16 @@ class SessionManeuverORM(UUIDPKMixin, Base):
     speed_after_kts: Mapped[float] = mapped_column(Float, nullable=False)
     recovery_time_sec: Mapped[float] = mapped_column(Float, nullable=False)
     heading_change_deg: Mapped[float] = mapped_column(Float, nullable=False)
-    max_heel_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     distance_lost_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     start_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     start_lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Statistical feature vector computed at detection (see the worker's
+    # processing/maneuver_features.py) — persisted to accumulate a training
+    # dataset for the future ML maneuver classifier. Nullable: older rows and
+    # analyses without features leave it null. Metrics that characterize the
+    # maneuver itself rather than this specific occurrence (e.g. max heel,
+    # under the "max_heel_deg" key) live ONLY here, not as their own column.
+    features: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
 class SessionLegORM(UUIDPKMixin, Base):
