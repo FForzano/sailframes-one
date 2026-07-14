@@ -159,7 +159,11 @@ services:
     restart: unless-stopped
 
   watchtower:
-    image: containrrr/watchtower:latest
+    # containrrr/watchtower was archived 2025-12-17 (frozen at v1.7.1, whose
+    # vendored Docker client speaks API 1.25 — too old for current Docker
+    # daemons, "client version 1.25 is too old" errors). nickfedor/watchtower
+    # is the actively maintained, drop-in-compatible community fork.
+    image: nickfedor/watchtower:latest
     command: ["--label-enable", "--interval", "300", "--cleanup"]
     environment:
       WATCHTOWER_CLEANUP: "true"
