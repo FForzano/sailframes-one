@@ -1,0 +1,182 @@
+# SailFrames production stack (VM + Docker Hub + Cloudflare Tunnel).
+#
+# Same services as the root docker-compose.yml, but the app images are
+# pulled from Docker Hub (fforzano99/xgsail) instead of built locally, and
+# Watchtower + cloudflared are added:
+#   - watchtower polls Docker Hub for new *-latest digests on the labeled
+#     app containers and redeploys them automatically.
+#   - cloudflared opens a Cloudflare Tunnel so xgsail.com reaches `frontend`
+#     with TLS terminated at Cloudflare's edge — no inbound ports on the VM.
+#
+# Bring it up on the VM:
+#   cp .env.example .env   # fill in the real production secrets
+#   docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d
+#
+# After that, deploys are automatic: docker-publish.yml pushes new
+# *-latest images on every push to main, and watchtower picks them up on
+# its next poll — no manual pull/restart needed.
+
+x-minio-user: &minio-user ${MINIO_ROOT_USER}
+x-minio-pass: &minio-pass ${MINIO_ROOT_PASSWORD}
+
+x-watchtower-label: &watchtower-label
+  com.centurylabs.watchtower.enable: "true"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: *minio-user
+      MINIO_ROOT_PASSWORD: *minio-pass
+      MINIO_NOTIFY_WEBHOOK_ENABLE_SF: "on"
+      MINIO_NOTIFY_WEBHOOK_ENDPOINT_SF: "http://backend:8000/hooks/minio"
+      MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_SF: ${SAILFRAMES_HOOK_TOKEN}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: *minio-user
+      MINIO_ROOT_PASSWORD: *minio-pass
+      SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET}
+      SAILFRAMES_PUBLIC_ORIGIN: https://xgsail.com
+    entrypoint: ["/bin/sh", "/init/minio-init.sh"]
+    volumes:
+      - ./minio-init.sh:/init/minio-init.sh:ro
+    restart: "no"
+
+  backend:
+    image: fforzano99/xgsail:backend-latest
+    labels: *watchtower-label
+    environment:
+      SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET}
+      SAILFRAMES_DATA_PREFIX: ${SAILFRAMES_DATA_PREFIX:-processed}
+      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
+      SAILFRAMES_S3_PUBLIC_ENDPOINT: ${SAILFRAMES_S3_PUBLIC_ENDPOINT}
+      AWS_ACCESS_KEY_ID: *minio-user
+      AWS_SECRET_ACCESS_KEY: *minio-pass
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN}
+      SAILFRAMES_JWT_SECRET: ${SAILFRAMES_JWT_SECRET}
+      SAILFRAMES_COOKIE_SECURE: "1"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      SAILFRAMES_SUPERADMIN_EMAIL: ${SAILFRAMES_SUPERADMIN_EMAIL}
+      SAILFRAMES_SUPERADMIN_PASSWORD: ${SAILFRAMES_SUPERADMIN_PASSWORD}
+      PROCESS_UPLOAD_URL: "http://process_upload:8080/2015-03-31/functions/function/invocations"
+      VIDEO_WORKER_URL: "http://video:8080/2015-03-31/functions/function/invocations"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    image: fforzano99/xgsail:frontend-latest
+    labels: *watchtower-label
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  process_upload:
+    image: fforzano99/xgsail:process-upload-latest
+    labels: *watchtower-label
+    environment:
+      DATA_BUCKET: ${SAILFRAMES_BUCKET}
+      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
+      AWS_ACCESS_KEY_ID: *minio-user
+      AWS_SECRET_ACCESS_KEY: *minio-pass
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      BACKEND_CALLBACK_URL: "http://backend:8000"
+      SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  video:
+    image: fforzano99/xgsail:video-latest
+    labels: *watchtower-label
+    environment:
+      DATA_BUCKET: ${SAILFRAMES_BUCKET}
+      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
+      AWS_ACCESS_KEY_ID: *minio-user
+      AWS_SECRET_ACCESS_KEY: *minio-pass
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  wind-scheduler:
+    image: curlimages/curl:latest
+    entrypoint: ["/bin/sh", "/init/wind-scheduler.sh"]
+    volumes:
+      - ./wind-scheduler.sh:/init/wind-scheduler.sh:ro
+    environment:
+      BACKEND_URL: "http://backend:8000"
+      SAILFRAMES_HOOK_TOKEN: ${SAILFRAMES_HOOK_TOKEN}
+      WIND_FETCH_INTERVAL_MIN_NOAA_NDBC: ${WIND_FETCH_INTERVAL_MIN_NOAA_NDBC:-30}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    command: ["--label-enable", "--interval", "300", "--cleanup"]
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  minio-data:
+  postgres-data:
