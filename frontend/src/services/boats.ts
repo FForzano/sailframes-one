@@ -5,16 +5,26 @@ import type {
   BoatMember,
   BoatRole,
   FileUploadTicket,
+  HullType,
   ImageUploadTicket,
   UUID,
 } from "@/types";
+
+export type BoatClassSort = "name" | "py_rating" | "crew_size" | "rya_class_id";
+export type SortOrder = "asc" | "desc";
 
 export const boatKeys = {
   all: ["boats"] as const,
   mine: ["boats", "mine"] as const,
   detail: (id: UUID) => ["boats", id] as const,
   members: (id: UUID) => ["boats", id, "members"] as const,
-  classes: (page = 0, search = "") => ["boat-classes", page, search] as const,
+  classes: (
+    page = 0,
+    search = "",
+    hullType: HullType | "" = "",
+    sort: BoatClassSort = "name",
+    order: SortOrder = "asc",
+  ) => ["boat-classes", page, search, hullType, sort, order] as const,
 };
 
 export const boatsService = {
@@ -37,11 +47,21 @@ export const boatsService = {
   uploadCert: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/cert`),
   uploadMbsa: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/mbsa`),
 
-  listClasses: (opts: { limit?: number; offset?: number; search?: string } = {}) => {
+  listClasses: (opts: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    hullType?: HullType | "";
+    sort?: BoatClassSort;
+    order?: SortOrder;
+  } = {}) => {
     const p = new URLSearchParams();
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
     if (opts.search) p.set("search", opts.search);
+    if (opts.hullType) p.set("hull_type", opts.hullType);
+    if (opts.sort) p.set("sort", opts.sort);
+    if (opts.order) p.set("order", opts.order);
     const s = p.toString();
     return api.get<BoatClass[]>(`/boat-classes${s ? `?${s}` : ""}`);
   },
@@ -49,4 +69,7 @@ export const boatsService = {
   updateClass: (id: UUID, body: Partial<BoatClass>) =>
     api.patch<BoatClass>(`/boat-classes/${id}`, body),
   removeClass: (id: UUID) => api.del(`/boat-classes/${id}`),
+  uploadClassLogo: (id: UUID) => api.post<ImageUploadTicket>(`/boat-classes/${id}/logo`),
+  confirmClassLogo: (id: UUID, imageId: UUID) =>
+    api.post(`/boat-classes/${id}/logo/${imageId}/confirm`),
 };

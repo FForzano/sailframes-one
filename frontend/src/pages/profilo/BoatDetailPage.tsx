@@ -14,6 +14,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ImageUploader } from "@/components/common/ImageUploader";
+import { ClassPicker, ClassInfo } from "@/components/common/ClassPicker";
 import { UserPicker } from "@/components/common/UserPicker";
 import { ClaimDeviceDialog } from "@/components/common/ClaimDeviceDialog";
 import { useMediaUpload } from "@/hooks/useMediaUpload";
@@ -101,7 +102,7 @@ export function BoatDetailPage() {
 
   const classes = useQuery({
     queryKey: boatKeys.classes(),
-    queryFn: () => boatsService.listClasses({ limit: 200 }),
+    queryFn: () => boatsService.listClasses({ limit: 1000, sort: "name" }),
   });
   const [form, setForm] = useState({ name: "", sail_number: "", boat_class_id: "", notes: "" });
   const [inviting, setInviting] = useState(false);
@@ -212,19 +213,13 @@ export function BoatDetailPage() {
                 value={form.sail_number}
                 onChange={(e) => setForm((f) => ({ ...f, sail_number: e.target.value }))}
               />
-              <Select
+              <ClassPicker
                 label={t("boats.boatClass")}
                 id="b-class"
-                value={form.boat_class_id}
-                onChange={(e) => setForm((f) => ({ ...f, boat_class_id: e.target.value }))}
-              >
-                <option value="">—</option>
-                {classes.data?.map((cl) => (
-                  <option key={cl.id} value={cl.id}>
-                    {cl.name}
-                  </option>
-                ))}
-              </Select>
+                classes={classes.data ?? []}
+                value={form.boat_class_id as UUID | ""}
+                onChange={(id) => setForm((f) => ({ ...f, boat_class_id: id }))}
+              />
             </div>
             <InputField
               label={t("boats.notes")}
@@ -239,10 +234,16 @@ export function BoatDetailPage() {
             </div>
           </form>
         ) : (
-          <p className="sf-muted">
-            {boat.data.sail_number ?? ""}{" "}
-            {classes.data?.find((cl) => cl.id === boat.data?.boat_class_id)?.name ?? ""}
-          </p>
+          <>
+            <p className="sf-muted">
+              {boat.data.sail_number ?? ""}{" "}
+              {classes.data?.find((cl) => cl.id === boat.data?.boat_class_id)?.name ?? ""}
+            </p>
+            {(() => {
+              const cl = classes.data?.find((c) => c.id === boat.data?.boat_class_id);
+              return cl ? <ClassInfo boatClass={cl} /> : null;
+            })()}
+          </>
         )}
 
         {manager && (

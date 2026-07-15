@@ -100,6 +100,7 @@ export interface BoatClass {
   spinnaker_type: SpinnakerType | null;
   py_rating: number | null;
   rya_class_id: number | null;
+  logo: ImageRef | null;
 }
 
 export type BoatRole = "owner" | "admin" | "visitor";

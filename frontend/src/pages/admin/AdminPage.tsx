@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { windService, windKeys } from "@/services/wind";
 import { usersService, userKeys } from "@/services/users";
 import { devicesService, deviceKeys } from "@/services/devices";
-import { boatsService, boatKeys } from "@/services/boats";
+import { boatsService, boatKeys, type BoatClassSort, type SortOrder } from "@/services/boats";
 import { useToast } from "@/hooks/useToast";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/Select";
 import { InputField, TextAreaField } from "@/components/ui/InputField";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
+import { ImageUploader } from "@/components/common/ImageUploader";
 import { fmtDateTime, userLabel } from "@/utils/format";
 import type { BoatClass, HullType, RigType, SpinnakerType, UUID, WindStation } from "@/types";
 
@@ -398,16 +399,22 @@ function BoatClasses() {
   const [name, setName] = useState("");
   const [page, setPage] = useState(0);
   const [search, setSearch] = useState("");
+  const [hullFilter, setHullFilter] = useState<HullType | "">("");
+  const [sort, setSort] = useState<BoatClassSort>("name");
+  const [order, setOrder] = useState<SortOrder>("asc");
   const [editing, setEditing] = useState<BoatClass | null>(null);
   const [form, setForm] = useState(emptyClassForm);
 
   const classes = useQuery({
-    queryKey: boatKeys.classes(page, search),
+    queryKey: boatKeys.classes(page, search, hullFilter, sort, order),
     queryFn: () =>
       boatsService.listClasses({
         limit: CLASS_PAGE_SIZE,
         offset: page * CLASS_PAGE_SIZE,
         search: search || undefined,
+        hullType: hullFilter,
+        sort,
+        order,
       }),
   });
 
@@ -428,6 +435,16 @@ function BoatClasses() {
       });
     }
   }, [editing]);
+
+  // Keep the open edit modal's logo preview in sync after an upload
+  // triggers a list refetch (the modal doesn't re-fetch its own copy).
+  useEffect(() => {
+    if (editing && classes.data) {
+      const fresh = classes.data.find((c) => c.id === editing.id);
+      if (fresh && fresh.logo !== editing.logo) setEditing(fresh);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [classes.data]);
 
   // Prefix match invalidates every page ([boat-classes, page] for each page).
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["boat-classes"] });
@@ -470,21 +487,57 @@ function BoatClasses() {
 
   return (
     <Card title={t("admin.boatClasses")}>
-      <InputField
-        label={t("common.search")}
-        id="bc-search"
-        type="search"
-        value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          setPage(0);
-        }}
-        placeholder={t("admin.boatClasses")}
-      />
+      <div className="sf-form__row" style={{ alignItems: "end" }}>
+        <InputField
+          label={t("common.search")}
+          id="bc-search"
+          type="search"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+          placeholder={t("admin.boatClasses")}
+        />
+        <Select
+          label={t("admin.hullType")}
+          id="bc-hull-filter"
+          value={hullFilter}
+          onChange={(e) => {
+            setHullFilter(e.target.value as HullType | "");
+            setPage(0);
+          }}
+        >
+          <option value="">{t("admin.allHullTypes")}</option>
+          <option value="monohull">{t("admin.monohull")}</option>
+          <option value="multihull">{t("admin.multihull")}</option>
+        </Select>
+        <Select
+          label={t("common.sortBy")}
+          id="bc-sort"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as BoatClassSort)}
+        >
+          <option value="name">{t("common.name")}</option>
+          <option value="py_rating">{t("admin.pyRating")}</option>
+          <option value="crew_size">{t("admin.crewSize")}</option>
+          <option value="rya_class_id">{t("admin.ryaClassId")}</option>
+        </Select>
+        <Select
+          label={t("common.sortOrder")}
+          id="bc-order"
+          value={order}
+          onChange={(e) => setOrder(e.target.value as SortOrder)}
+        >
+          <option value="asc">{t("common.ascending")}</option>
+          <option value="desc">{t("common.descending")}</option>
+        </Select>
+      </div>
       <div className="sf-tablewrap">
         <table className="sf-table">
           <thead>
             <tr>
+              <th />
               <th>{t("common.name")}</th>
               <th>{t("admin.hullType")}</th>
               <th>{t("admin.loa")}</th>
@@ -501,6 +554,13 @@ function BoatClasses() {
             {classes.data?.map((c) => (
               <tr key={c.id}>
                 <td>
+                  {c.logo ? (
+                    <img className="sf-avatar sf-avatar--sm" src={c.logo.url} alt="" />
+                  ) : (
+                    <span className="sf-muted">—</span>
+                  )}
+                </td>
+                <td>
                   <strong>{c.name}</strong>
                 </td>
                 <td>{c.hull_type ? t(`admin.${c.hull_type}`) : "—"}</td>
@@ -511,13 +571,27 @@ function BoatClasses() {
                 <td>{c.spinnaker_type ? t(`admin.spinnaker_${c.spinnaker_type}`) : "—"}</td>
                 <td>{c.py_rating ?? "—"}</td>
                 <td>{c.rya_class_id ?? "—"}</td>
-                <td style={{ display: "flex", gap: "0.4rem" }}>
-                  <Button variant="ghost" className="sf-btn--sm" onClick={() => setEditing(c)}>
-                    {t("common.edit")}
-                  </Button>
-                  <Button variant="danger" className="sf-btn--sm" onClick={() => remove.mutate(c.id)}>
-                    ×
-                  </Button>
+                <td>
+                  <span style={{ display: "flex", gap: "0.4rem" }}>
+                    <Button
+                      variant="ghost"
+                      className="sf-btn--sm"
+                      aria-label={t("common.edit")}
+                      title={t("common.edit")}
+                      onClick={() => setEditing(c)}
+                    >
+                      ✎
+                    </Button>
+                    <Button
+                      variant="danger"
+                      className="sf-btn--sm"
+                      aria-label={t("common.delete")}
+                      title={t("common.delete")}
+                      onClick={() => remove.mutate(c.id)}
+                    >
+                      ×
+                    </Button>
+                  </span>
                 </td>
               </tr>
             ))}
@@ -573,6 +647,19 @@ function BoatClasses() {
               save.mutate();
             }}
           >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
+              {editing.logo ? (
+                <img className="sf-avatar" src={editing.logo.url} alt="" />
+              ) : (
+                <span className="sf-avatar sf-avatar--initials">—</span>
+              )}
+              <ImageUploader
+                crop
+                create={() => boatsService.uploadClassLogo(editing.id)}
+                confirm={(imageId) => boatsService.confirmClassLogo(editing.id, imageId)}
+                onDone={invalidate}
+              />
+            </div>
             <InputField
               label={t("common.name")}
               id="bce-name"

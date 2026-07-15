@@ -43,7 +43,11 @@
     "date": "Data",
     "role": "Ruolo",
     "saved": "Salvato",
-    "loadError": "Errore di caricamento"
+    "loadError": "Errore di caricamento",
+    "sortBy": "Ordina per",
+    "sortOrder": "Direzione",
+    "ascending": "Crescente",
+    "descending": "Decrescente"
   },
   "errors": {
     "generic": "Qualcosa è andato storto",
@@ -122,7 +126,9 @@
     "cert": "Certificato",
     "mbsa": "Modulo di stazza",
     "deleteConfirm": "Eliminare questa barca? Lo storico sessioni è preservato.",
-    "empty": "Nessuna barca — aggiungi la tua prima barca."
+    "empty": "Nessuna barca — aggiungi la tua prima barca.",
+    "noClassMatch": "Nessuna classe trovata",
+    "noClass": "Nessuna classe"
   },
   "devices": {
     "title": "I miei dispositivi",
@@ -385,6 +391,7 @@
     "sailArea": "Superficie velica (m²)",
     "crewSize": "N. equipaggio",
     "hullType": "Tipo scafo",
+    "allHullTypes": "Tutti gli scafi",
     "rigType": "Armo",
     "pyRating": "Numero PY",
     "monohull": "Monoscafo",

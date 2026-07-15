@@ -132,13 +132,27 @@ class SqlBoatRepo:
 
     # --- boat_classes catalog ---
 
+    _CLASS_SORT_COLUMNS = {
+        "name": BoatClassORM.name,
+        "py_rating": BoatClassORM.py_rating,
+        "crew_size": BoatClassORM.crew_size,
+        "rya_class_id": BoatClassORM.rya_class_id,
+    }
+
     def list_classes(self, *, limit: int = 50, offset: int = 0,
-                     search: Optional[str] = None) -> "list[BoatClassORM]":
+                     search: Optional[str] = None, hull_type: Optional[str] = None,
+                     sort: str = "name", order: str = "asc") -> "list[BoatClassORM]":
         with self.Session() as s:
             q = select(BoatClassORM)
             if search:
                 q = q.where(BoatClassORM.name.ilike(f"%{search}%"))
-            q = q.order_by(BoatClassORM.name).limit(limit).offset(offset)
+            if hull_type:
+                q = q.where(BoatClassORM.hull_type == hull_type)
+            column = self._CLASS_SORT_COLUMNS.get(sort, BoatClassORM.name)
+            # NULLs (unset py_rating/crew_size on partial rows) always sort last,
+            # regardless of direction, instead of leading a descending sort.
+            column_ordered = column.desc() if order == "desc" else column.asc()
+            q = q.order_by(column.is_(None), column_ordered).limit(limit).offset(offset)
             return list(s.scalars(q).all())
 
     def get_class(self, class_id: uuid.UUID) -> Optional[BoatClassORM]:

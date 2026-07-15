@@ -65,10 +65,27 @@ def _boat_payload(boat, user) -> dict:
 
 # --- boat classes (superadmin catalog) -------------------------------------
 
+def _require_class(class_id: uuid.UUID):
+    boat_class = repos.boats.get_class(class_id)
+    if boat_class is None:
+        raise HTTPException(404, "Boat class not found")
+    return boat_class
+
+
+def _class_payload(boat_class) -> dict:
+    d = boat_class.to_dict()
+    d["logo"] = media.image_payload(boat_class.logo_id)
+    return d
+
+
 @router.get("/boat-classes")
-def list_boat_classes(limit: int = Query(50, le=200, gt=0), offset: int = Query(0, ge=0),
-                      search: Optional[str] = None):
-    return [c.to_dict() for c in repos.boats.list_classes(limit=limit, offset=offset, search=search)]
+def list_boat_classes(limit: int = Query(50, le=1000, gt=0), offset: int = Query(0, ge=0),
+                      search: Optional[str] = None, hull_type: Optional[str] = None,
+                      sort: str = Query("name", pattern="^(name|py_rating|crew_size|rya_class_id)$"),
+                      order: str = Query("asc", pattern="^(asc|desc)$")):
+    return [_class_payload(c) for c in repos.boats.list_classes(
+        limit=limit, offset=offset, search=search, hull_type=hull_type, sort=sort, order=order,
+    )]
 
 
 @router.post("/boat-classes")
@@ -77,7 +94,7 @@ def create_boat_class(body: BoatClassWriteModel, request: Request):
     require_superadmin(request)
     if not body.name:
         raise HTTPException(422, "name is required")
-    return repos.boats.create_class(body.model_dump(exclude_unset=True)).to_dict()
+    return _class_payload(repos.boats.create_class(body.model_dump(exclude_unset=True)))
 
 
 @router.patch("/boat-classes/{class_id}")
@@ -87,7 +104,30 @@ def update_boat_class(class_id: uuid.UUID, body: BoatClassWriteModel, request: R
     updated = repos.boats.update_class(class_id, body.model_dump(exclude_unset=True))
     if updated is None:
         raise HTTPException(404, "Boat class not found")
-    return updated.to_dict()
+    return _class_payload(updated)
+
+
+@router.post("/boat-classes/{class_id}/logo")
+def upload_class_logo(class_id: uuid.UUID, request: Request):
+    verify_csrf(request)
+    user = require_user(request)
+    require_superadmin(request)
+    _require_class(class_id)
+    payload = media.create_image_upload(user.id)
+    repos.boats.update_class(class_id, {"logo_id": payload["image_id"]})
+    return payload
+
+
+@router.post("/boat-classes/{class_id}/logo/{image_id}/confirm")
+def confirm_class_logo(class_id: uuid.UUID, image_id: uuid.UUID, request: Request):
+    verify_csrf(request)
+    require_superadmin(request)
+    boat_class = _require_class(class_id)
+    if boat_class.logo_id != image_id:
+        raise HTTPException(404, "Logo not found")
+    if not media.confirm_image(image_id):
+        raise HTTPException(409, "Image not uploaded yet")
+    return {"ok": True}
 
 
 @router.delete("/boat-classes/{class_id}")

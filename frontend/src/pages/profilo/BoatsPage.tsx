@@ -9,9 +9,9 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { InputField } from "@/components/ui/InputField";
-import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ClassPicker } from "@/components/common/ClassPicker";
 
 export function BoatsPage() {
   const { t } = useTranslation();
@@ -24,7 +24,7 @@ export function BoatsPage() {
   const boats = useQuery({ queryKey: boatKeys.mine, queryFn: () => boatsService.list(true) });
   const classes = useQuery({
     queryKey: boatKeys.classes(),
-    queryFn: () => boatsService.listClasses({ limit: 200 }),
+    queryFn: () => boatsService.listClasses({ limit: 1000, sort: "name" }),
   });
 
   const create = useMutation({
@@ -45,8 +45,7 @@ export function BoatsPage() {
 
   if (boats.isLoading) return <Spinner />;
 
-  const className = (id: string | null) =>
-    (id && classes.data?.find((c) => c.id === id)?.name) || "—";
+  const boatClass = (id: string | null) => (id && classes.data?.find((c) => c.id === id)) || null;
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -65,21 +64,44 @@ export function BoatsPage() {
           <table className="sf-table">
             <thead>
               <tr>
+                <th />
                 <th>{t("common.name")}</th>
                 <th>{t("boats.sailNumber")}</th>
                 <th>{t("boats.boatClass")}</th>
               </tr>
             </thead>
             <tbody>
-              {boats.data?.map((b) => (
-                <tr key={b.id}>
-                  <td>
-                    <Link to={`/profilo/barche/${b.id}`}>{b.name}</Link>
-                  </td>
-                  <td>{b.sail_number ?? "—"}</td>
-                  <td>{className(b.boat_class_id)}</td>
-                </tr>
-              ))}
+              {boats.data?.map((b) => {
+                const cl = boatClass(b.boat_class_id);
+                const photo = b.photos.find(Boolean);
+                return (
+                  <tr key={b.id}>
+                    <td>
+                      {photo ? (
+                        <img className="sf-avatar sf-avatar--sm" src={photo.url} alt="" />
+                      ) : (
+                        <span className="sf-muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <Link to={`/profilo/barche/${b.id}`}>{b.name}</Link>
+                    </td>
+                    <td>{b.sail_number ?? "—"}</td>
+                    <td>
+                      {cl ? (
+                        <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                          {cl.logo && (
+                            <img className="sf-avatar sf-avatar--sm" src={cl.logo.url} alt="" />
+                          )}
+                          {cl.name}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -101,19 +123,13 @@ export function BoatsPage() {
               value={form.sail_number}
               onChange={(e) => setForm((f) => ({ ...f, sail_number: e.target.value }))}
             />
-            <Select
+            <ClassPicker
               label={t("boats.boatClass")}
               id="boat-class"
+              classes={classes.data ?? []}
               value={form.boat_class_id}
-              onChange={(e) => setForm((f) => ({ ...f, boat_class_id: e.target.value }))}
-            >
-              <option value="">—</option>
-              {classes.data?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
+              onChange={(id) => setForm((f) => ({ ...f, boat_class_id: id }))}
+            />
             <div className="sf-form__actions">
               <Button type="submit" disabled={create.isPending || !form.name}>
                 {t("common.create")}
