@@ -39,6 +39,9 @@ interface RequestOptions {
 
 let refreshing: Promise<boolean> | null = null;
 
+// A 401 on these is expected (bad creds) or would loop the refresh itself.
+const NO_REFRESH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh"];
+
 async function doRefresh(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
@@ -85,7 +88,11 @@ export async function request<T = unknown>(
     signal: opts.signal,
   });
 
-  if (res.status === 401 && !opts._retried && !path.startsWith("/auth/")) {
+  if (
+    res.status === 401 &&
+    !opts._retried &&
+    !NO_REFRESH_PATHS.some((p) => path.startsWith(p))
+  ) {
     // Single-flight refresh shared across concurrent 401s, then replay once.
     const ok = await (refreshing ??= doRefresh().finally(() => {
       refreshing = null;
