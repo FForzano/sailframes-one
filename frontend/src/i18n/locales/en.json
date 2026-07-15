@@ -43,7 +43,11 @@
     "date": "Date",
     "role": "Role",
     "saved": "Saved",
-    "loadError": "Failed to load"
+    "loadError": "Failed to load",
+    "sortBy": "Sort by",
+    "sortOrder": "Order",
+    "ascending": "Ascending",
+    "descending": "Descending"
   },
   "errors": {
     "generic": "Something went wrong",
@@ -121,8 +125,12 @@
     "photos": "Photos",
     "cert": "Certificate",
     "mbsa": "Measurement form",
+    "viewDocument": "View",
     "deleteConfirm": "Delete this boat? Sessions history is preserved.",
-    "empty": "No boats yet — add your first boat."
+    "lastOwner": "A boat must always have at least one owner",
+    "empty": "No boats yet — add your first boat.",
+    "noClassMatch": "No matching class",
+    "noClass": "No class"
   },
   "devices": {
     "title": "My devices",
@@ -379,6 +387,23 @@
     "superadmin": "Superadmin",
     "active": "Active",
     "roles": "Roles",
-    "lastObservations": "Latest observations"
+    "lastObservations": "Latest observations",
+    "loa": "LOA (m)",
+    "beam": "Beam (m)",
+    "sailArea": "Sail area (m²)",
+    "crewSize": "Crew size",
+    "hullType": "Hull type",
+    "allHullTypes": "All hull types",
+    "rigType": "Rig",
+    "pyRating": "PY number",
+    "monohull": "Monohull",
+    "multihull": "Multihull",
+    "sloop": "Sloop",
+    "una": "Una (single-sail)",
+    "spinnakerType": "Spinnaker",
+    "spinnaker_none": "None",
+    "spinnaker_asymmetric": "Asymmetric",
+    "spinnaker_symmetric": "Symmetric",
+    "ryaClassId": "RYA Class ID"
   }
 }

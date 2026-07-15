@@ -1,6 +1,7 @@
 # Data files (too large for git)
 data/
 train-data/
+!scripts/data/
 
 # Python
 __pycache__/

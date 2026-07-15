@@ -22,9 +22,19 @@ class BoatMemberModel(BaseModel):
 
 
 class BoatMemberRoleModel(BaseModel):
-    role: str
+    role: Optional[str] = None  # owner | admin | visitor
+    default_sailing_role: Optional[str] = None  # skipper | crew
 
 
 class BoatClassWriteModel(BaseModel):
     name: Optional[str] = None  # required on create, enforced by the router
     description: Optional[str] = None
+    loa_m: Optional[float] = None
+    beam_m: Optional[float] = None
+    sail_area_sqm: Optional[float] = None
+    crew_size: Optional[int] = None
+    hull_type: Optional[str] = None  # monohull | multihull
+    rig_type: Optional[str] = None  # sloop | una (RYA "Rig" column: S/U)
+    spinnaker_type: Optional[str] = None  # none | asymmetric | symmetric (RYA "Spinnaker": 0/A/C)
+    py_rating: Optional[int] = None  # RYA "Number" column
+    rya_class_id: Optional[int] = None  # official RYA Class ID, reference only

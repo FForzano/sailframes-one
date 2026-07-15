@@ -359,6 +359,46 @@ h1, h2, h3 {
   outline-offset: -1px;
 }
 
+.sf-combobox {
+  position: relative;
+}
+.sf-combobox__list {
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 80;
+}
+.sf-combobox__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+.sf-combobox__option:hover,
+.sf-combobox__option--active {
+  background: color-mix(in srgb, var(--sf-primary) 15%, transparent);
+}
+.sf-classinfo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: -0.4rem 0 0.85rem;
+  font-size: 0.85rem;
+}
+.sf-classinfo__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.6rem;
+}
+
 .sf-form__row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -368,7 +408,9 @@ h1, h2, h3 {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-  margin-top: 0.5rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--sf-border);
 }
 .sf-form__error {
   color: var(--sf-danger);

@@ -6,12 +6,16 @@ edit never clobbers the roster)."""
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from ...db.models import BoatClassORM, BoatORM, BoatPhotoORM, UserBoatORM
 
 _FIELDS = ("name", "boat_class_id", "sail_number", "loa_m", "cert_id", "mbsa_id", "notes", "club_id")
-_CLASS_FIELDS = ("name", "description", "logo_id")
+_CLASS_FIELDS = (
+    "name", "description", "logo_id",
+    "loa_m", "beam_m", "sail_area_sqm", "crew_size", "hull_type",
+    "rig_type", "spinnaker_type", "py_rating", "rya_class_id",
+)
 
 
 class SqlBoatRepo:
@@ -88,12 +92,21 @@ class SqlBoatRepo:
             s.commit()
             return True
 
-    def set_member_role(self, boat_id: uuid.UUID, user_id: uuid.UUID, role: str) -> bool:
+    def set_member_role(self, boat_id: uuid.UUID, user_id: uuid.UUID, *,
+                        role: Optional[str] = None,
+                        default_sailing_role: Optional[str] = None) -> bool:
+        values = {}
+        if role is not None:
+            values["role"] = role
+        if default_sailing_role is not None:
+            values["default_sailing_role"] = default_sailing_role
+        if not values:
+            return False
         with self.Session() as s:
             res = s.execute(
                 update(UserBoatORM)
                 .where(UserBoatORM.boat_id == boat_id, UserBoatORM.user_id == user_id)
-                .values(role=role)
+                .values(**values)
             )
             s.commit()
             return res.rowcount > 0
@@ -103,6 +116,22 @@ class SqlBoatRepo:
             return list(s.scalars(
                 select(UserBoatORM).where(UserBoatORM.boat_id == boat_id)
             ).all())
+
+    def get_member(self, boat_id: uuid.UUID, user_id: uuid.UUID) -> Optional[UserBoatORM]:
+        with self.Session() as s:
+            return s.scalars(
+                select(UserBoatORM).where(
+                    UserBoatORM.boat_id == boat_id, UserBoatORM.user_id == user_id
+                )
+            ).first()
+
+    def count_owners(self, boat_id: uuid.UUID) -> int:
+        with self.Session() as s:
+            return s.scalar(
+                select(func.count()).select_from(UserBoatORM).where(
+                    UserBoatORM.boat_id == boat_id, UserBoatORM.role == "owner"
+                )
+            ) or 0
 
     def is_member(self, boat_id: uuid.UUID, user_id: uuid.UUID,
                   roles: "Optional[list]" = None) -> bool:
@@ -128,9 +157,28 @@ class SqlBoatRepo:
 
     # --- boat_classes catalog ---
 
-    def list_classes(self) -> "list[BoatClassORM]":
+    _CLASS_SORT_COLUMNS = {
+        "name": BoatClassORM.name,
+        "py_rating": BoatClassORM.py_rating,
+        "crew_size": BoatClassORM.crew_size,
+        "rya_class_id": BoatClassORM.rya_class_id,
+    }
+
+    def list_classes(self, *, limit: int = 50, offset: int = 0,
+                     search: Optional[str] = None, hull_type: Optional[str] = None,
+                     sort: str = "name", order: str = "asc") -> "list[BoatClassORM]":
         with self.Session() as s:
-            return list(s.scalars(select(BoatClassORM)).all())
+            q = select(BoatClassORM)
+            if search:
+                q = q.where(BoatClassORM.name.ilike(f"%{search}%"))
+            if hull_type:
+                q = q.where(BoatClassORM.hull_type == hull_type)
+            column = self._CLASS_SORT_COLUMNS.get(sort, BoatClassORM.name)
+            # NULLs (unset py_rating/crew_size on partial rows) always sort last,
+            # regardless of direction, instead of leading a descending sort.
+            column_ordered = column.desc() if order == "desc" else column.asc()
+            q = q.order_by(column.is_(None), column_ordered).limit(limit).offset(offset)
+            return list(s.scalars(q).all())
 
     def get_class(self, class_id: uuid.UUID) -> Optional[BoatClassORM]:
         with self.Session() as s:

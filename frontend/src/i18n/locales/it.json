@@ -43,7 +43,11 @@
     "date": "Data",
     "role": "Ruolo",
     "saved": "Salvato",
-    "loadError": "Errore di caricamento"
+    "loadError": "Errore di caricamento",
+    "sortBy": "Ordina per",
+    "sortOrder": "Direzione",
+    "ascending": "Crescente",
+    "descending": "Decrescente"
   },
   "errors": {
     "generic": "Qualcosa è andato storto",
@@ -121,8 +125,12 @@
     "photos": "Foto",
     "cert": "Certificato",
     "mbsa": "Modulo di stazza",
+    "viewDocument": "Visualizza",
     "deleteConfirm": "Eliminare questa barca? Lo storico sessioni è preservato.",
-    "empty": "Nessuna barca — aggiungi la tua prima barca."
+    "lastOwner": "La barca deve avere sempre almeno un owner",
+    "empty": "Nessuna barca — aggiungi la tua prima barca.",
+    "noClassMatch": "Nessuna classe trovata",
+    "noClass": "Nessuna classe"
   },
   "devices": {
     "title": "I miei dispositivi",
@@ -379,6 +387,23 @@
     "superadmin": "Superadmin",
     "active": "Attivo",
     "roles": "Ruoli",
-    "lastObservations": "Ultime osservazioni"
+    "lastObservations": "Ultime osservazioni",
+    "loa": "LOA (m)",
+    "beam": "Larghezza (m)",
+    "sailArea": "Superficie velica (m²)",
+    "crewSize": "N. equipaggio",
+    "hullType": "Tipo scafo",
+    "allHullTypes": "Tutti gli scafi",
+    "rigType": "Armo",
+    "pyRating": "Numero PY",
+    "monohull": "Monoscafo",
+    "multihull": "Multiscafo",
+    "sloop": "Sloop",
+    "una": "Armo singolo (Una)",
+    "spinnakerType": "Spinnaker",
+    "spinnaker_none": "Nessuno",
+    "spinnaker_asymmetric": "Asimmetrico",
+    "spinnaker_symmetric": "Simmetrico",
+    "ryaClassId": "ID classe RYA"
   }
 }
