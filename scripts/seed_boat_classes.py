@@ -14,11 +14,15 @@ published at https://www.rya.org.uk/racing/portsmouth-yardstick):
    starting point, not a current number). Roughly half its rows have no
    RYA Class ID at all (older/rarer classes never assigned one).
 3. ``rya_class_master_2026.json`` — the "Class List Master" (523 class
-   configurations, keyed by RYA Class ID): no PY numbers, used only to
-   backfill crew/rig/spinnaker/hull_type when a Limited Data List row is
-   missing them and has a matching ID (e.g. "470"/RYA ID 13 has a PY
-   number on the Limited Data List but no crew/rig/spinnaker there —
-   pulled from the master list instead).
+   configurations, keyed by RYA Class ID): no PY numbers. Used two ways:
+   (a) to backfill crew/rig/spinnaker/hull_type when a Limited Data List
+   row is missing them and has a matching ID (e.g. "470"/RYA ID 13 has a
+   PY number on the Limited Data List but no crew/rig/spinnaker there —
+   pulled from the master list instead); (b) every remaining class in the
+   master list that has an RYA Class ID but never made either PY list is
+   still imported, with ``py_rating`` left ``NULL`` — a class configuration
+   is real and worth having in the catalog even with no number yet; an
+   admin can fill it in by hand later once one is available.
 
 Only RYA-published fields are ever touched: ``name``, ``rya_class_id``,
 ``crew_size``, ``rig_type``, ``spinnaker_type``, ``py_rating``, ``hull_type``.
@@ -30,7 +34,11 @@ Idempotent and safe to re-run every time the RYA republishes a list: matches
 existing rows by ``rya_class_id`` first, falling back to a case-insensitive
 exact ``name`` match for a class created locally (or sourced from the
 Limited Data list with no ID) before it had an RYA ID — that class gets
-linked, not duplicated. Anything left unmatched is created.
+linked, not duplicated. Anything left unmatched is created. If the name
+match already carries a *different* RYA Class ID, the row is skipped rather
+than silently re-pointing an existing link (happens for a handful of master
+rows that share a name with an unrelated already-published class, e.g. two
+distinct "Spitfire" configurations — needs a human to disambiguate).
 
 Run with the backend environment configured (DB reachable), e.g. inside the
 backend container:
@@ -66,7 +74,8 @@ def _key(row: dict):
 def build_merged_rows() -> list[dict]:
     pn_rows = json.loads(PN_FILE.read_text())
     limited_rows = json.loads(LIMITED_FILE.read_text())
-    master_by_id = {r["rya_class_id"]: r for r in json.loads(MASTER_FILE.read_text())}
+    master_rows = json.loads(MASTER_FILE.read_text())
+    master_by_id = {r["rya_class_id"]: r for r in master_rows}
 
     merged: dict[object, dict] = {}
     for row in pn_rows:
@@ -84,6 +93,14 @@ def build_merged_rows() -> list[dict]:
                     entry[field] = master.get(field)
         merged[k] = entry
 
+    # Every remaining master-list class with an RYA Class ID that never made
+    # either PY list — imported anyway, py_rating stays NULL.
+    for row in master_rows:
+        k = row["rya_class_id"]
+        if k in merged:
+            continue
+        merged[k] = {**row, "py_rating": None}
+
     return list(merged.values())
 
 
@@ -98,9 +115,20 @@ def main() -> None:
     by_rya_id = {c.rya_class_id: c for c in existing if c.rya_class_id is not None}
     by_name = {c.name.strip().lower(): c for c in existing}
 
-    created = updated = unchanged = 0
+    created = updated = unchanged = skipped = 0
     for row in rows:
-        match = by_rya_id.get(row["rya_class_id"]) or by_name.get(row["name"].strip().lower())
+        match = by_rya_id.get(row["rya_class_id"])
+        if match is None:
+            name_match = by_name.get(row["name"].strip().lower())
+            if name_match is not None:
+                if (name_match.rya_class_id is not None
+                        and name_match.rya_class_id != row["rya_class_id"]):
+                    print(f"SKIP    {row['name']!r} (RYA ID {row['rya_class_id']}) — "
+                          f"name already linked to RYA ID {name_match.rya_class_id}, "
+                          "needs manual review")
+                    skipped += 1
+                    continue
+                match = name_match
         if match is None:
             print(f"CREATE  {row['name']!r} (RYA ID {row['rya_class_id']})")
             if not args.dry_run:
@@ -118,7 +146,7 @@ def main() -> None:
             repos.boats.update_class(match.id, changes)
         updated += 1
 
-    print(f"\n{created} created, {updated} updated, {unchanged} unchanged"
+    print(f"\n{created} created, {updated} updated, {unchanged} unchanged, {skipped} skipped"
           f"{' (dry run — nothing written)' if args.dry_run else ''}")
 
 
