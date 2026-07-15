@@ -45,6 +45,7 @@ function WindStations() {
   const isUrlBased = URL_BASED_PROVIDERS.includes(form.provider);
   const [observing, setObserving] = useState<WindStation | null>(null);
   const [page, setPage] = useState(0);
+  const [adding, setAdding] = useState(false);
   const OBS_PAGE_SIZE = 50;
 
   const stations = useQuery({ queryKey: windKeys.stations, queryFn: windService.listStations });
@@ -79,6 +80,7 @@ function WindStations() {
         lat: "",
         lng: "",
       });
+      setAdding(false);
       await queryClient.invalidateQueries({ queryKey: windKeys.stations });
     },
     onError: () => notify(t("errors.generic"), "error"),
@@ -195,93 +197,105 @@ function WindStations() {
         </div>
       )}
 
-      <form
-        className="sf-form__row"
-        style={{ alignItems: "end", marginTop: "0.75rem" }}
-        onSubmit={(e: FormEvent) => {
-          e.preventDefault();
-          create.mutate();
-        }}
-      >
-        <Select
-          label={t("admin.provider")}
-          id="ws-provider"
-          value={form.provider}
-          onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </Select>
-        <InputField
-          label={t("admin.stationId")}
-          id="ws-ext"
-          value={form.external_station_id}
-          onChange={(e) => setForm((f) => ({ ...f, external_station_id: e.target.value }))}
-          placeholder="44013"
-          required
-        />
-        {isUrlBased && (
-          <InputField
-            label={t("admin.sourceUrl")}
-            id="ws-source-url"
-            value={form.source_url}
-            onChange={(e) => setForm((f) => ({ ...f, source_url: e.target.value }))}
-            placeholder="https://example.com/realtime.txt"
-            required
-          />
-        )}
-        <InputField
-          label="Lat"
-          id="ws-lat"
-          type="number"
-          step="any"
-          value={form.lat}
-          onChange={(e) => setForm((f) => ({ ...f, lat: e.target.value }))}
-          placeholder="44.79"
-        />
-        <InputField
-          label="Lng"
-          id="ws-lng"
-          type="number"
-          step="any"
-          value={form.lng}
-          onChange={(e) => setForm((f) => ({ ...f, lng: e.target.value }))}
-          placeholder="12.33"
-        />
-        <InputField
-          label={t("common.name")}
-          id="ws-name"
-          value={form.name}
-          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-        />
-        <Select
-          label={t("admin.stationType")}
-          id="ws-type"
-          value={form.station_type}
-          onChange={(e) => setForm((f) => ({ ...f, station_type: e.target.value }))}
-        >
-          {STATION_TYPES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </Select>
-        <div className="sf-field">
-          <Button
-            type="submit"
-            disabled={
-              create.isPending ||
-              !form.external_station_id ||
-              (isUrlBased && !form.source_url)
-            }
+      <div className="sf-form__actions" style={{ justifyContent: "flex-start", marginTop: "0.75rem" }}>
+        <Button onClick={() => setAdding(true)}>{t("admin.addStation")}</Button>
+      </div>
+
+      {adding && (
+        <Modal title={t("admin.addStation")} onClose={() => setAdding(false)}>
+          <form
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              create.mutate();
+            }}
           >
-            {t("admin.addStation")}
-          </Button>
-        </div>
-      </form>
+            <div className="sf-form__row">
+              <Select
+                label={t("admin.provider")}
+                id="ws-provider"
+                value={form.provider}
+                onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+              >
+                {PROVIDERS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </Select>
+              <InputField
+                label={t("admin.stationId")}
+                id="ws-ext"
+                value={form.external_station_id}
+                onChange={(e) => setForm((f) => ({ ...f, external_station_id: e.target.value }))}
+                placeholder="44013"
+                required
+              />
+            </div>
+            {isUrlBased && (
+              <InputField
+                label={t("admin.sourceUrl")}
+                id="ws-source-url"
+                value={form.source_url}
+                onChange={(e) => setForm((f) => ({ ...f, source_url: e.target.value }))}
+                placeholder="https://example.com/realtime.txt"
+                required
+              />
+            )}
+            <div className="sf-form__row">
+              <InputField
+                label="Lat"
+                id="ws-lat"
+                type="number"
+                step="any"
+                value={form.lat}
+                onChange={(e) => setForm((f) => ({ ...f, lat: e.target.value }))}
+                placeholder="44.79"
+              />
+              <InputField
+                label="Lng"
+                id="ws-lng"
+                type="number"
+                step="any"
+                value={form.lng}
+                onChange={(e) => setForm((f) => ({ ...f, lng: e.target.value }))}
+                placeholder="12.33"
+              />
+            </div>
+            <div className="sf-form__row">
+              <InputField
+                label={t("common.name")}
+                id="ws-name"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
+              <Select
+                label={t("admin.stationType")}
+                id="ws-type"
+                value={form.station_type}
+                onChange={(e) => setForm((f) => ({ ...f, station_type: e.target.value }))}
+              >
+                {STATION_TYPES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="sf-form__actions">
+              <Button
+                type="submit"
+                disabled={
+                  create.isPending ||
+                  !form.external_station_id ||
+                  (isUrlBased && !form.source_url)
+                }
+              >
+                {t("admin.addStation")}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </Card>
   );
 }
