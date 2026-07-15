@@ -20,7 +20,7 @@ x-minio-user: &minio-user ${MINIO_ROOT_USER}
 x-minio-pass: &minio-pass ${MINIO_ROOT_PASSWORD}
 
 x-watchtower-label: &watchtower-label
-  com.centurylabs.watchtower.enable: "true"
+  com.centurylinklabs.watchtower.enable: "true"
 
 services:
   postgres:
