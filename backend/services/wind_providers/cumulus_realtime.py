@@ -37,15 +37,15 @@ def _to_float(value: str) -> Optional[float]:
         return None
 
 
-def parse_realtime_line(line: str) -> Optional[dict]:
+def parse_realtime_line(line: str, fetched_at: Optional[datetime] = None) -> Optional[dict]:
     """Parse one realtime.txt line into the wind fields we cache. Returns
     `None` for short/malformed lines.
 
     ``observed_at`` is *not* read from the file's own date/time fields:
     their format depends on the station's locale settings (day/month order
-    is ambiguous, and there's no timezone) — we use the fetch instant (UTC
-    now) instead, which is accurate within the polling cadence since the
-    file is effectively live.
+    is ambiguous, and there's no timezone) — we use the fetch instant
+    (``fetched_at``, defaulting to UTC now) instead, which is accurate
+    within the polling cadence since the file is effectively live.
     """
     parts = line.split()
     if len(parts) <= _IDX_WIND_UNIT:
@@ -60,7 +60,7 @@ def parse_realtime_line(line: str) -> Optional[dict]:
     bearing = _to_float(parts[_IDX_WIND_BEARING])
 
     return {
-        "observed_at": datetime.now(timezone.utc),
+        "observed_at": fetched_at or datetime.now(timezone.utc),
         "twd_deg": bearing,
         "tws_kts": round(avg * factor, 1) if avg is not None else None,
         "gust_kts": round(latest * factor, 1) if latest is not None else None,
@@ -68,6 +68,7 @@ def parse_realtime_line(line: str) -> Optional[dict]:
 
 
 def fetch_station(station) -> "list[dict]":
+    fetched_at = datetime.now(timezone.utc)
     resp = requests.get(station.source_url, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
 
@@ -75,5 +76,5 @@ def fetch_station(station) -> "list[dict]":
     if not lines:
         return []
 
-    parsed = parse_realtime_line(lines[-1])
+    parsed = parse_realtime_line(lines[-1], fetched_at=fetched_at)
     return [parsed] if parsed is not None else []
