@@ -7,7 +7,10 @@ it to a boat/activity/session:
 - ``.gpx`` — parsed inline (small files, ``services/gpx.parse_gpx``): the gps
   stream is written to ``processed/uploads/{upload_id}/gps.json`` and
   registered directly (the backend owns the DB — no worker callback needed);
-  the worker is then asked for a best-effort ``analysis.json``.
+  the worker is then asked for a best-effort ``analysis.json``, dispatched as
+  a background task so the request returns as soon as the gps stream is
+  registered instead of blocking on the worker's full analysis run (which can
+  take minutes — see ``ingestion.dispatch_analysis``).
 - ``.csv`` (E1-format export) — copied to ``raw/uploads/{upload_id}/`` so the
   standard storage-event → worker → callback pipeline takes over.
 """
@@ -16,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from ..repositories import get_repos
 from ..storage import BlobNotFound, get_blob_store
@@ -35,7 +38,8 @@ def complete_import(import_row, *, boat_id: uuid.UUID,
                     subject_type: str,
                     subject_user_id: Optional[uuid.UUID],
                     started_at: Optional[datetime],
-                    user_id: uuid.UUID) -> dict:
+                    user_id: uuid.UUID,
+                    background_tasks: BackgroundTasks) -> dict:
     """Create the session_upload for a completed import and start processing.
 
     Returns ``{import, session_upload_id, session_id}``; raises HTTPException
@@ -106,14 +110,17 @@ def complete_import(import_row, *, boat_id: uuid.UUID,
         repos.ingest.set_upload_status(upload.id, "processed")
         repos.ingest.update_import(import_row.id, {"status": "processed"})
         repos.sessions.rollup_status(session.id)
+        # Pre-fetch inline (fast, local) so the cache is ready by the time the
+        # background-dispatched worker run picks it up; the worker call itself
+        # is the slow part (up to WORKER_TIMEOUT_SEC) so it's backgrounded to
+        # keep this request from blocking on it — analysis is best-effort, the
+        # gps stream is already registered regardless of how it turns out.
         try:
-            # Pre-fetch the region's wind for the session window so the worker can
-            # build true-wind/polar/VMG even without an onboard wind sensor.
             waypoints = ingestion.sample_wind_waypoints(points)
             ingestion.write_wind_cache(prefix, waypoints, started_at, ended_at)
-            ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
         except Exception:
-            pass  # analysis is best-effort; the gps stream is already registered
+            pass
+        background_tasks.add_task(ingestion.dispatch_analysis, ingestion.bucket_name(), prefix)
     else:
         # Copy into the standard device-upload layout; the storage event on the
         # copied key drives the worker → callback pipeline from here.
@@ -122,7 +129,12 @@ def complete_import(import_row, *, boat_id: uuid.UUID,
         repos.ingest.update_import(import_row.id, {"status": "processed"})
 
     return {
-        "import": repos.ingest.get_import(import_row.id).to_dict(),
+        # Flat, same shape as GET /api/imports/{id} (frontend's `ImportRow`)
+        # — the wizard polls that endpoint after this call and assigns both
+        # responses to the same state, so the shapes must match (a nested
+        # "import" key here previously left `.id`/`.status` undefined on the
+        # very first render, sending the poll loop into GET .../undefined).
+        **repos.ingest.get_import(import_row.id).to_dict(),
         "session_upload_id": upload.id,
         "session_id": session.id,
     }

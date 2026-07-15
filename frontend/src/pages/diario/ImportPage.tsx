@@ -24,6 +24,7 @@ export function ImportPage() {
   const [phase, setPhase] = useState<Phase>("form");
   const [row, setRow] = useState<ImportRow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const boats = useQuery({ queryKey: boatKeys.mine, queryFn: () => boatsService.list(true) });
   // Only the session's own detail route needs the parent activity — fetched
@@ -38,10 +39,17 @@ export function ImportPage() {
     const file = fileRef.current?.files?.[0];
     if (!file || !boatId) return;
     setError(null);
+    setUploadProgress(0);
     try {
       setPhase("uploading");
       const ticket = await importsService.create(file.name);
-      await putToUploadUrl(ticket.upload_url, file);
+      // Must match the content_type `upload_ref` signed the URL with
+      // (backend/routers/imports.py, defaults to this — see storage/
+      // object_store.py's `upload_ref`): when a public S3/MinIO endpoint is
+      // configured, ContentType is part of the presigned signature, so a
+      // mismatching (or browser-guessed) header here fails as a 403
+      // SignatureDoesNotMatch rather than an upload error.
+      await putToUploadUrl(ticket.upload_url, file, "application/octet-stream", setUploadProgress);
       setPhase("processing");
       const completed = await importsService.complete(ticket.import_id, {
         boat_id: boatId as UUID,
@@ -106,7 +114,17 @@ export function ImportPage() {
           </div>
         </>
       )}
-      {(phase === "uploading" || phase === "processing") && (
+      {phase === "uploading" && (
+        <>
+          <div className="sf-progress" role="progressbar" aria-valuenow={Math.round(uploadProgress * 100)}>
+            <div className="sf-progress__bar" style={{ width: `${Math.round(uploadProgress * 100)}%` }} />
+          </div>
+          <p className="sf-muted" style={{ textAlign: "center" }}>
+            {t("sessions.uploading", { percent: Math.round(uploadProgress * 100) })}
+          </p>
+        </>
+      )}
+      {phase === "processing" && (
         <>
           <Spinner />
           <p className="sf-muted" style={{ textAlign: "center" }}>
