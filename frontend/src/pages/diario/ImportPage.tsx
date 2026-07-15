@@ -43,7 +43,13 @@ export function ImportPage() {
     try {
       setPhase("uploading");
       const ticket = await importsService.create(file.name);
-      await putToUploadUrl(ticket.upload_url, file, undefined, setUploadProgress);
+      // Must match the content_type `upload_ref` signed the URL with
+      // (backend/routers/imports.py, defaults to this — see storage/
+      // object_store.py's `upload_ref`): when a public S3/MinIO endpoint is
+      // configured, ContentType is part of the presigned signature, so a
+      // mismatching (or browser-guessed) header here fails as a 403
+      // SignatureDoesNotMatch rather than an upload error.
+      await putToUploadUrl(ticket.upload_url, file, "application/octet-stream", setUploadProgress);
       setPhase("processing");
       const completed = await importsService.complete(ticket.import_id, {
         boat_id: boatId as UUID,

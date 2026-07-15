@@ -129,7 +129,12 @@ def complete_import(import_row, *, boat_id: uuid.UUID,
         repos.ingest.update_import(import_row.id, {"status": "processed"})
 
     return {
-        "import": repos.ingest.get_import(import_row.id).to_dict(),
+        # Flat, same shape as GET /api/imports/{id} (frontend's `ImportRow`)
+        # — the wizard polls that endpoint after this call and assigns both
+        # responses to the same state, so the shapes must match (a nested
+        # "import" key here previously left `.id`/`.status` undefined on the
+        # very first render, sending the poll loop into GET .../undefined).
+        **repos.ingest.get_import(import_row.id).to_dict(),
         "session_upload_id": upload.id,
         "session_id": session.id,
     }
