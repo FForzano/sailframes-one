@@ -220,6 +220,7 @@
     "photos": "Photos",
     "videos": "Videos",
     "processing": "Processing…",
+    "uploading": "Uploading… {{percent}}%",
     "empty": "No sessions yet — record with a device or import a GPX.",
     "deleteConfirm": "Delete this session and its data?",
     "importTitle": "Import a track",

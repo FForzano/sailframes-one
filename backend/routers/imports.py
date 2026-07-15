@@ -7,7 +7,7 @@ to ``uploaded_by``.
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ..auth import require_user, verify_csrf
 from ..schemas import ImportCompleteModel, ImportCreateModel
@@ -41,7 +41,8 @@ def create_import(body: ImportCreateModel, request: Request):
 
 
 @router.post("/{import_id}/complete")
-def complete_import(import_id: uuid.UUID, body: ImportCompleteModel, request: Request):
+def complete_import(import_id: uuid.UUID, body: ImportCompleteModel, request: Request,
+                    background_tasks: BackgroundTasks):
     verify_csrf(request)
     user = require_user(request)
     row = _require_own_import(import_id, user)
@@ -67,6 +68,7 @@ def complete_import(import_id: uuid.UUID, body: ImportCompleteModel, request: Re
         subject_user_id=body.subject_user_id,
         started_at=body.started_at,
         user_id=user.id,
+        background_tasks=background_tasks,
     )
 
 
