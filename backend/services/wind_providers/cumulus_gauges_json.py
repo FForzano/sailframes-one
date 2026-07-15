@@ -17,6 +17,7 @@ refetched every few seconds by the scheduler, so the fetch instant is a
 good proxy for "now" regardless).
 """
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional

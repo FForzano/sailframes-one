@@ -3,9 +3,14 @@ unambiguous ``timeUTC`` parsing that distinguishes this format from the
 plain-text realtime.txt (see test_wind_providers_cumulus.py)."""
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from backend.services.wind_providers import cumulus_gauges_json
+
+# Matches SAMPLE_PAYLOAD's timeUTC — "close to the fetch instant" for tests
+# that exercise the non-drifted path.
+FETCHED_AT = datetime(2026, 7, 15, 22, 3, 10, tzinfo=timezone.utc)
 
 # Trimmed version of a real CumulusMX realtimegauges.txt payload (kts units).
 SAMPLE_PAYLOAD = {
@@ -28,7 +33,7 @@ def _payload(**overrides):
 
 
 def test_parses_wind_fields_and_observed_at_from_time_utc():
-    result = cumulus_gauges_json.parse_realtime_gauges(_payload())
+    result = cumulus_gauges_json.parse_realtime_gauges(_payload(), fetched_at=FETCHED_AT)
     assert result is not None
     assert result["twd_deg"] == 100.0
     assert result["tws_kts"] == 10.5
@@ -37,8 +42,15 @@ def test_parses_wind_fields_and_observed_at_from_time_utc():
 
 
 def test_mph_unit_converts_to_knots():
-    result = cumulus_gauges_json.parse_realtime_gauges(_payload(windunit="mph"))
+    result = cumulus_gauges_json.parse_realtime_gauges(_payload(windunit="mph"), fetched_at=FETCHED_AT)
     assert result["tws_kts"] == round(10.5 * 0.868976, 1)
+
+
+def test_drifted_time_utc_falls_back_to_fetch_instant():
+    fetched_at = datetime(2026, 7, 15, 13, 0, 0, tzinfo=timezone.utc)  # >1h from timeUTC
+    result = cumulus_gauges_json.parse_realtime_gauges(_payload(), fetched_at=fetched_at)
+    assert result is not None
+    assert result["observed_at"] == fetched_at
 
 
 def test_invalid_json_returns_none():
