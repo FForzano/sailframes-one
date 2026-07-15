@@ -397,13 +397,18 @@ function BoatClasses() {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [page, setPage] = useState(0);
+  const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<BoatClass | null>(null);
   const [form, setForm] = useState(emptyClassForm);
 
   const classes = useQuery({
-    queryKey: boatKeys.classes(page),
+    queryKey: boatKeys.classes(page, search),
     queryFn: () =>
-      boatsService.listClasses({ limit: CLASS_PAGE_SIZE, offset: page * CLASS_PAGE_SIZE }),
+      boatsService.listClasses({
+        limit: CLASS_PAGE_SIZE,
+        offset: page * CLASS_PAGE_SIZE,
+        search: search || undefined,
+      }),
   });
 
   useEffect(() => {
@@ -465,6 +470,17 @@ function BoatClasses() {
 
   return (
     <Card title={t("admin.boatClasses")}>
+      <InputField
+        label={t("common.search")}
+        id="bc-search"
+        type="search"
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setPage(0);
+        }}
+        placeholder={t("admin.boatClasses")}
+      />
       <div className="sf-tablewrap">
         <table className="sf-table">
           <thead>

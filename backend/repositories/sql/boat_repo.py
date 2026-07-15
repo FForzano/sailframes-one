@@ -132,11 +132,14 @@ class SqlBoatRepo:
 
     # --- boat_classes catalog ---
 
-    def list_classes(self, *, limit: int = 50, offset: int = 0) -> "list[BoatClassORM]":
+    def list_classes(self, *, limit: int = 50, offset: int = 0,
+                     search: Optional[str] = None) -> "list[BoatClassORM]":
         with self.Session() as s:
-            return list(s.scalars(
-                select(BoatClassORM).order_by(BoatClassORM.name).limit(limit).offset(offset)
-            ).all())
+            q = select(BoatClassORM)
+            if search:
+                q = q.where(BoatClassORM.name.ilike(f"%{search}%"))
+            q = q.order_by(BoatClassORM.name).limit(limit).offset(offset)
+            return list(s.scalars(q).all())
 
     def get_class(self, class_id: uuid.UUID) -> Optional[BoatClassORM]:
         with self.Session() as s:

@@ -14,7 +14,7 @@ export const boatKeys = {
   mine: ["boats", "mine"] as const,
   detail: (id: UUID) => ["boats", id] as const,
   members: (id: UUID) => ["boats", id, "members"] as const,
-  classes: (page = 0) => ["boat-classes", page] as const,
+  classes: (page = 0, search = "") => ["boat-classes", page, search] as const,
 };
 
 export const boatsService = {
@@ -37,10 +37,11 @@ export const boatsService = {
   uploadCert: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/cert`),
   uploadMbsa: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/mbsa`),
 
-  listClasses: (opts: { limit?: number; offset?: number } = {}) => {
+  listClasses: (opts: { limit?: number; offset?: number; search?: string } = {}) => {
     const p = new URLSearchParams();
     if (opts.limit) p.set("limit", String(opts.limit));
     if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.search) p.set("search", opts.search);
     const s = p.toString();
     return api.get<BoatClass[]>(`/boat-classes${s ? `?${s}` : ""}`);
   },

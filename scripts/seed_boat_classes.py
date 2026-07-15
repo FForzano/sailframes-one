@@ -1,22 +1,36 @@
 #!/usr/bin/env python3
-"""Seed/update ``boat_classes`` from the official RYA Portsmouth Yardstick
-list (data/rya_py_list_2026.json — extracted from the RYA's published
-"PN List 2026" PDF, https://www.rya.org.uk, Dinghy + Multi sections; the
-Limited Data / Experimental Numbers rows are included too since they still
-carry a stable RYA Class ID and starting PY number).
+"""Seed/update ``boat_classes`` from three official RYA Portsmouth Yardstick
+sources, layered by authority (data/ — all extracted from PDFs/xlsx
+published at https://www.rya.org.uk/racing/portsmouth-yardstick):
 
-Only the fields the RYA list actually publishes are touched: ``name``,
-``rya_class_id``, ``crew_size``, ``rig_type``, ``spinnaker_type`` and
-``py_rating`` (hull_type is derived from the Dinghy/Multi section split).
+1. ``rya_py_list_2026.json`` — the current "PN List 2026" (Dinghy + Multi +
+   Experimental Numbers sections): classes with a consistent return of
+   results this season. Authoritative for everything, including
+   ``py_rating``.
+2. ``rya_py_limited_data_2026.json`` — the "Limited Data List 2026":
+   classes without enough recent returns for the main list. Used only for
+   classes NOT already covered by the PN list; its ``py_rating`` is the
+   list's own "Last Published Number" (may be old — RYA publishes it as a
+   starting point, not a current number). Roughly half its rows have no
+   RYA Class ID at all (older/rarer classes never assigned one).
+3. ``rya_class_master_2026.json`` — the "Class List Master" (523 class
+   configurations, keyed by RYA Class ID): no PY numbers, used only to
+   backfill crew/rig/spinnaker/hull_type when a Limited Data List row is
+   missing them and has a matching ID (e.g. "470"/RYA ID 13 has a PY
+   number on the Limited Data List but no crew/rig/spinnaker there —
+   pulled from the master list instead).
+
+Only RYA-published fields are ever touched: ``name``, ``rya_class_id``,
+``crew_size``, ``rig_type``, ``spinnaker_type``, ``py_rating``, ``hull_type``.
 ``description``/``logo_id``/``loa_m``/``beam_m``/``sail_area_sqm`` are never
-touched — those are admin-filled extras outside the RYA list's scope, and
+touched — those are admin-filled extras outside the RYA lists' scope, and
 this script must not clobber whatever an admin has already entered there.
 
-Idempotent and safe to re-run every time the RYA republishes the list:
-matches existing rows by ``rya_class_id`` first, falling back to an
-case-insensitive exact ``name`` match for a class created locally before it
-had an RYA ID (that class gets linked, not duplicated). Anything left
-unmatched is created.
+Idempotent and safe to re-run every time the RYA republishes a list: matches
+existing rows by ``rya_class_id`` first, falling back to a case-insensitive
+exact ``name`` match for a class created locally (or sourced from the
+Limited Data list with no ID) before it had an RYA ID — that class gets
+linked, not duplicated. Anything left unmatched is created.
 
 Run with the backend environment configured (DB reachable), e.g. inside the
 backend container:
@@ -32,9 +46,45 @@ from pathlib import Path
 
 from backend.repositories import get_repos
 
-DATA_FILE = Path(__file__).parent / "data" / "rya_py_list_2026.json"
+DATA_DIR = Path(__file__).parent / "data"
+PN_FILE = DATA_DIR / "rya_py_list_2026.json"
+LIMITED_FILE = DATA_DIR / "rya_py_limited_data_2026.json"
+MASTER_FILE = DATA_DIR / "rya_class_master_2026.json"
+
 RYA_FIELDS = ("name", "rya_class_id", "crew_size", "rig_type", "spinnaker_type",
               "py_rating", "hull_type")
+STRUCTURAL_FIELDS = ("crew_size", "rig_type", "spinnaker_type", "hull_type")
+
+
+def _key(row: dict):
+    """Merge key: RYA Class ID when known, else a case-insensitive name —
+    some Limited Data List rows (older/rarer classes) have no ID at all."""
+    return row["rya_class_id"] if row.get("rya_class_id") is not None else \
+        ("name", row["name"].strip().lower())
+
+
+def build_merged_rows() -> list[dict]:
+    pn_rows = json.loads(PN_FILE.read_text())
+    limited_rows = json.loads(LIMITED_FILE.read_text())
+    master_by_id = {r["rya_class_id"]: r for r in json.loads(MASTER_FILE.read_text())}
+
+    merged: dict[object, dict] = {}
+    for row in pn_rows:
+        merged[_key(row)] = {**row}
+
+    for row in limited_rows:
+        k = _key(row)
+        if k in merged:
+            continue  # already have the current, more complete PN List row
+        entry = {**row, "hull_type": None}
+        master = master_by_id.get(row.get("rya_class_id"))
+        if master:
+            for field in STRUCTURAL_FIELDS:
+                if entry.get(field) is None:
+                    entry[field] = master.get(field)
+        merged[k] = entry
+
+    return list(merged.values())
 
 
 def main() -> None:
@@ -42,7 +92,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="preview changes, write nothing")
     args = parser.parse_args()
 
-    rows = json.loads(DATA_FILE.read_text())
+    rows = build_merged_rows()
     repos = get_repos()
     existing = repos.boats.list_classes(limit=10_000)
     by_rya_id = {c.rya_class_id: c for c in existing if c.rya_class_id is not None}
@@ -58,7 +108,8 @@ def main() -> None:
             created += 1
             continue
 
-        changes = {k: row[k] for k in RYA_FIELDS if getattr(match, k) != row[k]}
+        changes = {k: row[k] for k in RYA_FIELDS
+                   if row[k] is not None and getattr(match, k) != row[k]}
         if not changes:
             unchanged += 1
             continue

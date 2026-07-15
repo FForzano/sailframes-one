@@ -8,7 +8,7 @@ parent-mediated media (presign + confirm).
 """
 
 import uuid
-
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -66,8 +66,9 @@ def _boat_payload(boat, user) -> dict:
 # --- boat classes (superadmin catalog) -------------------------------------
 
 @router.get("/boat-classes")
-def list_boat_classes(limit: int = Query(50, le=200, gt=0), offset: int = Query(0, ge=0)):
-    return [c.to_dict() for c in repos.boats.list_classes(limit=limit, offset=offset)]
+def list_boat_classes(limit: int = Query(50, le=200, gt=0), offset: int = Query(0, ge=0),
+                      search: Optional[str] = None):
+    return [c.to_dict() for c in repos.boats.list_classes(limit=limit, offset=offset, search=search)]
 
 
 @router.post("/boat-classes")
