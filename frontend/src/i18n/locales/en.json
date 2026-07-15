@@ -379,6 +379,15 @@
     "superadmin": "Superadmin",
     "active": "Active",
     "roles": "Roles",
-    "lastObservations": "Latest observations"
+    "lastObservations": "Latest observations",
+    "loa": "LOA (m)",
+    "beam": "Beam (m)",
+    "sailArea": "Sail area (m²)",
+    "crewSize": "Crew size",
+    "hullType": "Hull type",
+    "rigType": "Rig type",
+    "pyRating": "PY rating",
+    "monohull": "Monohull",
+    "multihull": "Multihull"
   }
 }

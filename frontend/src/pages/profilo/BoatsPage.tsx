@@ -22,7 +22,10 @@ export function BoatsPage() {
   const [form, setForm] = useState({ name: "", sail_number: "", boat_class_id: "" });
 
   const boats = useQuery({ queryKey: boatKeys.mine, queryFn: () => boatsService.list(true) });
-  const classes = useQuery({ queryKey: boatKeys.classes, queryFn: boatsService.listClasses });
+  const classes = useQuery({
+    queryKey: boatKeys.classes(),
+    queryFn: () => boatsService.listClasses({ limit: 200 }),
+  });
 
   const create = useMutation({
     mutationFn: () =>

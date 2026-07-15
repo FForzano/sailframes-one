@@ -81,10 +81,19 @@ export interface MyMemberships {
 
 // --- boats ----------------------------------------------------------------------
 
+export type HullType = "monohull" | "multihull";
+
 export interface BoatClass {
   id: UUID;
   name: string;
   description: string | null;
+  loa_m: number | null;
+  beam_m: number | null;
+  sail_area_sqm: number | null;
+  crew_size: number | null;
+  hull_type: HullType | null;
+  rig_type: string | null;
+  py_rating: number | null;
 }
 
 export type BoatRole = "owner" | "admin" | "visitor";

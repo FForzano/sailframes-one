@@ -99,7 +99,10 @@ export function BoatDetailPage() {
     enabled: !!boatId && isBoatManager(boatId!),
   });
 
-  const classes = useQuery({ queryKey: boatKeys.classes, queryFn: boatsService.listClasses });
+  const classes = useQuery({
+    queryKey: boatKeys.classes(),
+    queryFn: () => boatsService.listClasses({ limit: 200 }),
+  });
   const [form, setForm] = useState({ name: "", sail_number: "", boat_class_id: "", notes: "" });
   const [inviting, setInviting] = useState(false);
   const [claiming, setClaiming] = useState(false);

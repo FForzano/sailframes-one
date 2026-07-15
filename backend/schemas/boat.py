@@ -28,3 +28,10 @@ class BoatMemberRoleModel(BaseModel):
 class BoatClassWriteModel(BaseModel):
     name: Optional[str] = None  # required on create, enforced by the router
     description: Optional[str] = None
+    loa_m: Optional[float] = None
+    beam_m: Optional[float] = None
+    sail_area_sqm: Optional[float] = None
+    crew_size: Optional[int] = None
+    hull_type: Optional[str] = None  # monohull | multihull
+    rig_type: Optional[str] = None
+    py_rating: Optional[float] = None

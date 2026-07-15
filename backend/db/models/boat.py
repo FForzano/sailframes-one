@@ -9,23 +9,34 @@ point at ``files``; photos at ``images`` via ``boat_photos``.
 import uuid
 from typing import Optional
 
-from sqlalchemy import Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base, CreatedAtMixin, TimestampMixin, UUIDPKMixin, enum_check
 
 USER_BOAT_ROLES = ("owner", "admin", "visitor")
 SAILING_ROLES = ("skipper", "crew")
+HULL_TYPES = ("monohull", "multihull")
 
 
 class BoatClassORM(UUIDPKMixin, CreatedAtMixin, Base):
     __tablename__ = "boat_classes"
+    __table_args__ = (enum_check("hull_type", HULL_TYPES),)
 
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     logo_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )
+    # Class-specific technical details (all optional — filled in by the
+    # superadmin catalog editor).
+    loa_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    beam_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sail_area_sqm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    crew_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hull_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    rig_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    py_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
 
 class BoatORM(UUIDPKMixin, TimestampMixin, Base):

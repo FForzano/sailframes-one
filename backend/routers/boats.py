@@ -10,7 +10,7 @@ parent-mediated media (presign + confirm).
 import uuid
 
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..auth import current_user, require_superadmin, require_user, verify_csrf
 from ..schemas import (
@@ -66,8 +66,8 @@ def _boat_payload(boat, user) -> dict:
 # --- boat classes (superadmin catalog) -------------------------------------
 
 @router.get("/boat-classes")
-def list_boat_classes():
-    return [c.to_dict() for c in repos.boats.list_classes()]
+def list_boat_classes(limit: int = Query(50, le=200, gt=0), offset: int = Query(0, ge=0)):
+    return [c.to_dict() for c in repos.boats.list_classes(limit=limit, offset=offset)]
 
 
 @router.post("/boat-classes")

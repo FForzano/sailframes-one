@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { windService, windKeys } from "@/services/wind";
@@ -9,10 +9,11 @@ import { useToast } from "@/hooks/useToast";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
-import { InputField } from "@/components/ui/InputField";
+import { InputField, TextAreaField } from "@/components/ui/InputField";
+import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { fmtDateTime, userLabel } from "@/utils/format";
-import type { UUID, WindStation } from "@/types";
+import type { BoatClass, HullType, UUID, WindStation } from "@/types";
 
 const PROVIDERS = ["noaa_ndbc", "noaa_metar", "custom_device"];
 const STATION_TYPES = ["buoy", "metar", "custom_device"];
@@ -374,41 +375,148 @@ function DeviceTypes() {
   );
 }
 
+const CLASS_PAGE_SIZE = 20;
+
+const emptyClassForm = {
+  name: "",
+  description: "",
+  loa_m: "",
+  beam_m: "",
+  sail_area_sqm: "",
+  crew_size: "",
+  hull_type: "",
+  rig_type: "",
+  py_rating: "",
+};
+
 function BoatClasses() {
   const { t } = useTranslation();
   const { notify } = useToast();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const [page, setPage] = useState(0);
+  const [editing, setEditing] = useState<BoatClass | null>(null);
+  const [form, setForm] = useState(emptyClassForm);
 
-  const classes = useQuery({ queryKey: boatKeys.classes, queryFn: boatsService.listClasses });
+  const classes = useQuery({
+    queryKey: boatKeys.classes(page),
+    queryFn: () =>
+      boatsService.listClasses({ limit: CLASS_PAGE_SIZE, offset: page * CLASS_PAGE_SIZE }),
+  });
+
+  useEffect(() => {
+    if (editing) {
+      setForm({
+        name: editing.name ?? "",
+        description: editing.description ?? "",
+        loa_m: editing.loa_m?.toString() ?? "",
+        beam_m: editing.beam_m?.toString() ?? "",
+        sail_area_sqm: editing.sail_area_sqm?.toString() ?? "",
+        crew_size: editing.crew_size?.toString() ?? "",
+        hull_type: editing.hull_type ?? "",
+        rig_type: editing.rig_type ?? "",
+        py_rating: editing.py_rating?.toString() ?? "",
+      });
+    }
+  }, [editing]);
+
+  // Prefix match invalidates every page ([boat-classes, page] for each page).
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["boat-classes"] });
+
   const create = useMutation({
     mutationFn: () => boatsService.createClass({ name }),
     onSuccess: async () => {
       setName("");
-      await queryClient.invalidateQueries({ queryKey: boatKeys.classes });
+      await invalidate();
+    },
+    onError: () => notify(t("errors.generic"), "error"),
+  });
+  const save = useMutation({
+    mutationFn: () =>
+      boatsService.updateClass(editing!.id, {
+        name: form.name,
+        description: form.description || null,
+        loa_m: form.loa_m ? Number(form.loa_m) : null,
+        beam_m: form.beam_m ? Number(form.beam_m) : null,
+        sail_area_sqm: form.sail_area_sqm ? Number(form.sail_area_sqm) : null,
+        crew_size: form.crew_size ? Number(form.crew_size) : null,
+        hull_type: (form.hull_type || null) as HullType | null,
+        rig_type: form.rig_type || null,
+        py_rating: form.py_rating ? Number(form.py_rating) : null,
+      }),
+    onSuccess: async () => {
+      setEditing(null);
+      notify(t("common.saved"), "success");
+      await invalidate();
     },
     onError: () => notify(t("errors.generic"), "error"),
   });
   const remove = useMutation({
     mutationFn: (id: UUID) => boatsService.removeClass(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: boatKeys.classes }),
+    onSuccess: () => invalidate(),
     onError: () => notify(t("errors.generic"), "error"),
   });
 
   return (
     <Card title={t("admin.boatClasses")}>
-      <div className="sf-strip">
-        {classes.data?.map((c) => (
-          <div key={c.id} className="sf-strip__item sf-strip__item--muted">
-            <span>
-              <strong>{c.name}</strong>
-            </span>
-            <Button variant="danger" className="sf-btn--sm" onClick={() => remove.mutate(c.id)}>
-              ×
-            </Button>
-          </div>
-        ))}
+      <div className="sf-tablewrap">
+        <table className="sf-table">
+          <thead>
+            <tr>
+              <th>{t("common.name")}</th>
+              <th>{t("admin.hullType")}</th>
+              <th>{t("admin.loa")}</th>
+              <th>{t("admin.sailArea")}</th>
+              <th>{t("admin.crewSize")}</th>
+              <th>{t("admin.rigType")}</th>
+              <th>{t("admin.pyRating")}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {classes.data?.map((c) => (
+              <tr key={c.id}>
+                <td>
+                  <strong>{c.name}</strong>
+                </td>
+                <td>{c.hull_type ? t(`admin.${c.hull_type}`) : "—"}</td>
+                <td>{c.loa_m ?? "—"}</td>
+                <td>{c.sail_area_sqm ?? "—"}</td>
+                <td>{c.crew_size ?? "—"}</td>
+                <td>{c.rig_type ?? "—"}</td>
+                <td>{c.py_rating ?? "—"}</td>
+                <td style={{ display: "flex", gap: "0.4rem" }}>
+                  <Button variant="ghost" className="sf-btn--sm" onClick={() => setEditing(c)}>
+                    {t("common.edit")}
+                  </Button>
+                  <Button variant="danger" className="sf-btn--sm" onClick={() => remove.mutate(c.id)}>
+                    ×
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+      <div className="sf-form__actions" style={{ justifyContent: "flex-start" }}>
+        <Button
+          variant="ghost"
+          className="sf-btn--sm"
+          disabled={page === 0}
+          onClick={() => setPage((p) => Math.max(0, p - 1))}
+        >
+          ‹
+        </Button>
+        <Button
+          variant="ghost"
+          className="sf-btn--sm"
+          disabled={(classes.data?.length ?? 0) < CLASS_PAGE_SIZE}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          ›
+        </Button>
+      </div>
+
       <form
         className="sf-form__row"
         style={{ alignItems: "end", marginTop: "0.75rem" }}
@@ -430,6 +538,96 @@ function BoatClasses() {
           </Button>
         </div>
       </form>
+
+      {editing && (
+        <Modal title={t("common.edit")} onClose={() => setEditing(null)}>
+          <form
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              save.mutate();
+            }}
+          >
+            <InputField
+              label={t("common.name")}
+              id="bce-name"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              required
+            />
+            <TextAreaField
+              label={t("common.description")}
+              id="bce-desc"
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+            />
+            <div className="sf-form__row">
+              <InputField
+                label={t("admin.loa")}
+                id="bce-loa"
+                type="number"
+                step="any"
+                value={form.loa_m}
+                onChange={(e) => setForm((f) => ({ ...f, loa_m: e.target.value }))}
+              />
+              <InputField
+                label={t("admin.beam")}
+                id="bce-beam"
+                type="number"
+                step="any"
+                value={form.beam_m}
+                onChange={(e) => setForm((f) => ({ ...f, beam_m: e.target.value }))}
+              />
+              <InputField
+                label={t("admin.sailArea")}
+                id="bce-sail"
+                type="number"
+                step="any"
+                value={form.sail_area_sqm}
+                onChange={(e) => setForm((f) => ({ ...f, sail_area_sqm: e.target.value }))}
+              />
+            </div>
+            <div className="sf-form__row">
+              <InputField
+                label={t("admin.crewSize")}
+                id="bce-crew"
+                type="number"
+                step="1"
+                value={form.crew_size}
+                onChange={(e) => setForm((f) => ({ ...f, crew_size: e.target.value }))}
+              />
+              <Select
+                label={t("admin.hullType")}
+                id="bce-hull"
+                value={form.hull_type}
+                onChange={(e) => setForm((f) => ({ ...f, hull_type: e.target.value }))}
+              >
+                <option value="">—</option>
+                <option value="monohull">{t("admin.monohull")}</option>
+                <option value="multihull">{t("admin.multihull")}</option>
+              </Select>
+              <InputField
+                label={t("admin.rigType")}
+                id="bce-rig"
+                value={form.rig_type}
+                onChange={(e) => setForm((f) => ({ ...f, rig_type: e.target.value }))}
+              />
+            </div>
+            <InputField
+              label={t("admin.pyRating")}
+              id="bce-py"
+              type="number"
+              step="any"
+              value={form.py_rating}
+              onChange={(e) => setForm((f) => ({ ...f, py_rating: e.target.value }))}
+            />
+            <div className="sf-form__actions">
+              <Button type="submit" disabled={save.isPending}>
+                {t("common.save")}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </Card>
   );
 }

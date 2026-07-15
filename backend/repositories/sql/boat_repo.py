@@ -11,7 +11,10 @@ from sqlalchemy import select, update
 from ...db.models import BoatClassORM, BoatORM, BoatPhotoORM, UserBoatORM
 
 _FIELDS = ("name", "boat_class_id", "sail_number", "loa_m", "cert_id", "mbsa_id", "notes", "club_id")
-_CLASS_FIELDS = ("name", "description", "logo_id")
+_CLASS_FIELDS = (
+    "name", "description", "logo_id",
+    "loa_m", "beam_m", "sail_area_sqm", "crew_size", "hull_type", "rig_type", "py_rating",
+)
 
 
 class SqlBoatRepo:
@@ -128,9 +131,11 @@ class SqlBoatRepo:
 
     # --- boat_classes catalog ---
 
-    def list_classes(self) -> "list[BoatClassORM]":
+    def list_classes(self, *, limit: int = 50, offset: int = 0) -> "list[BoatClassORM]":
         with self.Session() as s:
-            return list(s.scalars(select(BoatClassORM)).all())
+            return list(s.scalars(
+                select(BoatClassORM).order_by(BoatClassORM.name).limit(limit).offset(offset)
+            ).all())
 
     def get_class(self, class_id: uuid.UUID) -> Optional[BoatClassORM]:
         with self.Session() as s:

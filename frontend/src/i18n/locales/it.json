@@ -379,6 +379,15 @@
     "superadmin": "Superadmin",
     "active": "Attivo",
     "roles": "Ruoli",
-    "lastObservations": "Ultime osservazioni"
+    "lastObservations": "Ultime osservazioni",
+    "loa": "LOA (m)",
+    "beam": "Larghezza (m)",
+    "sailArea": "Superficie velica (m²)",
+    "crewSize": "N. equipaggio",
+    "hullType": "Tipo scafo",
+    "rigType": "Tipo attrezzatura",
+    "pyRating": "Rating PY",
+    "monohull": "Monoscafo",
+    "multihull": "Multiscafo"
   }
 }

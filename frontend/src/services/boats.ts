@@ -14,7 +14,7 @@ export const boatKeys = {
   mine: ["boats", "mine"] as const,
   detail: (id: UUID) => ["boats", id] as const,
   members: (id: UUID) => ["boats", id, "members"] as const,
-  classes: ["boat-classes"] as const,
+  classes: (page = 0) => ["boat-classes", page] as const,
 };
 
 export const boatsService = {
@@ -37,7 +37,13 @@ export const boatsService = {
   uploadCert: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/cert`),
   uploadMbsa: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/mbsa`),
 
-  listClasses: () => api.get<BoatClass[]>("/boat-classes"),
+  listClasses: (opts: { limit?: number; offset?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.offset) p.set("offset", String(opts.offset));
+    const s = p.toString();
+    return api.get<BoatClass[]>(`/boat-classes${s ? `?${s}` : ""}`);
+  },
   createClass: (body: Partial<BoatClass>) => api.post<BoatClass>("/boat-classes", body),
   updateClass: (id: UUID, body: Partial<BoatClass>) =>
     api.patch<BoatClass>(`/boat-classes/${id}`, body),
