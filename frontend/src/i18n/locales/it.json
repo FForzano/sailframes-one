@@ -125,7 +125,9 @@
     "photos": "Foto",
     "cert": "Certificato",
     "mbsa": "Modulo di stazza",
+    "viewDocument": "Visualizza",
     "deleteConfirm": "Eliminare questa barca? Lo storico sessioni è preservato.",
+    "lastOwner": "La barca deve avere sempre almeno un owner",
     "empty": "Nessuna barca — aggiungi la tua prima barca.",
     "noClassMatch": "Nessuna classe trovata",
     "noClass": "Nessuna classe"

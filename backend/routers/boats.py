@@ -225,7 +225,14 @@ def set_member_role(boat_id: uuid.UUID, user_id: uuid.UUID,
     # Role changes are the owner's prerogative (matrix: "boat:owner cambia ruolo").
     if not _is_manager(user, boat_id, owner_only=True):
         raise HTTPException(403, "Boat owner required")
-    if not repos.boats.set_member_role(boat_id, user_id, body.role):
+    if body.role is None and body.default_sailing_role is None:
+        raise HTTPException(422, "role or default_sailing_role required")
+    if body.role is not None and body.role != "owner":
+        member = repos.boats.get_member(boat_id, user_id)
+        if member is not None and member.role == "owner" and repos.boats.count_owners(boat_id) <= 1:
+            raise HTTPException(409, "Boat must have at least one owner")
+    if not repos.boats.set_member_role(boat_id, user_id, role=body.role,
+                                       default_sailing_role=body.default_sailing_role):
         raise HTTPException(404, "Member not found")
     return {"ok": True}
 
@@ -237,6 +244,9 @@ def remove_member(boat_id: uuid.UUID, user_id: uuid.UUID, request: Request):
     _require_boat(boat_id)
     if user.id != user_id and not _is_manager(user, boat_id):
         raise HTTPException(403, "Boat owner/admin required (or leave yourself)")
+    member = repos.boats.get_member(boat_id, user_id)
+    if member is not None and member.role == "owner" and repos.boats.count_owners(boat_id) <= 1:
+        raise HTTPException(409, "Cannot remove the boat's only owner")
     if not repos.boats.remove_member(boat_id, user_id):
         raise HTTPException(404, "Member not found")
     return {"ok": True}
@@ -294,11 +304,34 @@ def _document_upload(boat_id: uuid.UUID, field: str, request: Request) -> dict:
     return payload
 
 
+def _document_delete(boat_id: uuid.UUID, field: str, request: Request) -> dict:
+    verify_csrf(request)
+    user = require_user(request)
+    boat = _require_boat(boat_id)
+    if not _is_manager(user, boat_id):
+        raise HTTPException(403, "Boat owner/admin required")
+    file_id = getattr(boat, field)
+    repos.boats.update(boat_id, {field: None})
+    if file_id is not None:
+        media.delete_file(file_id, user.id)
+    return {"ok": True}
+
+
 @router.post("/boats/{boat_id}/cert")
 def upload_cert(boat_id: uuid.UUID, request: Request):
     return _document_upload(boat_id, "cert_id", request)
 
 
+@router.delete("/boats/{boat_id}/cert")
+def delete_cert(boat_id: uuid.UUID, request: Request):
+    return _document_delete(boat_id, "cert_id", request)
+
+
 @router.post("/boats/{boat_id}/mbsa")
 def upload_mbsa(boat_id: uuid.UUID, request: Request):
     return _document_upload(boat_id, "mbsa_id", request)
+
+
+@router.delete("/boats/{boat_id}/mbsa")
+def delete_mbsa(boat_id: uuid.UUID, request: Request):
+    return _document_delete(boat_id, "mbsa_id", request)

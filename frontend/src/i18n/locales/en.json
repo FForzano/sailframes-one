@@ -125,7 +125,9 @@
     "photos": "Photos",
     "cert": "Certificate",
     "mbsa": "Measurement form",
+    "viewDocument": "View",
     "deleteConfirm": "Delete this boat? Sessions history is preserved.",
+    "lastOwner": "A boat must always have at least one owner",
     "empty": "No boats yet — add your first boat.",
     "noClassMatch": "No matching class",
     "noClass": "No class"

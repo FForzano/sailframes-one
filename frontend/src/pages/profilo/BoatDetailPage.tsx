@@ -23,18 +23,22 @@ import type { BoatRole, UUID } from "@/types";
 import { useRef } from "react";
 
 const BOAT_ROLES: BoatRole[] = ["owner", "admin", "visitor"];
+const SAILING_ROLES = ["skipper", "crew"];
 
 function DocumentUpload({
   label,
   current,
   create,
+  remove,
   onDone,
 }: {
   label: string;
   current: { url: string } | null | undefined;
   create: () => Promise<{ file_id: UUID; upload_url: string }>;
+  remove: () => Promise<unknown>;
   onDone: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   // Documents (PDF) have no confirm endpoint mismatch: cert/mbsa reuse the
   // generic file flow, confirm happens implicitly on next read — the backend
   // links the file row on presign, so we just PUT and refresh.
@@ -44,17 +48,12 @@ function DocumentUpload({
     confirm: async () => undefined,
     onDone,
   });
+  const removeMutation = useMutation({ mutationFn: remove, onSuccess: onDone });
+
   return (
     <div className="sf-strip__item sf-strip__item--muted">
       <span>
-        {label}{" "}
-        {current ? (
-          <a href={current.url} target="_blank" rel="noreferrer">
-            PDF
-          </a>
-        ) : (
-          <span className="sf-muted">—</span>
-        )}
+        {label}
         {error && <span className="sf-form__error"> {error}</span>}
       </span>
       <input
@@ -68,14 +67,38 @@ function DocumentUpload({
           e.target.value = "";
         }}
       />
-      <Button
-        variant="ghost"
-        className="sf-btn--sm"
-        disabled={busy}
-        onClick={() => inputRef.current?.click()}
-      >
-        {busy ? "…" : "PDF"}
-      </Button>
+      <span style={{ display: "flex", gap: "0.4rem" }}>
+        <Button
+          variant="ghost"
+          className="sf-btn--sm"
+          disabled={!current}
+          aria-label={t("boats.viewDocument")}
+          title={t("boats.viewDocument")}
+          onClick={() => current && window.open(current.url, "_blank", "noreferrer")}
+        >
+          ↗
+        </Button>
+        <Button
+          variant="ghost"
+          className="sf-btn--sm"
+          disabled={busy}
+          aria-label={current ? t("common.edit") : t("common.upload")}
+          title={current ? t("common.edit") : t("common.upload")}
+          onClick={() => inputRef.current?.click()}
+        >
+          {busy ? "…" : current ? "✎" : "⬆"}
+        </Button>
+        <Button
+          variant="danger"
+          className="sf-btn--sm"
+          disabled={!current || removeMutation.isPending}
+          aria-label={t("common.delete")}
+          title={t("common.delete")}
+          onClick={() => removeMutation.mutate()}
+        >
+          ×
+        </Button>
+      </span>
     </div>
   );
 }
@@ -154,11 +177,18 @@ export function BoatDetailPage() {
     },
     onError: () => notify(t("errors.generic"), "error"),
   });
+  const setSailingRole = useMutation({
+    mutationFn: ({ userId, sailingRole }: { userId: UUID; sailingRole: string }) =>
+      boatsService.setMemberSailingRole(boatId!, userId, sailingRole),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: boatKeys.members(boatId!) }),
+    onError: () => notify(t("errors.generic"), "error"),
+  });
   const removeMember = useMutation({
     mutationFn: (userId: UUID) => boatsService.removeMember(boatId!, userId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: boatKeys.members(boatId!) });
     },
+    onError: () => notify(t("errors.generic"), "error"),
   });
   const removeBoat = useMutation({
     mutationFn: () => boatsService.remove(boatId!),
@@ -179,6 +209,7 @@ export function BoatDetailPage() {
 
   const manager = isBoatManager(boatId);
   const owner = isBoatOwner(boatId);
+  const ownerCount = members.data?.filter((m) => m.role === "owner").length ?? 0;
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -247,11 +278,12 @@ export function BoatDetailPage() {
         )}
 
         {manager && (
-          <>
+          <div style={{ marginTop: "1rem" }}>
             <DocumentUpload
               label={t("boats.cert")}
               current={boat.data.cert}
               create={() => boatsService.uploadCert(boatId)}
+              remove={() => boatsService.removeCert(boatId)}
               onDone={async () => {
                 await invalidate();
               }}
@@ -260,11 +292,12 @@ export function BoatDetailPage() {
               label={t("boats.mbsa")}
               current={boat.data.mbsa}
               create={() => boatsService.uploadMbsa(boatId)}
+              remove={() => boatsService.removeMbsa(boatId)}
               onDone={async () => {
                 await invalidate();
               }}
             />
-          </>
+          </div>
         )}
       </Card>
 
@@ -355,11 +388,41 @@ export function BoatDetailPage() {
                         m.role
                       )}
                     </td>
-                    <td>{m.default_sailing_role ?? "—"}</td>
+                    <td>
+                      {owner ? (
+                        <Select
+                          label=""
+                          id={`sailing-role-${m.user_id}`}
+                          value={m.default_sailing_role ?? ""}
+                          onChange={(e) => {
+                            // Clearing back to "—" isn't supported by the backend yet
+                            // (PATCH only sets, it can't null the field out) — ignore.
+                            if (e.target.value) {
+                              setSailingRole.mutate({ userId: m.user_id, sailingRole: e.target.value });
+                            }
+                          }}
+                        >
+                          <option value="">—</option>
+                          {SAILING_ROLES.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        m.default_sailing_role ?? "—"
+                      )}
+                    </td>
                     <td>
                       <Button
                         variant="ghost"
                         className="sf-btn--sm"
+                        disabled={m.role === "owner" && ownerCount <= 1}
+                        title={
+                          m.role === "owner" && ownerCount <= 1
+                            ? t("boats.lastOwner")
+                            : undefined
+                        }
                         onClick={() => removeMember.mutate(m.user_id)}
                       >
                         {t("common.remove")}

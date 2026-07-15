@@ -6,7 +6,7 @@ edit never clobbers the roster)."""
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from ...db.models import BoatClassORM, BoatORM, BoatPhotoORM, UserBoatORM
 
@@ -92,12 +92,21 @@ class SqlBoatRepo:
             s.commit()
             return True
 
-    def set_member_role(self, boat_id: uuid.UUID, user_id: uuid.UUID, role: str) -> bool:
+    def set_member_role(self, boat_id: uuid.UUID, user_id: uuid.UUID, *,
+                        role: Optional[str] = None,
+                        default_sailing_role: Optional[str] = None) -> bool:
+        values = {}
+        if role is not None:
+            values["role"] = role
+        if default_sailing_role is not None:
+            values["default_sailing_role"] = default_sailing_role
+        if not values:
+            return False
         with self.Session() as s:
             res = s.execute(
                 update(UserBoatORM)
                 .where(UserBoatORM.boat_id == boat_id, UserBoatORM.user_id == user_id)
-                .values(role=role)
+                .values(**values)
             )
             s.commit()
             return res.rowcount > 0
@@ -107,6 +116,22 @@ class SqlBoatRepo:
             return list(s.scalars(
                 select(UserBoatORM).where(UserBoatORM.boat_id == boat_id)
             ).all())
+
+    def get_member(self, boat_id: uuid.UUID, user_id: uuid.UUID) -> Optional[UserBoatORM]:
+        with self.Session() as s:
+            return s.scalars(
+                select(UserBoatORM).where(
+                    UserBoatORM.boat_id == boat_id, UserBoatORM.user_id == user_id
+                )
+            ).first()
+
+    def count_owners(self, boat_id: uuid.UUID) -> int:
+        with self.Session() as s:
+            return s.scalar(
+                select(func.count()).select_from(UserBoatORM).where(
+                    UserBoatORM.boat_id == boat_id, UserBoatORM.role == "owner"
+                )
+            ) or 0
 
     def is_member(self, boat_id: uuid.UUID, user_id: uuid.UUID,
                   roles: "Optional[list]" = None) -> bool:

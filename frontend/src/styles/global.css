@@ -408,7 +408,9 @@ h1, h2, h3 {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-  margin-top: 0.5rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--sf-border);
 }
 .sf-form__error {
   color: var(--sf-danger);

@@ -22,7 +22,8 @@ class BoatMemberModel(BaseModel):
 
 
 class BoatMemberRoleModel(BaseModel):
-    role: str
+    role: Optional[str] = None  # owner | admin | visitor
+    default_sailing_role: Optional[str] = None  # skipper | crew
 
 
 class BoatClassWriteModel(BaseModel):

@@ -39,13 +39,17 @@ export const boatsService = {
     api.post(`/boats/${id}/members`, body),
   setMemberRole: (id: UUID, userId: UUID, role: BoatRole) =>
     api.patch(`/boats/${id}/members/${userId}`, { role }),
+  setMemberSailingRole: (id: UUID, userId: UUID, sailingRole: string) =>
+    api.patch(`/boats/${id}/members/${userId}`, { default_sailing_role: sailingRole }),
   removeMember: (id: UUID, userId: UUID) => api.del(`/boats/${id}/members/${userId}`),
 
   createPhoto: (id: UUID) => api.post<ImageUploadTicket>(`/boats/${id}/photos`),
   confirmPhoto: (id: UUID, imageId: UUID) => api.post(`/boats/${id}/photos/${imageId}/confirm`),
   removePhoto: (id: UUID, imageId: UUID) => api.del(`/boats/${id}/photos/${imageId}`),
   uploadCert: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/cert`),
+  removeCert: (id: UUID) => api.del(`/boats/${id}/cert`),
   uploadMbsa: (id: UUID) => api.post<FileUploadTicket>(`/boats/${id}/mbsa`),
+  removeMbsa: (id: UUID) => api.del(`/boats/${id}/mbsa`),
 
   listClasses: (opts: {
     limit?: number;
