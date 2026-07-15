@@ -518,6 +518,10 @@ export interface WindStation {
   station_type: string;
   lat: number | null;
   lng: number | null;
+  keeps_local_history: boolean;
+  /** Polled URL — only set for URL-based providers (cumulus_realtime,
+   * cumulus_gauges_json); null for API-keyed providers (noaa_ndbc/metar). */
+  source_url: string | null;
 }
 
 export interface WindObservation {

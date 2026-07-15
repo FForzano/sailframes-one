@@ -16,8 +16,18 @@ import { ImageUploader } from "@/components/common/ImageUploader";
 import { fmtDateTime, userLabel } from "@/utils/format";
 import type { BoatClass, HullType, RigType, SpinnakerType, UUID, WindStation } from "@/types";
 
-const PROVIDERS = ["noaa_ndbc", "noaa_metar", "custom_device"];
+const PROVIDERS = [
+  "noaa_ndbc",
+  "noaa_metar",
+  "custom_device",
+  "cumulus_realtime",
+  "cumulus_gauges_json",
+];
 const STATION_TYPES = ["buoy", "metar", "custom_device"];
+// Providers polled by URL (source_url) rather than looked up by
+// external_station_id against a fixed provider API — see
+// backend/services/wind_providers/__init__.py::URL_BASED_PROVIDERS.
+const URL_BASED_PROVIDERS = ["cumulus_realtime", "cumulus_gauges_json"];
 
 function WindStations() {
   const { t } = useTranslation();
@@ -26,11 +36,13 @@ function WindStations() {
   const [form, setForm] = useState({
     provider: "noaa_ndbc",
     external_station_id: "",
+    source_url: "",
     name: "",
     station_type: "buoy",
     lat: "",
     lng: "",
   });
+  const isUrlBased = URL_BASED_PROVIDERS.includes(form.provider);
   const [observing, setObserving] = useState<WindStation | null>(null);
   const [page, setPage] = useState(0);
   const OBS_PAGE_SIZE = 50;
@@ -51,6 +63,7 @@ function WindStations() {
       windService.createStation({
         provider: form.provider,
         external_station_id: form.external_station_id,
+        source_url: form.source_url || undefined,
         name: form.name || undefined,
         station_type: form.station_type,
         lat: form.lat ? Number(form.lat) : undefined,
@@ -60,6 +73,7 @@ function WindStations() {
       setForm({
         provider: "noaa_ndbc",
         external_station_id: "",
+        source_url: "",
         name: "",
         station_type: "buoy",
         lat: "",
@@ -82,6 +96,7 @@ function WindStations() {
             <tr>
               <th>{t("admin.provider")}</th>
               <th>{t("admin.stationId")}</th>
+              <th>{t("admin.sourceUrl")}</th>
               <th>{t("common.name")}</th>
               <th>{t("admin.stationType")}</th>
               <th />
@@ -92,6 +107,15 @@ function WindStations() {
               <tr key={s.id}>
                 <td>{s.provider}</td>
                 <td>{s.external_station_id}</td>
+                <td>
+                  {s.source_url ? (
+                    <a href={s.source_url} target="_blank" rel="noreferrer">
+                      {s.source_url}
+                    </a>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>{s.name ?? "—"}</td>
                 <td>{s.station_type}</td>
                 <td style={{ display: "flex", gap: "0.4rem" }}>
@@ -199,6 +223,16 @@ function WindStations() {
           placeholder="44013"
           required
         />
+        {isUrlBased && (
+          <InputField
+            label={t("admin.sourceUrl")}
+            id="ws-source-url"
+            value={form.source_url}
+            onChange={(e) => setForm((f) => ({ ...f, source_url: e.target.value }))}
+            placeholder="https://example.com/realtime.txt"
+            required
+          />
+        )}
         <InputField
           label="Lat"
           id="ws-lat"
@@ -236,7 +270,14 @@ function WindStations() {
           ))}
         </Select>
         <div className="sf-field">
-          <Button type="submit" disabled={create.isPending || !form.external_station_id}>
+          <Button
+            type="submit"
+            disabled={
+              create.isPending ||
+              !form.external_station_id ||
+              (isUrlBased && !form.source_url)
+            }
+          >
             {t("admin.addStation")}
           </Button>
         </div>
