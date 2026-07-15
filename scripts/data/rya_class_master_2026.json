@@ -1,0 +1,4178 @@
+[
+  {
+    "rya_class_id": 1,
+    "name": "12ft Skiff",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 2,
+    "name": "12ft Dinghy",
+    "crew_size": 2,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 5,
+    "name": "18ft Skiff",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 6,
+    "name": "2.4 mR",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 7,
+    "name": "29er",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 8,
+    "name": "29er XX",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 9,
+    "name": "Farr 3.7",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 10,
+    "name": "370",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 11,
+    "name": "Hobie 405",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 12,
+    "name": "420",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 13,
+    "name": "470",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 14,
+    "name": "49er",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 15,
+    "name": "49er Old Rig",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 16,
+    "name": "49er FX",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 17,
+    "name": "505",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 18,
+    "name": "59er",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 19,
+    "name": "A Class (non-foiling)",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 20,
+    "name": "A Class Foiling",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 21,
+    "name": "Admiralty Sailing Craft",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 22,
+    "name": "Albacore",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 23,
+    "name": "Albin Ballad",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 24,
+    "name": "Alpa Esse",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 25,
+    "name": "Alto",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 26,
+    "name": "Appledore Gaffer",
+    "crew_size": 2,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 27,
+    "name": "Avon Scow",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 28,
+    "name": "B14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 29,
+    "name": "Balaton",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 30,
+    "name": "BayRaider 17",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 31,
+    "name": "BayRaider 20",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 32,
+    "name": "Bembridge Scow",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 33,
+    "name": "Bittern",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 34,
+    "name": "Blaze",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 35,
+    "name": "Blaze Carbon Rig",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 36,
+    "name": "Blaze Fire",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 37,
+    "name": "Blaze Halo",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 38,
+    "name": "Bosham One Design",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 39,
+    "name": "Boss - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 40,
+    "name": "Boss",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 41,
+    "name": "Bosun",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 42,
+    "name": "Bosun - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 43,
+    "name": "Brightlingsea One Design",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 44,
+    "name": "British Moth",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 45,
+    "name": "Broads One Design",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 46,
+    "name": "Buzz",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 47,
+    "name": "Buzz - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 48,
+    "name": "Byte",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 49,
+    "name": "Byte CI",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 50,
+    "name": "Byte CII",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 51,
+    "name": "Cadet",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 52,
+    "name": "Cape Cutter 19",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 53,
+    "name": "Caprice 19 Dayboat",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 54,
+    "name": "Caravelle",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 55,
+    "name": "Catapult",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 56,
+    "name": "Challenger",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 57,
+    "name": "Cherub - 1997 Class Rules",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 58,
+    "name": "Cherub",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 59,
+    "name": "Chichester Harbour 12",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 60,
+    "name": "Chichester Harbour 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 61,
+    "name": "Chichester Scow",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 62,
+    "name": "Comet",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 64,
+    "name": "Comet Xtra",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 65,
+    "name": "Comet Zero",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 66,
+    "name": "Comet Versa - doublehanded",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 67,
+    "name": "Comet Versa - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 68,
+    "name": "Comet Duo - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 69,
+    "name": "Comet Trio MK 1",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 70,
+    "name": "Comet Trio MK 2",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 71,
+    "name": "Contender",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 72,
+    "name": "Cornish Limpet 10",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 73,
+    "name": "Cornish Coble",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 74,
+    "name": "Cornish Comorant 12",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 75,
+    "name": "Cornish Shrimper 17",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 76,
+    "name": "Cornish Shrimper 19",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 77,
+    "name": "Cornish Shrimper 21",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 78,
+    "name": "Cornish Crabber 21",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 79,
+    "name": "Cornish Crabber 24",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 80,
+    "name": "Cornish Crabber 26",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 81,
+    "name": "Devoti D-One",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 82,
+    "name": "Devoti D-Zero",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 83,
+    "name": "Devoti D-Zero - blue rig",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 84,
+    "name": "Dart 15 / Sprint 15",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 85,
+    "name": "Dart 15 / Sprint 15 - doublehanded",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 86,
+    "name": "Dart 15 Sport / Sprint 15 Sport",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 87,
+    "name": "Dart 16 - 2 crew with spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 88,
+    "name": "Dart 16 - 2 crew no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 89,
+    "name": "Dart 16 - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 90,
+    "name": "Dart 16 - singlehanded no spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 91,
+    "name": "Dart 16X - 2 crew with spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 92,
+    "name": "Dart 16X - 2 crew no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 93,
+    "name": "Dart 16X - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 94,
+    "name": "Dart 16X - singlehanded no spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 95,
+    "name": "Dart 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 96,
+    "name": "Dart 18 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 97,
+    "name": "Dart Sting - no jib",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 98,
+    "name": "Dart Sting - with jib",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 99,
+    "name": "Devon Yawl",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 100,
+    "name": "Dragon",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 101,
+    "name": "Dragonfly",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 102,
+    "name": "Hobie Dragoon",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 103,
+    "name": "Drascombe Dabber",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 104,
+    "name": "Drascombe Lugger",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 105,
+    "name": "Drascombe Longboat",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 106,
+    "name": "DX 15 Catamaran",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 107,
+    "name": "Emsworth One Design",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 108,
+    "name": "Enterprise",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 109,
+    "name": "Enterprise - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 110,
+    "name": "Essex One Design",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 111,
+    "name": "Europe",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 112,
+    "name": "Express",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 113,
+    "name": "F16 (cat)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 114,
+    "name": "F16 (cat - singlehanded)",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 115,
+    "name": "F16 (Stealth)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 116,
+    "name": "F16 (Stealth - singlehanded)",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 117,
+    "name": "F16 (Viper)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 118,
+    "name": "F16 (Viper - singlehanded)",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 119,
+    "name": "F16 (Nacra)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 120,
+    "name": "F16 (Nacra - singlehanded)",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 121,
+    "name": "Formula 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 122,
+    "name": "F18 (Nacra Infusion)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 123,
+    "name": "F18 (Hobie Tiger)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 124,
+    "name": "F18 (Hobie Wildcat)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 125,
+    "name": "F18 (Shockwave)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 126,
+    "name": "F18 (Capricorn)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 127,
+    "name": "F18 (Dart Hawk)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 129,
+    "name": "F20 (cat)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 130,
+    "name": "F20 (Nacra Inter 20)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 131,
+    "name": "Faversham 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 132,
+    "name": "Finn",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 133,
+    "name": "Fireball",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 134,
+    "name": "Firebird",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 135,
+    "name": "Firefly",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 136,
+    "name": "Firefly - singlehanded",
+    "crew_size": 2,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 137,
+    "name": "Beneteau First 18 - asymmetric",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 138,
+    "name": "Beneteau First 18 - symmetric",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 139,
+    "name": "Flying Dutchman",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 140,
+    "name": "Flying Fifteen Classic (1-2700)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 141,
+    "name": "Flying Fifteen Silver (2701-3400)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 142,
+    "name": "Flying Fifteen",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 143,
+    "name": "Flying Junior",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 145,
+    "name": "Foxer",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 146,
+    "name": "Formula 1 (keelboat)",
+    "crew_size": 4,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 147,
+    "name": "Formula 16 (cat)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 148,
+    "name": "Fusion Pro",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 150,
+    "name": "Fusion Pro - doublehanded",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 151,
+    "name": "Fusion Pro Gen",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 152,
+    "name": "GP14 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 153,
+    "name": "GP14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 154,
+    "name": "Graduate MKI Rig",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 155,
+    "name": "Graduate",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 156,
+    "name": "Gull",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 157,
+    "name": "Gull - singlehanded no spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 158,
+    "name": "Hadron H2",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 159,
+    "name": "Hansa 2.3",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 160,
+    "name": "Hansa 303 - doublehanded",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 161,
+    "name": "Hansa 303 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 162,
+    "name": "Hansa Liberty",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 163,
+    "name": "Harrier",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 164,
+    "name": "Hartley 10",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 165,
+    "name": "Hartley 12",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 166,
+    "name": "Hartley 12.2",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 167,
+    "name": "Hartley 15",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 168,
+    "name": "Hawk 20",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 169,
+    "name": "Heron",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 170,
+    "name": "Heron - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 171,
+    "name": "Hobie 14",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 172,
+    "name": "Hobie 14 Turbo",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 173,
+    "name": "Hobie 15",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 174,
+    "name": "Hobie 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 175,
+    "name": "Hobie 17",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 176,
+    "name": "Hobie 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 177,
+    "name": "Hobie 20 Formula",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 179,
+    "name": "Hobie FX-One",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 180,
+    "name": "Hobie Fox",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 181,
+    "name": "Hobie Pacific",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 182,
+    "name": "Hornet",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 183,
+    "name": "Hunter 707",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 184,
+    "name": "Sonata",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 185,
+    "name": "Hurricane 5.9",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 186,
+    "name": "Hurricane 5.9 Sport",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 187,
+    "name": "Hurricane 5.9 SX",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 188,
+    "name": "Icon",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 189,
+    "name": "ILCA 4 / Laser 4.7",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 190,
+    "name": "ILCA 6 / Laser Radial",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 191,
+    "name": "ILCA 7 / Laser",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 192,
+    "name": "Illusion",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 193,
+    "name": "Asymmetric International Canoe",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 194,
+    "name": "International Canoe One Design",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 195,
+    "name": "International Canoe",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 196,
+    "name": "International Moth",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 197,
+    "name": "International Moth - no foils",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 198,
+    "name": "International 12",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 199,
+    "name": "International 14 - penultimate",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 200,
+    "name": "International 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 202,
+    "name": "ISO",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 203,
+    "name": "Javelin",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 204,
+    "name": "K1",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 205,
+    "name": "K2",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 206,
+    "name": "Kestrel",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 207,
+    "name": "Keyhaven Scow",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 208,
+    "name": "Kittiwake 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 209,
+    "name": "Kittiwake 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 210,
+    "name": "Kittiwake 20",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 211,
+    "name": "Lapwing",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 212,
+    "name": "Lapwing Senior",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 213,
+    "name": "Lark",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 217,
+    "name": "Laser II - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 218,
+    "name": "Laser II",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 219,
+    "name": "Laser 13",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 220,
+    "name": "Laser 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 221,
+    "name": "2000",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 222,
+    "name": "Laser 3000",
+    "crew_size": 2,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 223,
+    "name": "4000",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 224,
+    "name": "Laser 5000",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 225,
+    "name": "Laser Bahia",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 226,
+    "name": "Laser Bug",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 227,
+    "name": "Laser EPS",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 228,
+    "name": "Laser Pico Race",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 229,
+    "name": "Laser Pico - singlehanded with jib",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 230,
+    "name": "Laser Pico - doublehanded with jib",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 231,
+    "name": "Laser Pico",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 232,
+    "name": "Laser Pico Race - doublehanded with jib",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 233,
+    "name": "Laser Stratos",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 234,
+    "name": "Laser Stratos - keel",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 235,
+    "name": "Laser Vago XD",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 236,
+    "name": "Laser Vago",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 237,
+    "name": "Lazy E",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 238,
+    "name": "Leader",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 239,
+    "name": "Lightning 368",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 240,
+    "name": "Loch Long One Design",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 241,
+    "name": "Lymington Scow",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 242,
+    "name": "Marauder",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 243,
+    "name": "Martin 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 244,
+    "name": "Martin 16 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 245,
+    "name": "Megabyte",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 246,
+    "name": "Melges 24",
+    "crew_size": 4,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 247,
+    "name": "Merlin Rocket - Vintage (1-2339)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 248,
+    "name": "Merlin Rocket - Classic (2340-3221)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 249,
+    "name": "Merlin Rocket - Silver (3222-3412)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 250,
+    "name": "Merlin Rocket",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 251,
+    "name": "Minisail",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 252,
+    "name": "Miracle",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 253,
+    "name": "Mirror (D/H)",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 254,
+    "name": "Mirror - (S/H)",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 255,
+    "name": "Mirror - (S/H) no spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 256,
+    "name": "MRX Dinghy",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 257,
+    "name": "Musto Skiff",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 258,
+    "name": "MX-Ray",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 259,
+    "name": "National 12",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 260,
+    "name": "National 12 - rudder foil",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 261,
+    "name": "National 12 - double bottom",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 262,
+    "name": "National 12 - vintage",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 263,
+    "name": "National 18 - classic",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 264,
+    "name": "National 18 - penultimate",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 265,
+    "name": "National 18 - ultimate",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 266,
+    "name": "Nacra 15",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 267,
+    "name": "Nacra 17",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 268,
+    "name": "Nacra 17 - foiling",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 269,
+    "name": "Nacra F20 Carbon",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 270,
+    "name": "Nacra 500 Fun",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 271,
+    "name": "Nacra 500 School",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 272,
+    "name": "Nacra 500 Sport",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 273,
+    "name": "New Cat F1",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 274,
+    "name": "Norfolk Smuggler",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 275,
+    "name": "Norfolk Oyster",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 276,
+    "name": "Norfolk Urchin",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 277,
+    "name": "Norfolk Gypsy",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 278,
+    "name": "Norfolk One Design",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 279,
+    "name": "Norfolk Punt",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 280,
+    "name": "OK",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 281,
+    "name": "Open Bic",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 282,
+    "name": "Optimist",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 283,
+    "name": "Osprey",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 284,
+    "name": "Otter",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 285,
+    "name": "Otter - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 286,
+    "name": "Pacer",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 287,
+    "name": "Pegasus",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 288,
+    "name": "Phantom",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 289,
+    "name": "Phantom - alloy rig",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 290,
+    "name": "Pirate",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 291,
+    "name": "Prindle 15",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 292,
+    "name": "Prindle 15 - spinnaker",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 293,
+    "name": "Prindle 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 294,
+    "name": "Prindle 18.2",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 295,
+    "name": "Prindle 19",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 296,
+    "name": "Punk",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 297,
+    "name": "Bembridge Redwing",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 298,
+    "name": "Redwing",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 299,
+    "name": "Rooster 8.1",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 300,
+    "name": "RS100 10.2",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 301,
+    "name": "RS100 8.4",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 302,
+    "name": "RS100 7.4",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 303,
+    "name": "RS200",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 304,
+    "name": "RS300",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 305,
+    "name": "RS400",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 306,
+    "name": "RS500",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 307,
+    "name": "RS600",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 308,
+    "name": "RS600 FF",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 309,
+    "name": "RS700",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 310,
+    "name": "RS800",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 311,
+    "name": "RS Aero 5",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 312,
+    "name": "RS Aero 7",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 313,
+    "name": "RS Aero 9",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 314,
+    "name": "RS Cat 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 315,
+    "name": "RS Cat 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 316,
+    "name": "RS Elite",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 317,
+    "name": "RS Feva S",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 318,
+    "name": "RS Feva XL",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 319,
+    "name": "K6",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 320,
+    "name": "RS Neo",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 321,
+    "name": "RS Quba",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 322,
+    "name": "RS Quest",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 323,
+    "name": "RS Tera Sport",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 324,
+    "name": "RS Tera Pro",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 325,
+    "name": "RS Vareo",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 326,
+    "name": "RS Venture S",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 327,
+    "name": "RS Venture SE",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 328,
+    "name": "RS Venture Connect",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 329,
+    "name": "RS Vision",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 330,
+    "name": "S1Race",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 331,
+    "name": "Sailfish",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 332,
+    "name": "Sandhopper",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 333,
+    "name": "SB20",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 334,
+    "name": "Scorpion",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 335,
+    "name": "Seafly",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 336,
+    "name": "Shadow",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 337,
+    "name": "Shadow X",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 338,
+    "name": "Sharpie",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 339,
+    "name": "Shearwater",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 340,
+    "name": "SigneT",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 341,
+    "name": "SigneT - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 342,
+    "name": "SK2",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 343,
+    "name": "Skipper",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 344,
+    "name": "Skud 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 345,
+    "name": "SL16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 346,
+    "name": "Slipper Dinghy",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 347,
+    "name": "Slipstream",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 348,
+    "name": "Snipe",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 349,
+    "name": "Soling",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 350,
+    "name": "Solo",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 351,
+    "name": "Solution",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 352,
+    "name": "Spice",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 353,
+    "name": "Spitfire",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 354,
+    "name": "Spitfire - singlehanded",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 355,
+    "name": "Splash",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 359,
+    "name": "Sprint 15 DX",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 360,
+    "name": "Sprite",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 361,
+    "name": "Sprog",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 362,
+    "name": "Squib",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 363,
+    "name": "Streaker",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 364,
+    "name": "Streaker Wave",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 365,
+    "name": "Sunfish",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 366,
+    "name": "Supernova - old hull",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 367,
+    "name": "Supernova",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 368,
+    "name": "Swallow",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 369,
+    "name": "Swordfish",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 370,
+    "name": "Tasar",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 371,
+    "name": "Tela 16 Dayboat",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 372,
+    "name": "Tempest",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 373,
+    "name": "Thames A Rater",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 374,
+    "name": "Estuary One Design",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 375,
+    "name": "Tideway",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 376,
+    "name": "Tideway 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 377,
+    "name": "Tinker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 378,
+    "name": "Tonic",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 379,
+    "name": "Topper",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 380,
+    "name": "Topper 4.2",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 381,
+    "name": "Topaz Taz",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 382,
+    "name": "Topaz Argo",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 383,
+    "name": "Topaz Magno",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 384,
+    "name": "Topaz Omega",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 385,
+    "name": "Topaz Uno",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 386,
+    "name": "Topaz Race",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 387,
+    "name": "Topaz Race X",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 388,
+    "name": "Topaz Tres X",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 389,
+    "name": "Topaz Vibe",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 390,
+    "name": "Topaz Xenon",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 391,
+    "name": "Topaz 12 X",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 392,
+    "name": "Topaz 14 X",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 393,
+    "name": "Topaz 16 CX",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 394,
+    "name": "Topper Breeze",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 395,
+    "name": "Topper Sport 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 396,
+    "name": "Topper Sport 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 397,
+    "name": "Tornado",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 398,
+    "name": "Tornado - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 399,
+    "name": "Toy",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 400,
+    "name": "Tridente 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 401,
+    "name": "Tridente 16",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 402,
+    "name": "Twinkle Twelve",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 403,
+    "name": "Unicorn",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 404,
+    "name": "V3000",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 405,
+    "name": "Vagabond",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 406,
+    "name": "Vanguard",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 407,
+    "name": "Vaurien - old sail plan",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 408,
+    "name": "Vaurien",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 409,
+    "name": "Vortex",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 410,
+    "name": "VX One",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 411,
+    "name": "Wanderer",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 412,
+    "name": "Wanderer - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 413,
+    "name": "Waszp",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 414,
+    "name": "Waveney & Oulton One Design",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 415,
+    "name": "Wayfarer",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 416,
+    "name": "Wayfarer - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 417,
+    "name": "Wensum",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 418,
+    "name": "Weta 4.4",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 419,
+    "name": "Wizz",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 420,
+    "name": "Windermere 17",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 421,
+    "name": "Wineglass",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 422,
+    "name": "Windsurfer",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 423,
+    "name": "Wivenhoe One Design",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 424,
+    "name": "X0",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 425,
+    "name": "X1",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 426,
+    "name": "Yeoman",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 427,
+    "name": "Yeoman - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 428,
+    "name": "Yachting World Dayboat",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 429,
+    "name": "RS Zest - singlehanded",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 430,
+    "name": "RS Zest",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 431,
+    "name": "Zoom",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 432,
+    "name": "Topaz Tres",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 433,
+    "name": "Sonnet",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 435,
+    "name": "C Scow",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 437,
+    "name": "Maverick",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 438,
+    "name": "MC Scow",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 439,
+    "name": "Y-Flyer",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 451,
+    "name": "Devoti D-Zero - black rig",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 454,
+    "name": "Devoti D-Zero - grey rig",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 455,
+    "name": "RS Aero 6",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 457,
+    "name": "Flying Fifteen - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 458,
+    "name": "Punt HC",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 459,
+    "name": "Bosun - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 460,
+    "name": "RS200 - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 461,
+    "name": "RS600 - doublehanded with spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 462,
+    "name": "RS600 - doublehanded with no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 463,
+    "name": "Merlin Rocket - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 464,
+    "name": "2000 - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 465,
+    "name": "420 - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 466,
+    "name": "Laser Bahia - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 467,
+    "name": "Topper 6.4",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 468,
+    "name": "Kestrel - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 469,
+    "name": "GP14 - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 470,
+    "name": "Lymington Scow - doublehanded with no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 472,
+    "name": "Lymington Scow - doublehanded with spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 474,
+    "name": "Wayfarer - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 475,
+    "name": "Wanderer - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 476,
+    "name": "Loch Long - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 477,
+    "name": "Comet Duo",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 478,
+    "name": "Lark - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 479,
+    "name": "Leader - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 480,
+    "name": "Comet Zero - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 481,
+    "name": "Miracle - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 482,
+    "name": "RS200 - singlehanded with no spinnaker",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 483,
+    "name": "Laser Vago - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 484,
+    "name": "Hobie 16 - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 485,
+    "name": "Buccaneer 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 486,
+    "name": "Gull - singlehanded",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 487,
+    "name": "Flying Scot",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 488,
+    "name": "Lark - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 489,
+    "name": "RS400 - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 490,
+    "name": "Chichester Harbour 18 - spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 491,
+    "name": "Graduate - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 492,
+    "name": "RS Feva XL - singlehanded",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 493,
+    "name": "Fairey Falcon",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 494,
+    "name": "Thistle",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 495,
+    "name": "RS Quest - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 496,
+    "name": "RS200 - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 497,
+    "name": "National 12 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 499,
+    "name": "Albacore - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 500,
+    "name": "Chichester Harbour 18 - 3 person with spinnaker",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 501,
+    "name": "Topaz Argo - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 502,
+    "name": "Laser II - singlehanded with no spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 503,
+    "name": "Laser 13 - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 504,
+    "name": "RS Quest - symmetric spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 505,
+    "name": "Hartley 12 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 506,
+    "name": "Bembridge Scow - doublehanded",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 507,
+    "name": "Mirror - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 510,
+    "name": "Topaz Omega - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 511,
+    "name": "Cornish Shrimper 19 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 512,
+    "name": "Scorpion - singlehanded with spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 513,
+    "name": "Otter - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 514,
+    "name": "Topaz 14 X - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 515,
+    "name": "Sailfish 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 516,
+    "name": "Topaz 14 X - singlehanded with no spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 517,
+    "name": "Wayfarer - singlehanded with no spinnaker",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 519,
+    "name": "Mutineer 15",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 520,
+    "name": "RS Quba Sport",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 521,
+    "name": "RS Quba Pro",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 522,
+    "name": "IDRA 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 523,
+    "name": "Martin 16 - spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 524,
+    "name": "Lightning",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 525,
+    "name": "C420",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 526,
+    "name": "RS Feva XL - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 527,
+    "name": "Harrier +",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 528,
+    "name": "RS Feva S - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 529,
+    "name": "Hobie 15 - no spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 530,
+    "name": "RS21",
+    "crew_size": 4,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 531,
+    "name": "Comet Race",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 532,
+    "name": "Nacra F16 - singlehanded with straight foils",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 533,
+    "name": "Tornado - 24 sqm spinnaker",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 534,
+    "name": "Nacra Inter 17 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 535,
+    "name": "Nacra Inter 17",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 536,
+    "name": "Flying Fifteen - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 537,
+    "name": "Nacra F16 - singlehanded with curved foils",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 538,
+    "name": "Nacra F16 - straight foils",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 539,
+    "name": "Laser Replica",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 540,
+    "name": "Nacra 17 Olympic Foiling - singlehanded",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 541,
+    "name": "Nacra 17 Olympic Foiling",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 542,
+    "name": "Sailhorse",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 543,
+    "name": "Dart 12",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "multihull"
+  },
+  {
+    "rya_class_id": 544,
+    "name": "RS400 - singlehanded",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 545,
+    "name": "Club Oppie",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 546,
+    "name": "Nacra inter 20",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 547,
+    "name": "Hadron H1",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 548,
+    "name": "National 18 - ultra",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": "monohull"
+  },
+  {
+    "rya_class_id": 549,
+    "name": "Melges 15",
+    "crew_size": null,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 550,
+    "name": "Mirror Gaff rig",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 551,
+    "name": "Nacra 570",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 552,
+    "name": "Lighthouse Tender",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 553,
+    "name": "Hartley Zenith",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 554,
+    "name": "Topaz Uno Race Plus",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 555,
+    "name": "VX AIR",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 556,
+    "name": "VX TWO",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 557,
+    "name": "FUSION II",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": null
+  },
+  {
+    "rya_class_id": 558,
+    "name": "RS Toura",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "hull_type": null
+  }
+]

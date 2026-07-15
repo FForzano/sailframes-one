@@ -1,0 +1,1554 @@
+[
+  {
+    "rya_class_id": 13,
+    "name": "470",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 978
+  },
+  {
+    "rya_class_id": null,
+    "name": "12 SQM SHARPIE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1026
+  },
+  {
+    "rya_class_id": 14,
+    "name": "49ER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 697
+  },
+  {
+    "rya_class_id": null,
+    "name": "AJAX N23",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1040
+  },
+  {
+    "rya_class_id": null,
+    "name": "ALD LAPWING",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1248
+  },
+  {
+    "rya_class_id": null,
+    "name": "ALLEGRO",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1012
+  },
+  {
+    "rya_class_id": null,
+    "name": "ALPHA",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1182
+  },
+  {
+    "rya_class_id": 193,
+    "name": "ASYMMETRIC INTERNATIONAL CANOE",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 866
+  },
+  {
+    "rya_class_id": 27,
+    "name": "AVON SCOW",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1465
+  },
+  {
+    "rya_class_id": null,
+    "name": "BHYC HAVEN",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1097
+  },
+  {
+    "rya_class_id": null,
+    "name": "BHYC SWAN",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1210
+  },
+  {
+    "rya_class_id": 37,
+    "name": "BLAZE HALO",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 992
+  },
+  {
+    "rya_class_id": null,
+    "name": "BONITO",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1191
+  },
+  {
+    "rya_class_id": 40,
+    "name": "BOSS",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 847
+  },
+  {
+    "rya_class_id": 41,
+    "name": "BOSUN",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1198
+  },
+  {
+    "rya_class_id": 43,
+    "name": "BRIGHTLINGSEA ONE DESIGN",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1087
+  },
+  {
+    "rya_class_id": 45,
+    "name": "BROADS ONE DESIGN",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1087
+  },
+  {
+    "rya_class_id": null,
+    "name": "BULL 7000",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 860
+  },
+  {
+    "rya_class_id": null,
+    "name": "BULLETT",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1087
+  },
+  {
+    "rya_class_id": 48,
+    "name": "BYTE",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1205
+  },
+  {
+    "rya_class_id": null,
+    "name": "CATALAC 9M",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1248
+  },
+  {
+    "rya_class_id": null,
+    "name": "CHALLENGE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 974
+  },
+  {
+    "rya_class_id": null,
+    "name": "CHEETAH",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 983
+  },
+  {
+    "rya_class_id": 58,
+    "name": "CHERUB",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 903
+  },
+  {
+    "rya_class_id": null,
+    "name": "CLUB 19",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1052
+  },
+  {
+    "rya_class_id": null,
+    "name": "COLCHESTER OD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1305
+  },
+  {
+    "rya_class_id": 477,
+    "name": "COMET DUO",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1168
+  },
+  {
+    "rya_class_id": null,
+    "name": "CRISP OD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1087
+  },
+  {
+    "rya_class_id": 87,
+    "name": "DART 16 - 2 CREW WITH SPINNAKER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 893
+  },
+  {
+    "rya_class_id": 105,
+    "name": "DRASCOMBE LONGBOAT",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1210
+  },
+  {
+    "rya_class_id": null,
+    "name": "E22",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 879
+  },
+  {
+    "rya_class_id": null,
+    "name": "EMBASSY",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1419
+  },
+  {
+    "rya_class_id": 110,
+    "name": "ESSEX ONE DESIGN",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1078
+  },
+  {
+    "rya_class_id": 374,
+    "name": "ESTUARY ONE DESIGN",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1078
+  },
+  {
+    "rya_class_id": 112,
+    "name": "EXPRESS",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1135
+  },
+  {
+    "rya_class_id": 134,
+    "name": "FIREBIRD",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1201
+  },
+  {
+    "rya_class_id": null,
+    "name": "FIRST CLASS 8",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 918
+  },
+  {
+    "rya_class_id": null,
+    "name": "FLEETWIND",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1268
+  },
+  {
+    "rya_class_id": null,
+    "name": "FLIPPER SCOW",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1116
+  },
+  {
+    "rya_class_id": 139,
+    "name": "FLYING DUTCHMAN",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 879
+  },
+  {
+    "rya_class_id": 143,
+    "name": "FLYING JUNIOR",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1163
+  },
+  {
+    "rya_class_id": 121,
+    "name": "FORMULA 18",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 655
+  },
+  {
+    "rya_class_id": null,
+    "name": "GARANA 601",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1068
+  },
+  {
+    "rya_class_id": null,
+    "name": "H BOAT",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1015
+  },
+  {
+    "rya_class_id": null,
+    "name": "HALF RATER",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1229
+  },
+  {
+    "rya_class_id": 163,
+    "name": "HARRIER",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1116
+  },
+  {
+    "rya_class_id": 168,
+    "name": "HAWK 20",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1115
+  },
+  {
+    "rya_class_id": 169,
+    "name": "HERON",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1340
+  },
+  {
+    "rya_class_id": null,
+    "name": "HILBRE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1248
+  },
+  {
+    "rya_class_id": null,
+    "name": "HIRONDELLE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 993
+  },
+  {
+    "rya_class_id": 11,
+    "name": "HOBIE 405",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 1089
+  },
+  {
+    "rya_class_id": null,
+    "name": "HORNING REBEL OD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1059
+  },
+  {
+    "rya_class_id": 183,
+    "name": "HUNTER 707",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 925
+  },
+  {
+    "rya_class_id": null,
+    "name": "HURRICANE 4.9",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 781
+  },
+  {
+    "rya_class_id": 185,
+    "name": "HURRICANE 5.9",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 699
+  },
+  {
+    "rya_class_id": null,
+    "name": "HURRICANE 500",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 785
+  },
+  {
+    "rya_class_id": null,
+    "name": "HYDRA",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 832
+  },
+  {
+    "rya_class_id": 188,
+    "name": "ICON",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 976
+  },
+  {
+    "rya_class_id": 200,
+    "name": "INTERNATIONAL 14",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 758
+  },
+  {
+    "rya_class_id": 194,
+    "name": "INTERNATIONAL CANOE ONE DESIGN",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 905
+  },
+  {
+    "rya_class_id": 196,
+    "name": "INTERNATIONAL MOTH",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 570
+  },
+  {
+    "rya_class_id": 197,
+    "name": "INTERNATIONAL MOTH - NO FOILS",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 990
+  },
+  {
+    "rya_class_id": null,
+    "name": "IROQUOIS",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 984
+  },
+  {
+    "rya_class_id": null,
+    "name": "IROQUOIS 30 MK2",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 927
+  },
+  {
+    "rya_class_id": null,
+    "name": "IROQUOIS MK1",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 960
+  },
+  {
+    "rya_class_id": null,
+    "name": "IROQUOIS MK2",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 983
+  },
+  {
+    "rya_class_id": null,
+    "name": "ISLE OF WIGHT SCOW",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1419
+  },
+  {
+    "rya_class_id": null,
+    "name": "J24",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 935
+  },
+  {
+    "rya_class_id": null,
+    "name": "J80",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 876
+  },
+  {
+    "rya_class_id": 203,
+    "name": "JAVELIN",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 932
+  },
+  {
+    "rya_class_id": null,
+    "name": "JAVELIN 16",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 927
+  },
+  {
+    "rya_class_id": null,
+    "name": "JOLLYBOAT",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 917
+  },
+  {
+    "rya_class_id": null,
+    "name": "KINSMAN",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1125
+  },
+  {
+    "rya_class_id": 211,
+    "name": "LAPWING",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1320
+  },
+  {
+    "rya_class_id": 222,
+    "name": "LASER 3000",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 1103
+  },
+  {
+    "rya_class_id": 224,
+    "name": "LASER 5000",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 846
+  },
+  {
+    "rya_class_id": 227,
+    "name": "LASER EPS",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1035
+  },
+  {
+    "rya_class_id": 218,
+    "name": "LASER II",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1117
+  },
+  {
+    "rya_class_id": 228,
+    "name": "LASER PICO RACE",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1330
+  },
+  {
+    "rya_class_id": null,
+    "name": "LASER M",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1121
+  },
+  {
+    "rya_class_id": 235,
+    "name": "LASER VAGO XD",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 1100
+  },
+  {
+    "rya_class_id": 237,
+    "name": "LAZY E",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1068
+  },
+  {
+    "rya_class_id": 238,
+    "name": "LEADER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1115
+  },
+  {
+    "rya_class_id": null,
+    "name": "LIVERPOOL BAY FALCON",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1097
+  },
+  {
+    "rya_class_id": 240,
+    "name": "LOCH LONG ONE DESIGN",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1170
+  },
+  {
+    "rya_class_id": 241,
+    "name": "LYMINGTON SCOW",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1448
+  },
+  {
+    "rya_class_id": null,
+    "name": "MAN O WAR",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1116
+  },
+  {
+    "rya_class_id": 242,
+    "name": "MARAUDER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1042
+  },
+  {
+    "rya_class_id": null,
+    "name": "MAYFLY",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1191
+  },
+  {
+    "rya_class_id": null,
+    "name": "MELGES 24",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 846
+  },
+  {
+    "rya_class_id": null,
+    "name": "MERCURY",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1097
+  },
+  {
+    "rya_class_id": null,
+    "name": "MERMAID 11",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1381
+  },
+  {
+    "rya_class_id": 251,
+    "name": "MINISAIL",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1248
+  },
+  {
+    "rya_class_id": null,
+    "name": "MIRROR 16",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1097
+  },
+  {
+    "rya_class_id": 258,
+    "name": "MX-RAY",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 1020
+  },
+  {
+    "rya_class_id": null,
+    "name": "MYSTERE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 823
+  },
+  {
+    "rya_class_id": null,
+    "name": "MYTH OD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1381
+  },
+  {
+    "rya_class_id": 263,
+    "name": "National 18 - Classic",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1018
+  },
+  {
+    "rya_class_id": 264,
+    "name": "National 18 - Penultimate",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 970
+  },
+  {
+    "rya_class_id": 265,
+    "name": "National 18 - Ultimate",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 930
+  },
+  {
+    "rya_class_id": 548,
+    "name": "National 18 - Ultra",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 900
+  },
+  {
+    "rya_class_id": null,
+    "name": "NIMBLE 30",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 983
+  },
+  {
+    "rya_class_id": null,
+    "name": "NORFOLK",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1248
+  },
+  {
+    "rya_class_id": 278,
+    "name": "NORFOLK ONE DESIGN",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1266
+  },
+  {
+    "rya_class_id": 279,
+    "name": "NORFOLK PUNT",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 886
+  },
+  {
+    "rya_class_id": null,
+    "name": "NORWESTER",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1381
+  },
+  {
+    "rya_class_id": 284,
+    "name": "OTTER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1275
+  },
+  {
+    "rya_class_id": 286,
+    "name": "PACER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1193
+  },
+  {
+    "rya_class_id": 287,
+    "name": "PEGASUS",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1068
+  },
+  {
+    "rya_class_id": null,
+    "name": "PIPER",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1060
+  },
+  {
+    "rya_class_id": null,
+    "name": "PISCES",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1210
+  },
+  {
+    "rya_class_id": null,
+    "name": "PLUS",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1267
+  },
+  {
+    "rya_class_id": null,
+    "name": "PROJECTION 762",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 855
+  },
+  {
+    "rya_class_id": null,
+    "name": "PROUT QUEST",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1021
+  },
+  {
+    "rya_class_id": null,
+    "name": "PROUT QUEST 30",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1021
+  },
+  {
+    "rya_class_id": null,
+    "name": "QUEST",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1031
+  },
+  {
+    "rya_class_id": null,
+    "name": "REBEL",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1070
+  },
+  {
+    "rya_class_id": 298,
+    "name": "REDWING",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1094
+  },
+  {
+    "rya_class_id": null,
+    "name": "REEDLING",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1036
+  },
+  {
+    "rya_class_id": null,
+    "name": "REEDLING 19",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1031
+  },
+  {
+    "rya_class_id": null,
+    "name": "ROYAL HARWICH OD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1154
+  },
+  {
+    "rya_class_id": 316,
+    "name": "RS ELITE",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 938
+  },
+  {
+    "rya_class_id": 321,
+    "name": "RS QUBA",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1295
+  },
+  {
+    "rya_class_id": 300,
+    "name": "RS100 10.2",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 981
+  },
+  {
+    "rya_class_id": 460,
+    "name": "RS200 - NO SPINNAKER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1065
+  },
+  {
+    "rya_class_id": null,
+    "name": "SALCOMBE YAWL",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1105
+  },
+  {
+    "rya_class_id": 332,
+    "name": "SANDHOPPER",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1197
+  },
+  {
+    "rya_class_id": null,
+    "name": "SARO SCIMITAR",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1135
+  },
+  {
+    "rya_class_id": 333,
+    "name": "SB20",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 911
+  },
+  {
+    "rya_class_id": null,
+    "name": "SEABIRD HALF-RATER",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1229
+  },
+  {
+    "rya_class_id": null,
+    "name": "SEAFIRE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1116
+  },
+  {
+    "rya_class_id": null,
+    "name": "SEAFIRE - SINGLEHANDED WITH NO",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1135
+  },
+  {
+    "rya_class_id": 337,
+    "name": "SHADOW X",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 750
+  },
+  {
+    "rya_class_id": 338,
+    "name": "SHARPIE",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1031
+  },
+  {
+    "rya_class_id": null,
+    "name": "SHRIMP",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1437
+  },
+  {
+    "rya_class_id": 340,
+    "name": "SIGNET",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1265
+  },
+  {
+    "rya_class_id": null,
+    "name": "SILVER STREAK",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1116
+  },
+  {
+    "rya_class_id": null,
+    "name": "SKIPPER 12",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1305
+  },
+  {
+    "rya_class_id": null,
+    "name": "SKIPPER CLUBMAN",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1182
+  },
+  {
+    "rya_class_id": null,
+    "name": "SKUA",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1362
+  },
+  {
+    "rya_class_id": null,
+    "name": "SKUA OD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1362
+  },
+  {
+    "rya_class_id": 347,
+    "name": "SLIPSTREAM",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 889
+  },
+  {
+    "rya_class_id": null,
+    "name": "SNOWGOOSE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 964
+  },
+  {
+    "rya_class_id": null,
+    "name": "SOLENT SCOW",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1456
+  },
+  {
+    "rya_class_id": null,
+    "name": "SOLENT SUNBEAM",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1012
+  },
+  {
+    "rya_class_id": 349,
+    "name": "SOLING",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 914
+  },
+  {
+    "rya_class_id": null,
+    "name": "SONAR",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 940
+  },
+  {
+    "rya_class_id": null,
+    "name": "SPARK",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 917
+  },
+  {
+    "rya_class_id": 352,
+    "name": "SPICE",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 930
+  },
+  {
+    "rya_class_id": null,
+    "name": "SPORT 14",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1055
+  },
+  {
+    "rya_class_id": 360,
+    "name": "SPRITE",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1248
+  },
+  {
+    "rya_class_id": 361,
+    "name": "SPROG",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1173
+  },
+  {
+    "rya_class_id": 362,
+    "name": "SQUIB",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1142
+  },
+  {
+    "rya_class_id": null,
+    "name": "ST MAWES",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1201
+  },
+  {
+    "rya_class_id": null,
+    "name": "STAMPEDE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 747
+  },
+  {
+    "rya_class_id": null,
+    "name": "STAR",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 917
+  },
+  {
+    "rya_class_id": 365,
+    "name": "SUNFISH",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1229
+  },
+  {
+    "rya_class_id": 368,
+    "name": "SWALLOW",
+    "crew_size": 3,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1021
+  },
+  {
+    "rya_class_id": null,
+    "name": "SWIFT",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 997
+  },
+  {
+    "rya_class_id": 369,
+    "name": "SWORDFISH",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1117
+  },
+  {
+    "rya_class_id": 372,
+    "name": "TEMPEST",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 942
+  },
+  {
+    "rya_class_id": 375,
+    "name": "TIDEWAY",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1447
+  },
+  {
+    "rya_class_id": null,
+    "name": "TIKKI",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1305
+  },
+  {
+    "rya_class_id": null,
+    "name": "TOPAZ DUO",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1190
+  },
+  {
+    "rya_class_id": 384,
+    "name": "TOPAZ OMEGA",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 1075
+  },
+  {
+    "rya_class_id": 385,
+    "name": "TOPAZ UNO",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1251
+  },
+  {
+    "rya_class_id": 390,
+    "name": "TOPAZ XENON",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 1111
+  },
+  {
+    "rya_class_id": null,
+    "name": "TORCH",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1305
+  },
+  {
+    "rya_class_id": 397,
+    "name": "TORNADO",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 625
+  },
+  {
+    "rya_class_id": null,
+    "name": "TORNADO SPORT",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 644
+  },
+  {
+    "rya_class_id": 399,
+    "name": "TOY",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "none",
+    "py_rating": 1025
+  },
+  {
+    "rya_class_id": null,
+    "name": "TOY (BIG RIG)",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1021
+  },
+  {
+    "rya_class_id": null,
+    "name": "TRACER",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1229
+  },
+  {
+    "rya_class_id": null,
+    "name": "TURTLE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1343
+  },
+  {
+    "rya_class_id": 402,
+    "name": "TWINKLE TWELVE",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1286
+  },
+  {
+    "rya_class_id": null,
+    "name": "TYPHOON",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1012
+  },
+  {
+    "rya_class_id": null,
+    "name": "UNIT",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1031
+  },
+  {
+    "rya_class_id": 405,
+    "name": "VAGABOND",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1248
+  },
+  {
+    "rya_class_id": 409,
+    "name": "VORTEX",
+    "crew_size": 1,
+    "rig_type": "una",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 960
+  },
+  {
+    "rya_class_id": null,
+    "name": "VULCAN",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1021
+  },
+  {
+    "rya_class_id": null,
+    "name": "WAGTAIL",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1475
+  },
+  {
+    "rya_class_id": 414,
+    "name": "WAVENEY & OULTON ONE DESIGN",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1087
+  },
+  {
+    "rya_class_id": 417,
+    "name": "WENSUM",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1381
+  },
+  {
+    "rya_class_id": null,
+    "name": "WEST WIGHT SCOW",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1419
+  },
+  {
+    "rya_class_id": 418,
+    "name": "WETA 4.4",
+    "crew_size": 1,
+    "rig_type": "sloop",
+    "spinnaker_type": "asymmetric",
+    "py_rating": 960
+  },
+  {
+    "rya_class_id": null,
+    "name": "WHARRAM TANE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1116
+  },
+  {
+    "rya_class_id": null,
+    "name": "WILDFIRE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1097
+  },
+  {
+    "rya_class_id": 421,
+    "name": "WINEGLASS",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1080
+  },
+  {
+    "rya_class_id": null,
+    "name": "WIZARD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 983
+  },
+  {
+    "rya_class_id": null,
+    "name": "XOD",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1125
+  },
+  {
+    "rya_class_id": 428,
+    "name": "YACHTING WORLD DAYBOAT",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "none",
+    "py_rating": 1205
+  },
+  {
+    "rya_class_id": null,
+    "name": "YARE & BURE",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1117
+  },
+  {
+    "rya_class_id": 426,
+    "name": "YEOMAN",
+    "crew_size": 2,
+    "rig_type": "sloop",
+    "spinnaker_type": "symmetric",
+    "py_rating": 1108
+  },
+  {
+    "rya_class_id": null,
+    "name": "ZENITH",
+    "crew_size": null,
+    "rig_type": null,
+    "spinnaker_type": null,
+    "py_rating": 1106
+  }
+]
