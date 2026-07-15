@@ -379,6 +379,7 @@
     "boatClasses": "Boat classes",
     "provider": "Provider",
     "stationId": "Station ID",
+    "sourceUrl": "Source URL",
     "stationType": "Type",
     "observations": "Observations",
     "addStation": "Add station",
