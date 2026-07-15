@@ -385,9 +385,16 @@
     "sailArea": "Sail area (m²)",
     "crewSize": "Crew size",
     "hullType": "Hull type",
-    "rigType": "Rig type",
-    "pyRating": "PY rating",
+    "rigType": "Rig",
+    "pyRating": "PY number",
     "monohull": "Monohull",
-    "multihull": "Multihull"
+    "multihull": "Multihull",
+    "sloop": "Sloop",
+    "una": "Una (single-sail)",
+    "spinnakerType": "Spinnaker",
+    "spinnaker_none": "None",
+    "spinnaker_asymmetric": "Asymmetric",
+    "spinnaker_symmetric": "Symmetric",
+    "ryaClassId": "RYA Class ID"
   }
 }

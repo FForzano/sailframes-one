@@ -13,7 +13,8 @@ from ...db.models import BoatClassORM, BoatORM, BoatPhotoORM, UserBoatORM
 _FIELDS = ("name", "boat_class_id", "sail_number", "loa_m", "cert_id", "mbsa_id", "notes", "club_id")
 _CLASS_FIELDS = (
     "name", "description", "logo_id",
-    "loa_m", "beam_m", "sail_area_sqm", "crew_size", "hull_type", "rig_type", "py_rating",
+    "loa_m", "beam_m", "sail_area_sqm", "crew_size", "hull_type",
+    "rig_type", "spinnaker_type", "py_rating", "rya_class_id",
 )
 
 

@@ -17,11 +17,20 @@ from ..base import Base, CreatedAtMixin, TimestampMixin, UUIDPKMixin, enum_check
 USER_BOAT_ROLES = ("owner", "admin", "visitor")
 SAILING_ROLES = ("skipper", "crew")
 HULL_TYPES = ("monohull", "multihull")
+# Mirror the RYA Portsmouth Yardstick list's "Rig" (S/U) and "Spinnaker"
+# (0/A/C) columns so a class transcribed from the published PDF maps 1:1.
+RIG_TYPES = ("sloop", "una")
+SPINNAKER_TYPES = ("none", "asymmetric", "symmetric")
 
 
 class BoatClassORM(UUIDPKMixin, CreatedAtMixin, Base):
     __tablename__ = "boat_classes"
-    __table_args__ = (enum_check("hull_type", HULL_TYPES),)
+    __table_args__ = (
+        enum_check("hull_type", HULL_TYPES),
+        enum_check("rig_type", RIG_TYPES),
+        enum_check("spinnaker_type", SPINNAKER_TYPES),
+        UniqueConstraint("rya_class_id"),
+    )
 
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -35,8 +44,13 @@ class BoatClassORM(UUIDPKMixin, CreatedAtMixin, Base):
     sail_area_sqm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     crew_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     hull_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # RYA PY list fields — rig/spinnaker/number map to the official
+    # Rig/Spinnaker/Number columns; rya_class_id to RYA Class ID (reference
+    # only, no import/sync against the published list).
     rig_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    py_rating: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    spinnaker_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    py_rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rya_class_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class BoatORM(UUIDPKMixin, TimestampMixin, Base):

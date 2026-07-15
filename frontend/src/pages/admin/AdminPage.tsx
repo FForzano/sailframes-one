@@ -13,7 +13,7 @@ import { InputField, TextAreaField } from "@/components/ui/InputField";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { fmtDateTime, userLabel } from "@/utils/format";
-import type { BoatClass, HullType, UUID, WindStation } from "@/types";
+import type { BoatClass, HullType, RigType, SpinnakerType, UUID, WindStation } from "@/types";
 
 const PROVIDERS = ["noaa_ndbc", "noaa_metar", "custom_device"];
 const STATION_TYPES = ["buoy", "metar", "custom_device"];
@@ -386,7 +386,9 @@ const emptyClassForm = {
   crew_size: "",
   hull_type: "",
   rig_type: "",
+  spinnaker_type: "",
   py_rating: "",
+  rya_class_id: "",
 };
 
 function BoatClasses() {
@@ -415,7 +417,9 @@ function BoatClasses() {
         crew_size: editing.crew_size?.toString() ?? "",
         hull_type: editing.hull_type ?? "",
         rig_type: editing.rig_type ?? "",
+        spinnaker_type: editing.spinnaker_type ?? "",
         py_rating: editing.py_rating?.toString() ?? "",
+        rya_class_id: editing.rya_class_id?.toString() ?? "",
       });
     }
   }, [editing]);
@@ -441,8 +445,10 @@ function BoatClasses() {
         sail_area_sqm: form.sail_area_sqm ? Number(form.sail_area_sqm) : null,
         crew_size: form.crew_size ? Number(form.crew_size) : null,
         hull_type: (form.hull_type || null) as HullType | null,
-        rig_type: form.rig_type || null,
-        py_rating: form.py_rating ? Number(form.py_rating) : null,
+        rig_type: (form.rig_type || null) as RigType | null,
+        spinnaker_type: (form.spinnaker_type || null) as SpinnakerType | null,
+        py_rating: form.py_rating ? Math.round(Number(form.py_rating)) : null,
+        rya_class_id: form.rya_class_id ? Math.round(Number(form.rya_class_id)) : null,
       }),
     onSuccess: async () => {
       setEditing(null);
@@ -469,7 +475,9 @@ function BoatClasses() {
               <th>{t("admin.sailArea")}</th>
               <th>{t("admin.crewSize")}</th>
               <th>{t("admin.rigType")}</th>
+              <th>{t("admin.spinnakerType")}</th>
               <th>{t("admin.pyRating")}</th>
+              <th>{t("admin.ryaClassId")}</th>
               <th />
             </tr>
           </thead>
@@ -483,8 +491,10 @@ function BoatClasses() {
                 <td>{c.loa_m ?? "—"}</td>
                 <td>{c.sail_area_sqm ?? "—"}</td>
                 <td>{c.crew_size ?? "—"}</td>
-                <td>{c.rig_type ?? "—"}</td>
+                <td>{c.rig_type ? t(`admin.${c.rig_type}`) : "—"}</td>
+                <td>{c.spinnaker_type ? t(`admin.spinnaker_${c.spinnaker_type}`) : "—"}</td>
                 <td>{c.py_rating ?? "—"}</td>
+                <td>{c.rya_class_id ?? "—"}</td>
                 <td style={{ display: "flex", gap: "0.4rem" }}>
                   <Button variant="ghost" className="sf-btn--sm" onClick={() => setEditing(c)}>
                     {t("common.edit")}
@@ -605,21 +615,46 @@ function BoatClasses() {
                 <option value="monohull">{t("admin.monohull")}</option>
                 <option value="multihull">{t("admin.multihull")}</option>
               </Select>
-              <InputField
+              <Select
                 label={t("admin.rigType")}
                 id="bce-rig"
                 value={form.rig_type}
                 onChange={(e) => setForm((f) => ({ ...f, rig_type: e.target.value }))}
+              >
+                <option value="">—</option>
+                <option value="sloop">{t("admin.sloop")}</option>
+                <option value="una">{t("admin.una")}</option>
+              </Select>
+            </div>
+            <div className="sf-form__row">
+              <Select
+                label={t("admin.spinnakerType")}
+                id="bce-spinnaker"
+                value={form.spinnaker_type}
+                onChange={(e) => setForm((f) => ({ ...f, spinnaker_type: e.target.value }))}
+              >
+                <option value="">—</option>
+                <option value="none">{t("admin.spinnaker_none")}</option>
+                <option value="asymmetric">{t("admin.spinnaker_asymmetric")}</option>
+                <option value="symmetric">{t("admin.spinnaker_symmetric")}</option>
+              </Select>
+              <InputField
+                label={t("admin.pyRating")}
+                id="bce-py"
+                type="number"
+                step="1"
+                value={form.py_rating}
+                onChange={(e) => setForm((f) => ({ ...f, py_rating: e.target.value }))}
+              />
+              <InputField
+                label={t("admin.ryaClassId")}
+                id="bce-rya"
+                type="number"
+                step="1"
+                value={form.rya_class_id}
+                onChange={(e) => setForm((f) => ({ ...f, rya_class_id: e.target.value }))}
               />
             </div>
-            <InputField
-              label={t("admin.pyRating")}
-              id="bce-py"
-              type="number"
-              step="any"
-              value={form.py_rating}
-              onChange={(e) => setForm((f) => ({ ...f, py_rating: e.target.value }))}
-            />
             <div className="sf-form__actions">
               <Button type="submit" disabled={save.isPending}>
                 {t("common.save")}

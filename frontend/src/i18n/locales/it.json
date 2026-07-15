@@ -385,9 +385,16 @@
     "sailArea": "Superficie velica (m²)",
     "crewSize": "N. equipaggio",
     "hullType": "Tipo scafo",
-    "rigType": "Tipo attrezzatura",
-    "pyRating": "Rating PY",
+    "rigType": "Armo",
+    "pyRating": "Numero PY",
     "monohull": "Monoscafo",
-    "multihull": "Multiscafo"
+    "multihull": "Multiscafo",
+    "sloop": "Sloop",
+    "una": "Armo singolo (Una)",
+    "spinnakerType": "Spinnaker",
+    "spinnaker_none": "Nessuno",
+    "spinnaker_asymmetric": "Asimmetrico",
+    "spinnaker_symmetric": "Simmetrico",
+    "ryaClassId": "ID classe RYA"
   }
 }

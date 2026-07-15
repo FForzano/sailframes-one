@@ -33,5 +33,7 @@ class BoatClassWriteModel(BaseModel):
     sail_area_sqm: Optional[float] = None
     crew_size: Optional[int] = None
     hull_type: Optional[str] = None  # monohull | multihull
-    rig_type: Optional[str] = None
-    py_rating: Optional[float] = None
+    rig_type: Optional[str] = None  # sloop | una (RYA "Rig" column: S/U)
+    spinnaker_type: Optional[str] = None  # none | asymmetric | symmetric (RYA "Spinnaker": 0/A/C)
+    py_rating: Optional[int] = None  # RYA "Number" column
+    rya_class_id: Optional[int] = None  # official RYA Class ID, reference only
