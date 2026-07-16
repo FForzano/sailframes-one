@@ -2,12 +2,19 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Capacitor } from "@capacitor/core";
 import { ApiError } from "@/api/client";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/contexts/ToastContext";
 import App from "./App";
 import "./i18n";
 import "./styles/global.css";
+
+// Dynamic import: keeps @capacitor/status-bar's native calls out of the web
+// bundle's execution path (see contexts/AuthContext.tsx's nativeAuth).
+if (Capacitor.isNativePlatform()) {
+  void import("@/services/nativeStatusBar").then((m) => m.initNativeStatusBar());
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
