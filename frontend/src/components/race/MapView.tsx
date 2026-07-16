@@ -17,6 +17,18 @@ import {
   type TrackPoint,
 } from "./raceModel";
 
+// Track/boat names are user-supplied data (boat.name) inserted into popup
+// innerHTML below — must be escaped, unlike the rest of popupContent which is
+// only translated strings and formatted numbers.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Nearest track point to a click/drag, by plain lat/lon distance (only used
 // to pick "which fix", not a real distance — squared error is fine).
 function nearestPoint(tr: Track, latlng: L.LatLng) {
@@ -39,15 +51,22 @@ export interface MapMark {
   lng: number;
   /** preview marks (suggest/auto-start-line before apply) render dashed */
   preview?: boolean;
-  /** "leg" marks render as a numbered circle (see `seq`); "maneuver" marks
-   * render as a small plain dot in a distinct color. "maneuver-pending" is a
+  /** "leg" marks render as a numbered circle (see `seq`), colored by
+   * `legType`; "maneuver" marks render as a colored pin (colored by
+   * `maneuverType`) with `mark_role`'s first letter. "maneuver-pending" is a
    * manually-added maneuver awaiting the worker's stat computation (see
    * SessionDetailPage's maneuver-edit mode); "maneuver-draft" is the
-   * in-progress start/end pick before it's even submitted. Omit for the
-   * default diamond (race marks: start/windward/gate/finish…). */
+   * in-progress start/end pick before it's even submitted (no type yet, so no
+   * color). Omit for the default diamond (race marks: start/windward/gate/
+   * finish…). */
   kind?: "leg" | "maneuver" | "maneuver-pending" | "maneuver-draft";
   /** Progressive number shown on "leg" marks (matches the LegsTable `#` column). */
   seq?: number;
+  /** Which bordata this "leg" mark is — drives its color (see .sf-markicon--leg-*). */
+  legType?: "upwind" | "downwind" | "reach";
+  /** Which maneuver this "maneuver"/"maneuver-pending" mark is — drives its
+   * color (see .sf-markicon--tack/--gybe/--course_change). */
+  maneuverType?: "tack" | "gybe" | "course_change";
 }
 
 // Imperative Leaflet (not react-leaflet): tracks + marks are drawn once, and
@@ -65,6 +84,7 @@ export function MapView({
   controls,
   placementMode = false,
   onManeuverPlacement,
+  onOpenSession,
 }: {
   tracks: Track[];
   marks?: MapMark[];
@@ -94,6 +114,11 @@ export function MapView({
    * a manual maneuver's start/end by clicking the track twice. */
   placementMode?: boolean;
   onManeuverPlacement?: (point: { lat: number; lon: number; timestamp: number }) => void;
+  /** Click handler for the popup's "more info" button (shown whenever there's
+   * more than one track, e.g. the activity map) — called with that track's
+   * session id (`tr.id`, see buildTrack/buildTracks) so the caller can
+   * navigate to `/diario/sessions/{id}`. */
+  onOpenSession?: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
   const elRef = useRef<HTMLDivElement>(null);
@@ -113,6 +138,8 @@ export function MapView({
   placementModeRef.current = placementMode;
   const onManeuverPlacementRef = useRef(onManeuverPlacement);
   onManeuverPlacementRef.current = onManeuverPlacement;
+  const onOpenSessionRef = useRef(onOpenSession);
+  onOpenSessionRef.current = onOpenSession;
   const { data: windAt } = useWindAt(wind?.lat, wind?.lng, wind?.at);
   // Prefer this session's own determined wind (closest-in-time point) over
   // the live snapshot — it's what the session's own VMG/polar/legs were
@@ -174,6 +201,17 @@ export function MapView({
     }).addTo(map);
     mapRef.current = map;
 
+    // Delegated listener (not bound per-popup) so it survives popupContent's
+    // innerHTML being replaced on every drag tick (see the "drag" handler
+    // below, which calls setContent again on the same popup instance).
+    const container = map.getContainer();
+    const onContainerClick = (e: MouseEvent) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>(".sf-map-popup__info");
+      const sessionId = btn?.dataset.sessionId;
+      if (sessionId) onOpenSessionRef.current?.(sessionId);
+    };
+    container.addEventListener("click", onContainerClick);
+
     const bounds: L.LatLngExpression[] = [];
     for (const tr of tracks) {
       const latlngs = tr.pts.map((p) => [p.lat, p.lon] as [number, number]);
@@ -204,15 +242,51 @@ export function MapView({
       // "Course" here is the true wind angle, not raw compass heading — kept
       // to 0-180° + tack side (like the polar chart) rather than a 0-360°
       // bearing, since TWA is signed (+ = starboard, - = port).
+      // "Open in new"-style arrow (not a plain "i") — reads as "go to the
+      // session's details/analysis", which is what onOpenSession actually does.
+      const moreInfoIcon =
+        `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">` +
+        `<path d="M6 3h7v7M13 3 6.5 9.5M4 5.5v6.5a1 1 0 0 0 1 1h6.5" fill="none" ` +
+        `stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>` +
+        `</svg>`;
       const popupContent = (p: TrackPoint) => {
-        const vp = vmgAt(vmg, p.ms);
+        // Prefer this track's own VMG series (activity/race maps, one per
+        // session) over the map-wide `vmg` prop (session maps, a single track).
+        const vp = vmgAt(tr.vmg ?? vmg, p.ms);
         const course = vp
           ? `${Math.round(Math.abs(vp.twa_deg))}° ${t(vp.twa_deg >= 0 ? "race.starboard" : "race.port")}`
           : "—";
+        // The boat's own photo (first of Boat.photos), when there is one —
+        // large, on the left, spanning the full height of the 4 text lines
+        // beside it (see .sf-map-popup__thumb/-body).
+        const thumb = tr.boatImageUrl
+          ? `<img class="sf-map-popup__thumb" src="${escapeHtml(tr.boatImageUrl)}" alt="" />`
+          : "";
+        // Boat name always shown (a single-track session map still benefits
+        // from the "more info" shortcut below), not just on multi-track
+        // activity/race maps — bolder/larger than the stat rows below it so
+        // it reads as the popup's title, not just another line of data.
+        const boatName = `<span class="sf-map-popup__name">${escapeHtml(tr.name)}</span>`;
+        // Only rendered when the caller actually handles it — otherwise (e.g.
+        // RacePage/RaceManagePanel, which don't pass onOpenSession) it would
+        // be a decorative icon that does nothing when clicked.
+        const moreInfo = onOpenSession
+          ? `<button type="button" class="sf-map-popup__info" data-session-id="${tr.id}" title="${t(
+              "sessions.openSession",
+            )}">${moreInfoIcon}</button>`
+          : "";
+        // Four text lines (name+link, speed, VMG, course) stacked to the
+        // right of the photo, which stretches to match their combined height.
         return (
+          `<div class="sf-map-popup__body">` +
+          thumb +
+          `<div class="sf-map-popup__col">` +
+          `<div class="sf-map-popup__row">${boatName}${moreInfo}</div>` +
           `<strong>${fmtKnots(p.sog)}</strong>` +
           `<span>${t("sessions.vmg")} ${vp ? fmtKnots(vp.vmg_kts) : "—"}</span>` +
-          `<span>${t("race.course")} ${course}</span>`
+          `<span>${t("race.course")} ${course}</span>` +
+          `</div>` +
+          `</div>`
         );
       };
 
@@ -278,6 +352,7 @@ export function MapView({
     else map.setView([20, 0], 2); // neutral world view when there is no data
 
     return () => {
+      container.removeEventListener("click", onContainerClick);
       map.remove();
       mapRef.current = null;
       markersRef.current = {};
@@ -286,7 +361,7 @@ export function MapView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `marks` intentionally
     // excluded: only used above for the one-time initial bounds fit.
-  }, [tracks, vmg, t]);
+  }, [tracks, vmg, t, !!onOpenSession]);
 
   // Marks (legs/maneuvers/race marks) on their own layer group, redrawn
   // whenever they change without touching the map/tiles/tracks above.
@@ -295,20 +370,46 @@ export function MapView({
     if (!map) return;
     const layer = L.layerGroup().addTo(map);
     for (const mk of marks) {
-      const icon =
-        mk.kind === "leg"
-          ? L.divIcon({ className: "sf-markicon sf-markicon--leg", html: `${mk.seq ?? ""}`, iconSize: [18, 18] })
-          : mk.kind === "maneuver"
-            ? L.divIcon({ className: "sf-markicon sf-markicon--maneuver", html: "", iconSize: [10, 10] })
-            : mk.kind === "maneuver-pending"
-              ? L.divIcon({ className: "sf-markicon sf-markicon--maneuver sf-markicon--pending", html: "", iconSize: [10, 10] })
-              : mk.kind === "maneuver-draft"
-                ? L.divIcon({ className: "sf-markicon sf-markicon--preview", html: "◆", iconSize: [12, 12] })
-                : L.divIcon({
-                    className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
-                    html: "◆",
-                    iconSize: [16, 16],
-                  });
+      let icon: L.DivIcon;
+      if (mk.kind === "leg") {
+        // Colored by point-of-sail (bordata) — see .sf-markicon--leg-* below;
+        // falls back to the base rule's color if legType is somehow absent.
+        const typeClass = mk.legType ? ` sf-markicon--leg-${mk.legType}` : "";
+        icon = L.divIcon({
+          className: `sf-markicon sf-markicon--leg${typeClass}`,
+          html: `${mk.seq ?? ""}`,
+          iconSize: [18, 18],
+        });
+      } else if (mk.kind === "maneuver" || mk.kind === "maneuver-pending") {
+        // A colored pin (circle + pointing tail) instead of a plain dot, so
+        // maneuver type reads at a glance — color (see .sf-markicon--tack/
+        // --gybe/--course_change) plus the type's first letter (from the
+        // already-translated mark_role, so it's correctly localized).
+        // iconSize/iconAnchor both use the FULL 26×33 box (26px circle + 7px
+        // tail, see .sf-markicon--maneuver-circle/-tail) — anchor at its
+        // bottom-center, the standard Leaflet pin convention. The earlier
+        // version anchored past its own (circle-only) iconSize, which is
+        // what put the tip in the wrong place.
+        const typeClass = mk.maneuverType ? ` sf-markicon--${mk.maneuverType}` : "";
+        const pendingClass = mk.kind === "maneuver-pending" ? " sf-markicon--pending" : "";
+        icon = L.divIcon({
+          className: `sf-markicon sf-markicon--maneuver${typeClass}${pendingClass}`,
+          html:
+            `<span class="sf-markicon--maneuver-circle">` +
+            `<span>${mk.mark_role.charAt(0).toUpperCase()}</span></span>` +
+            `<span class="sf-markicon--maneuver-tail"></span>`,
+          iconSize: [26, 33],
+          iconAnchor: [13, 33],
+        });
+      } else if (mk.kind === "maneuver-draft") {
+        icon = L.divIcon({ className: "sf-markicon sf-markicon--preview", html: "◆", iconSize: [12, 12] });
+      } else {
+        icon = L.divIcon({
+          className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
+          html: "◆",
+          iconSize: [16, 16],
+        });
+      }
       L.marker([mk.lat, mk.lng], { icon }).bindTooltip(mk.mark_role).addTo(layer);
     }
     marksLayerRef.current = layer;

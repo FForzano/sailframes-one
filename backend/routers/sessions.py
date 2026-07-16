@@ -10,7 +10,7 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 
 from ..auth import current_user, require_user, session_visible_to, verify_csrf
 from ..schemas import (
@@ -18,10 +18,11 @@ from ..schemas import (
     ManeuverCreateModel,
     ManeuverRejectionModel,
     SessionCrewModel,
+    SessionTrimModel,
     SessionWriteModel,
 )
-from ..services import ingestion, media
-from ._common import blob, repos, with_user
+from ..services import gpx, ingestion, media
+from ._common import blob, load_json_or_404, repos, with_user
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
@@ -142,9 +143,11 @@ def _start_reanalysis_job(upload) -> None:
     repos.ingest.set_reanalysis_status(upload.id, "running", error=None)
 
 
-def _run_reanalyze(upload_id: uuid.UUID, prefix: str) -> None:
+def _run_reanalyze(upload_id: uuid.UUID, prefix: str, trim_start: Optional[float] = None,
+                   trim_end: Optional[float] = None) -> None:
     try:
-        ingestion.dispatch_analysis(ingestion.bucket_name(), prefix)
+        ingestion.dispatch_analysis(ingestion.bucket_name(), prefix,
+                                    trim_start=trim_start, trim_end=trim_end)
         repos.ingest.set_reanalysis_status(upload_id, None)
     except Exception as exc:
         logger.warning("reanalyze job failed for upload %s", upload_id, exc_info=True)
@@ -179,7 +182,35 @@ def reanalyze_session(session_id: uuid.UUID, request: Request, background_tasks:
     upload = _latest_upload_or_404(session_id)
     _start_reanalysis_job(upload)
     prefix = ingestion.processed_prefix(upload.id)
-    background_tasks.add_task(_run_reanalyze, upload.id, prefix)
+    background_tasks.add_task(_run_reanalyze, upload.id, prefix,
+                              session.trim_start_time, session.trim_end_time)
+    return {"ok": True, "session_upload_id": upload.id, "status": "running"}
+
+
+@router.patch("/{session_id}/trim", status_code=202)
+def set_session_trim(session_id: uuid.UUID, body: SessionTrimModel, request: Request,
+                     background_tasks: BackgroundTasks):
+    """Set (or clear, passing both as null) the session's reversible
+    track-trim bounds and immediately re-run analysis with them applied —
+    same edit-level permission and background-job plumbing as ``reanalyze``.
+    Raw ``gps.json`` is never touched; the worker just slices the parsed
+    track to this window before running the pipeline (see
+    ``workers/process_upload/analyzer.py::_slice_by_time``), so the trim is
+    always adjustable later, not a destructive crop."""
+    verify_csrf(request)
+    user = require_user(request)
+    session = _require_session(session_id)
+    if not _can_edit(session, user):
+        raise HTTPException(403, "Not allowed")
+    if (body.trim_start_time is not None and body.trim_end_time is not None
+            and body.trim_end_time <= body.trim_start_time):
+        raise HTTPException(422, "trim_end_time must be after trim_start_time")
+    session = repos.sessions.update(session_id, body.model_dump())
+    upload = _latest_upload_or_404(session_id)
+    _start_reanalysis_job(upload)
+    prefix = ingestion.processed_prefix(upload.id)
+    background_tasks.add_task(_run_reanalyze, upload.id, prefix,
+                              session.trim_start_time, session.trim_end_time)
     return {"ok": True, "session_upload_id": upload.id, "status": "running"}
 
 
@@ -229,6 +260,26 @@ def list_streams(session_id: uuid.UUID, request: Request):
         d["download_url"] = blob.download_ref(st.data_ref) if st.data_ref else None
         out.append(d)
     return out
+
+
+@router.get("/{session_id}/gpx")
+def download_gpx(session_id: uuid.UUID, request: Request):
+    """Export this session's processed GPS track as a GPX file — always
+    regenerated from ``gps.json`` (see ``services/gpx.py::build_gpx``), never
+    the original raw upload bytes, so it's uniform whether the session came
+    from a device or a manual GPX/CSV import."""
+    user = current_user(request)
+    _require_visible(session_id, user)
+    streams = repos.ingest.list_streams_for_session(session_id)
+    gps_stream = next((s for s in streams if s.sensor_type == "gps" and s.data_ref), None)
+    if gps_stream is None:
+        raise HTTPException(404, "No GPS track for this session")
+    points = load_json_or_404(gps_stream.data_ref)
+    return Response(
+        content=gpx.build_gpx(points),
+        media_type="application/gpx+xml",
+        headers={"Content-Disposition": f'attachment; filename="session-{session_id}.gpx"'},
+    )
 
 
 @router.get("/{session_id}/stats")

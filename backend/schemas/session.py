@@ -32,3 +32,11 @@ class ManeuverCreateModel(BaseModel):
     maneuver_type: Literal["tack", "gybe", "course_change"]
     start_time: float
     end_time: float
+
+
+class SessionTrimModel(BaseModel):
+    """Both bounds are required (not exclude_unset) so the client always
+    states its intent explicitly — including `null` to clear an existing
+    trim — rather than relying on omission."""
+    trim_start_time: Optional[float] = None
+    trim_end_time: Optional[float] = None

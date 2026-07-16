@@ -25,7 +25,8 @@ from ...db.models import (
     SessionVideoORM,
 )
 
-_FIELDS = ("activity_id", "boat_id", "started_at", "ended_at", "status")
+_FIELDS = ("activity_id", "boat_id", "started_at", "ended_at", "status",
+           "trim_start_time", "trim_end_time")
 _STATS_FIELDS = ("distance_m", "avg_speed_kts", "max_speed_kts", "duration_s",
                  "avg_polar_pct", "max_polar_pct", "computed_at")
 # Fields copied verbatim from a fresh worker payload row when inserting a

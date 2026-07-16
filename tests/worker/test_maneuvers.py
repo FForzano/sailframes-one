@@ -19,6 +19,7 @@ from processing.maneuver_classification import (
     _ml_classifier,
     classify_maneuver,
     geometric_classifier,
+    probabilistic_classifier,
 )
 from processing.maneuver_features import (
     CORE_FEATURES,
@@ -58,7 +59,10 @@ def build_imu(gps):
                        pitch_deg=0.0, heel_deg=12.0) for p in gps]
 
 
-# Frozen output of the PRE-refactor detect_maneuvers (excluding `features`).
+# Frozen output of detect_maneuvers with the active `probabilistic` classifier
+# (excluding the additive `features` field). The set is unchanged from the
+# previous detector — 3 tacks + 2 gybes — only the first gybe's refined
+# boundaries shifted ~1s under the wind-agnostic turn-pivot logic.
 GOLDEN = [
     {"maneuver_type": "tack", "start_time": 37.0, "end_time": 42.0, "duration_sec": 5.0,
      "speed_loss_kts": 0.0, "speed_before_kts": 6.0, "speed_min_kts": 6.0,
@@ -75,11 +79,11 @@ GOLDEN = [
      "speed_after_kts": 6.0, "recovery_time_sec": 1.0, "heading_change_deg": -90.0,
      "distance_lost_m": None,
      "start_lat": 45.001308147545195, "start_lon": 9.001308147545195},
-    {"maneuver_type": "gybe", "start_time": 158.0, "end_time": 161.0, "duration_sec": 3.0,
+    {"maneuver_type": "gybe", "start_time": 157.0, "end_time": 161.0, "duration_sec": 4.0,
      "speed_loss_kts": 0.0, "speed_before_kts": 6.0, "speed_min_kts": 6.0,
-     "speed_after_kts": 6.5, "recovery_time_sec": 1.0, "heading_change_deg": -155.2,
+     "speed_after_kts": 6.5, "recovery_time_sec": 1.0, "heading_change_deg": -160.1,
      "distance_lost_m": None,
-     "start_lat": 45.001343502884254, "start_lon": 8.998656497115746},
+     "start_lat": 45.001308147545195, "start_lon": 8.998691852454805},
     {"maneuver_type": "gybe", "start_time": 197.0, "end_time": 202.0, "duration_sec": 5.0,
      "speed_loss_kts": 0.0, "speed_before_kts": 6.5, "speed_min_kts": 6.5,
      "speed_after_kts": 6.5, "recovery_time_sec": 1.0, "heading_change_deg": 60.0,
@@ -151,9 +155,10 @@ def test_max_heel_none_without_imu():
 # --------------------------------------------------------------------------- #
 
 def test_registry_shape():
-    assert ACTIVE_CLASSIFIER == "geometric"
-    assert set(CLASSIFIERS) == {"geometric"}
-    assert CLASSIFIERS[ACTIVE_CLASSIFIER] is geometric_classifier
+    assert ACTIVE_CLASSIFIER == "probabilistic"
+    assert set(CLASSIFIERS) == {"probabilistic", "geometric"}
+    assert CLASSIFIERS["geometric"] is geometric_classifier
+    assert CLASSIFIERS[ACTIVE_CLASSIFIER] is probabilistic_classifier
 
 
 def test_geometric_classifier_labels():
@@ -161,10 +166,98 @@ def test_geometric_classifier_labels():
                              features={"rel_before": 45.0, "rel_after": -45.0})
     gybe = ManeuverCandidate(0, 5, 5, 160, 6, 6, 6, 1,
                              features={"rel_before": 150.0, "rel_after": -150.0})
-    assert classify_maneuver(tack) == ManeuverType.TACK
-    assert classify_maneuver(gybe) == ManeuverType.GYBE
+    # geometric_classifier is no longer active, but stays registered for
+    # rollback/comparison — assert its rule directly.
+    assert geometric_classifier(tack) == ManeuverType.TACK
+    assert geometric_classifier(gybe) == ManeuverType.GYBE
     # never rejects or emits the third class
     assert geometric_classifier(tack) is not None
+
+
+# --------------------------------------------------------------------------- #
+# Probabilistic classifier (active): reject + tack/gybe/course_change
+# --------------------------------------------------------------------------- #
+
+def _pcand(heading_change, rel_before, rel_after, speed_before=6.0, speed_min=6.0,
+           turn_rate=20.0, had_wind_axis=1.0):
+    """A ManeuverCandidate carrying the features the probabilistic classifier
+    reads (rel_before/after + optionals). heading_change_deg is the signed turn."""
+    return ManeuverCandidate(
+        start_time=0, end_time=5, duration_sec=5, heading_change_deg=heading_change,
+        speed_before_kts=speed_before, speed_min_kts=speed_min,
+        speed_after_kts=speed_before, recovery_time_sec=1,
+        features={"rel_before": rel_before, "rel_after": rel_after,
+                  "avg_abs_rel": (abs(rel_before) + abs(rel_after)) / 2.0,
+                  "had_wind_axis": had_wind_axis, "max_abs_turn_rate": turn_rate},
+    )
+
+
+def test_probabilistic_labels_tack_and_gybe():
+    tack = _pcand(-90, 45, -45)     # crosses near head-to-wind, wide rotation
+    gybe = _pcand(160, 150, -150)   # crosses dead-downwind
+    assert probabilistic_classifier(tack) == ManeuverType.TACK
+    assert probabilistic_classifier(gybe) == ManeuverType.GYBE
+
+
+def test_probabilistic_rejects_weak_turn():
+    # A tiny same-tack heading nudge with no wind crossing is not a maneuver.
+    assert probabilistic_classifier(_pcand(8, 40, 48, turn_rate=1.0)) is None
+
+
+def test_probabilistic_tack_needs_wider_turn_than_gybe():
+    # A 30° cross: below the tack floor (40°) but a valid modest gybe — exactly
+    # the "variazione piccola: improbabile virata, possibile abbattuta" asymmetry.
+    assert probabilistic_classifier(_pcand(30, 20, -10)) is None            # tack-like, too narrow
+    assert probabilistic_classifier(_pcand(30, 160, -170)) == ManeuverType.GYBE
+
+
+def test_probabilistic_course_change_same_tack():
+    # Bear away 60° without crossing the wind (rel stays positive) → course change.
+    assert probabilistic_classifier(_pcand(60, 40, 100)) == ManeuverType.COURSE_CHANGE
+
+
+def test_probabilistic_writes_confidence_and_scores():
+    cand = _pcand(-90, 45, -45)
+    probabilistic_classifier(cand)
+    assert 0.0 <= cand.features["maneuver_confidence"] <= 1.0
+    assert set(cand.features["type_scores"]) == {"tack", "gybe", "course_change"}
+
+
+def test_gradual_mark_rounding_detected_as_course_change():
+    """Regression: a real mark rounding (close-hauled -> reach, same tack) is a
+    SLOW, sustained turn (~2 deg/s over ~25s), not a snap tack/gybe, and it
+    typically GAINS speed (a reach is faster than close-hauled) rather than
+    losing it. Both the turn-rate floor and the speed-evidence direction must
+    account for this or the rounding is invisible end-to-end."""
+    gps = []
+    t = 0.0
+    for i in range(40):
+        gps.append(GpsPoint(timestamp=t + i, lat=45.0 + 1e-5 * i, lon=9.0 + 1e-5 * i,
+                            speed_kts=5.8, heading_deg=40.0))
+    t += 40
+    for i in range(25):
+        h = 40.0 + 60.0 * i / 24
+        s = 5.8 + 1.2 * i / 24
+        gps.append(GpsPoint(timestamp=t + i, lat=45.0 + 1e-5 * i, lon=9.0 + 1e-5 * i,
+                            speed_kts=s, heading_deg=h % 360))
+    t += 25
+    for i in range(40):
+        gps.append(GpsPoint(timestamp=t + i, lat=45.0 + 1e-5 * i, lon=9.0 + 1e-5 * i,
+                            speed_kts=7.0, heading_deg=100.0))
+
+    maneuvers = detect_maneuvers(gps, imu=None, twd_deg=0.0)
+    assert len(maneuvers) == 1
+    assert maneuvers[0].maneuver_type == ManeuverType.COURSE_CHANGE
+
+
+def test_stage1_generates_candidates_without_wind_axis():
+    """Stage 1 is wind-agnostic: a sustained turn yields a candidate even with
+    no wind (twd_deg=None → synthetic axis), and it carries rel_before/after."""
+    gps = build_track()
+    candidates = _detect_candidates(gps, build_imu(gps), None)
+    assert len(candidates) == 5
+    for c in candidates:
+        assert c.features["rel_before"] is not None
 
 
 # --------------------------------------------------------------------------- #

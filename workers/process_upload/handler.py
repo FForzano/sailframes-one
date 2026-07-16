@@ -72,10 +72,13 @@ def lambda_handler(event, context):
     for record in event.get('Records', []):
         if 'analyze' in record:
             bucket = record.get('bucket', DATA_BUCKET)
-            prefix = record['analyze']['prefix']
+            spec = record['analyze']
+            prefix = spec['prefix']
             logger.info(f"Analyzing {bucket}/{prefix}")
             try:
-                process_analyze_prefix(bucket, prefix)
+                process_analyze_prefix(bucket, prefix,
+                                       trim_start=spec.get('trim_start'),
+                                       trim_end=spec.get('trim_end'))
             except Exception as e:
                 logger.error(f"Failed to analyze {prefix}: {e}", exc_info=True)
                 errors.append({'key': prefix, 'error': str(e)})
@@ -122,10 +125,16 @@ def lambda_handler(event, context):
     return {'statusCode': 200, 'body': 'OK'}
 
 
-def process_analyze_prefix(bucket: str, prefix: str):
+def process_analyze_prefix(bucket: str, prefix: str, trim_start=None, trim_end=None):
     """Run the analysis pipeline against a processed upload prefix
     (``gps.json`` + optional ``imu``/``wind``/``pressure.json``) and write
     ``analysis.json`` back next to it.
+
+    ``trim_start``/``trim_end`` (unix-epoch seconds, from the session's
+    reversible track-trim bounds — see ``backend/routers/sessions.py::
+    set_session_trim``) are forwarded to ``analyze_session`` unchanged; when
+    both are ``None`` (the common case) the full track is analyzed exactly as
+    before.
 
     Dispatched by the backend after streams are registered (manual imports,
     or re-analysis of a device upload) — everything downstream of "we have a
@@ -148,7 +157,7 @@ def process_analyze_prefix(bucket: str, prefix: str):
                 continue  # optional sensor file not present — analyzer tolerates missing files
             (tmp_path / name).write_bytes(obj['Body'].read())
 
-        result = analyze_session(tmp_path)
+        result = analyze_session(tmp_path, trim_start=trim_start, trim_end=trim_end)
 
         # Track-preview thumbnail for the sessions list — rendered once here
         # (not on every list load) and stored next to the rest of the

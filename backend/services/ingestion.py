@@ -104,8 +104,16 @@ def dispatch_csv_key(bucket: str, key: str) -> None:
     requests.post(url, json={"Records": [record]}, timeout=_worker_timeout())
 
 
-def dispatch_analysis(bucket: str, prefix: str) -> None:
+def dispatch_analysis(bucket: str, prefix: str, trim_start: Optional[float] = None,
+                      trim_end: Optional[float] = None) -> None:
     """Ask the worker to (re)build analysis.json for a processed prefix.
+
+    ``trim_start``/``trim_end`` (unix-epoch seconds, from ``sessions.
+    trim_start_time``/``trim_end_time`` — see ``routers/sessions.py::
+    set_session_trim``) are forwarded only when set, so the worker slices the
+    track to that window before analyzing (``workers/process_upload/
+    analyzer.py::_slice_by_time``); omitting them (the common case, no trim)
+    analyzes the full track exactly as before.
 
     Best-effort: streams are already registered by this point, and this is
     reachable directly from a user click (``POST /sessions/{id}/reanalyze``),
@@ -113,7 +121,12 @@ def dispatch_analysis(bucket: str, prefix: str) -> None:
     url = os.environ.get("PROCESS_UPLOAD_URL")
     if not url:
         return
-    record = {"analyze": {"prefix": prefix}, "bucket": bucket}
+    analyze: dict = {"prefix": prefix}
+    if trim_start is not None:
+        analyze["trim_start"] = trim_start
+    if trim_end is not None:
+        analyze["trim_end"] = trim_end
+    record = {"analyze": analyze, "bucket": bucket}
     try:
         requests.post(url, json={"Records": [record]}, timeout=_worker_timeout())
     except requests.RequestException:
@@ -312,5 +325,6 @@ def refresh_wind_cache(session_id: uuid.UUID) -> str:
     waypoints = sample_wind_waypoints(points)
     end = session.ended_at or session.started_at
     write_wind_cache(prefix, waypoints, session.started_at, end)
-    dispatch_analysis(bucket_name(), prefix)
+    dispatch_analysis(bucket_name(), prefix,
+                      trim_start=session.trim_start_time, trim_end=session.trim_end_time)
     return prefix

@@ -5,7 +5,9 @@ import { CSRF_COOKIE, CSRF_HEADER, readCookie } from "./csrf";
 // `sf_refresh` cookies, we only add the CSRF header (read from the readable
 // `sf_csrf` cookie) on mutations and retry once through /auth/refresh on 401.
 
-const BASE = import.meta.env.VITE_API_BASE ?? "/api";
+// Exported for the rare case a plain browser navigation needs the API URL
+// directly (e.g. a GPX file download) instead of going through `request()`.
+export const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 // Dispatched when refresh fails — AuthContext listens and drops to anonymous.
 export const AUTH_EXPIRED_EVENT = "sf:auth-expired";
