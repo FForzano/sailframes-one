@@ -1,5 +1,17 @@
-import { api } from "@/api/client";
+import { api, setAccessToken } from "@/api/client";
 import type { Capabilities, MyMemberships, User } from "@/types";
+
+/** Shape of /auth/login and /auth/refresh responses. `refresh_token` exists
+ * for native clients (persisted into secure storage by `services/nativeAuth`)
+ * — the web app must never read or store it, only the in-memory access token
+ * set below. */
+export interface LoginResponse {
+  user: User;
+  csrf_token: string;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
 
 export const authService = {
   register: (body: {
@@ -10,10 +22,16 @@ export const authService = {
     terms_and_conditions: boolean;
   }) => api.post<User>("/auth/register", body),
 
-  login: (email: string, password: string) =>
-    api.post<{ user: User; csrf_token: string }>("/auth/login", { email, password }),
+  login: async (email: string, password: string) => {
+    const res = await api.post<LoginResponse>("/auth/login", { email, password });
+    setAccessToken(res.access_token);
+    return res;
+  },
 
-  logout: () => api.post("/auth/logout"),
+  /** `refreshToken` is native-only (see services/nativeAuth) — web relies on
+   * the httpOnly cookie instead and omits it. */
+  logout: (refreshToken?: string) =>
+    api.post("/auth/logout", refreshToken ? { refresh_token: refreshToken } : undefined),
 
   /** Identity + roles/permissions/memberships in one call (embeds `user`). */
   capabilities: () => api.get<Capabilities>("/auth/capabilities"),

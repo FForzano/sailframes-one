@@ -1,9 +1,14 @@
 import { CSRF_COOKIE, CSRF_HEADER, readCookie } from "./csrf";
 
-// Thin fetch wrapper for the SailFrames cookie-auth API. Unlike a Bearer-token
-// setup there is NO token in JS: the browser holds httpOnly `sf_access` /
-// `sf_refresh` cookies, we only add the CSRF header (read from the readable
-// `sf_csrf` cookie) on mutations and retry once through /auth/refresh on 401.
+// Thin fetch wrapper for the SailFrames API. The access token is a JWT held
+// in memory only (never localStorage, to limit XSS blast radius) and sent as
+// `Authorization: Bearer` on every request — this is what makes cross-origin
+// native (Capacitor) clients work, since their WebView cookie jar can't be
+// relied on. The httpOnly `sf_refresh` cookie still backs the silent-refresh
+// flow for web (native refreshes via its own token instead, see
+// `services/nativeAuth.ts`); the CSRF header (read from the readable
+// `sf_csrf` cookie) is still sent on mutations but the backend only enforces
+// it for cookie-authenticated requests, so it's a no-op once Bearer is live.
 
 // Exported for the rare case a plain browser navigation needs the API URL
 // directly (e.g. a GPX file download) instead of going through `request()`.
@@ -11,6 +16,34 @@ export const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 // Dispatched when refresh fails — AuthContext listens and drops to anonymous.
 export const AUTH_EXPIRED_EVENT = "sf:auth-expired";
+
+// In-memory only — a hard page reload loses this and the first authenticated
+// call 401s, which triggers the existing refresh-and-retry path below to
+// repopulate it from the httpOnly refresh cookie (web) or stored native
+// refresh token.
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null): void {
+  accessToken = token;
+}
+
+// Native has no cookie jar to carry the refresh token, so it must send it
+// explicitly in the /auth/refresh body. `services/nativeAuth.ts` registers
+// this provider on native platforms only; web never sets it, so `doRefresh`
+// falls back to the httpOnly cookie exactly as before.
+let refreshTokenProvider: (() => string | null) | null = null;
+
+export function setRefreshTokenProvider(fn: (() => string | null) | null): void {
+  refreshTokenProvider = fn;
+}
+
+// Refresh rotates the opaque refresh token every time — native must
+// re-persist the new one or the next refresh will fail (reuse detection).
+let onNativeRefreshRotated: ((refreshToken: string) => void) | null = null;
+
+export function setNativeRefreshSink(fn: ((refreshToken: string) => void) | null): void {
+  onNativeRefreshRotated = fn;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -44,13 +77,25 @@ let refreshing: Promise<boolean> | null = null;
 // A 401 on these is expected (bad creds) or would loop the refresh itself.
 const NO_REFRESH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh"];
 
+interface RefreshResponse {
+  access_token: string;
+  refresh_token: string;
+}
+
 async function doRefresh(): Promise<boolean> {
   try {
+    const nativeRefreshToken = refreshTokenProvider?.() ?? null;
     const res = await fetch(`${BASE}/auth/refresh`, {
       method: "POST",
       credentials: "include",
+      headers: nativeRefreshToken ? { "Content-Type": "application/json" } : undefined,
+      body: nativeRefreshToken ? JSON.stringify({ refresh_token: nativeRefreshToken }) : undefined,
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const body = (await res.json()) as RefreshResponse;
+    setAccessToken(body.access_token);
+    if (nativeRefreshToken) onNativeRefreshRotated?.(body.refresh_token);
+    return true;
   } catch {
     return false;
   }
@@ -81,6 +126,7 @@ export async function request<T = unknown>(
     body = JSON.stringify(opts.body);
   }
   if (isMutation) headers[CSRF_HEADER] = readCookie(CSRF_COOKIE) ?? "";
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
   const res = await fetch(`${BASE}${path}`, {
     method,

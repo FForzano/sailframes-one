@@ -21,8 +21,12 @@ echo "[init] creating bucket $BUCKET..."
 mc mb --ignore-existing "local/$BUCKET"
 
 # Anonymous access policy — read-only, OTA surface only:
-#   - anonymous GET to config/*    (firmware reads config/{boat}/latest.json)
-#   - anonymous GET to firmware/*  (OTA manifest + binaries)
+#   - anonymous GET to config/*      (firmware reads config/{boat}/latest.json)
+#   - anonymous GET to firmware/*    (device firmware OTA manifest + binaries)
+#   - anonymous GET to app-updates/* (native app JS-bundle OTA — see
+#     ota-service/, which mints its own presigned URLs but reads the shared
+#     manifest.json directly; kept anonymous-read for parity/manual debugging)
+OTA_PREFIX="${SAILFRAMES_OTA_PREFIX:-app-updates}"
 echo "[init] applying anonymous bucket policy..."
 cat > /tmp/policy.json <<EOF
 {
@@ -35,7 +39,8 @@ cat > /tmp/policy.json <<EOF
       "Action": ["s3:GetObject"],
       "Resource": [
         "arn:aws:s3:::$BUCKET/config/*",
-        "arn:aws:s3:::$BUCKET/firmware/*"
+        "arn:aws:s3:::$BUCKET/firmware/*",
+        "arn:aws:s3:::$BUCKET/$OTA_PREFIX/*"
       ]
     }
   ]

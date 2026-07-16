@@ -1,10 +1,17 @@
 name: Docker publish
 
-# Builds the four application images and pushes them to the single Docker
-# Hub repo fforzano99/xgsail, tagged <service>-latest and
+# Builds the application images and pushes them to the single Docker Hub
+# repo fforzano99/xgsail, tagged <service>-latest and
 # <service>-sha-<short-sha>. Mirrors scripts/build-images.sh's
 # context/dockerfile pairs. Watchtower on the VM polls *-latest and
 # redeploys on its own — this workflow only publishes.
+#
+# ota-service is a container too, so it rides the same build-and-push +
+# Watchtower flow as backend/frontend/workers. The native app's JS bundle
+# is a different kind of artifact (not a container Watchtower can restart
+# into existence on a phone) — deploy-ota publishes it separately via
+# scripts/deploy-ota.sh whenever frontend/ changes, so the already-installed
+# native app self-updates on next launch. See docs/ota-updates.md.
 
 on:
   push:
@@ -15,6 +22,19 @@ env:
   DOCKERHUB_REPO: fforzano99/xgsail
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -62,6 +82,9 @@ jobs:
           - service: video
             context: ./workers/video
             dockerfile: workers/video/Dockerfile
+          - service: ota-service
+            context: .
+            dockerfile: ota-service/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -86,3 +109,38 @@ jobs:
             ${{ env.DOCKERHUB_REPO }}:${{ matrix.service }}-sha-${{ steps.sha.outputs.short }}
           cache-from: type=registry,ref=${{ env.DOCKERHUB_REPO }}:${{ matrix.service }}-latest
           cache-to: type=inline
+
+  # Publishes the native app's JS bundle via scripts/deploy-ota.sh whenever
+  # frontend/ changes on main. Independent of the `publish` job above: this
+  # doesn't touch a container image, it uploads straight to the production
+  # MinIO (over its public endpoint) so ota-service can serve the new
+  # manifest immediately — no Watchtower/redeploy involved on this path.
+  deploy-ota:
+    needs: [changes, test]
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install MinIO client (mc)
+        run: |
+          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+          chmod +x /usr/local/bin/mc
+
+      - name: Publish OTA update
+        env:
+          OTA_API_BASE: ${{ secrets.OTA_API_BASE }}
+          SAILFRAMES_S3_ENDPOINT: ${{ secrets.SAILFRAMES_S3_PUBLIC_ENDPOINT }}
+          MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+          SAILFRAMES_BUCKET: ${{ secrets.SAILFRAMES_BUCKET }}
+        run: scripts/deploy-ota.sh

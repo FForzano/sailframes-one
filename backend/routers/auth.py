@@ -1,21 +1,32 @@
 """Native auth endpoints (``/api/auth/*``).
 
-Email/password login issuing a short-lived JWT access cookie + a rotating,
-reuse-detected refresh cookie. Backend-agnostic: users and refresh tokens are
+Email/password login issuing a short-lived JWT access token + a rotating,
+reuse-detected refresh token. Backend-agnostic: users and refresh tokens are
 persisted through the repository layer, so this works on both the object and
 Postgres metadata backends.
 
-Cookies set:
-- ``sf_access``  — httpOnly JWT, path ``/``.
-- ``sf_refresh`` — httpOnly opaque token, path ``/api/auth`` (reaches refresh +
-  logout only).
-- ``sf_csrf``    — readable by JS, mirrored back in ``X-SF-CSRF`` for the
-  double-submit CSRF check on mutations.
+Two transports for the same tokens, so both web and native (Capacitor)
+clients are covered:
+- **Web**: cookies. ``sf_access`` (httpOnly JWT, path ``/``), ``sf_refresh``
+  (httpOnly opaque token, path ``/api/auth``), ``sf_csrf`` (readable by JS,
+  mirrored back in ``X-SF-CSRF`` for the double-submit CSRF check on
+  mutations). Same-origin only — this is what makes CSRF meaningful.
+- **Native**: response body. ``access_token`` is sent as
+  ``Authorization: Bearer`` on every request; ``refresh_token`` is stored
+  client-side (secure storage) and sent back in the ``/refresh``/``/logout``
+  body, since a cross-origin WebView cookie jar isn't reliable. Bearer
+  requests never carry the access cookie, so CSRF never applies to them
+  (see ``verify_csrf``).
+
+Every login/refresh response includes both the cookies AND the token
+fields — cookies for web, body fields for native (harmlessly ignored by
+whichever client doesn't need them).
 """
 
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -42,7 +53,7 @@ from ..auth.tokens import (
     refresh_expiry,
     refresh_max_age,
 )
-from ..schemas import ChangePasswordModel, LoginModel, RegisterModel
+from ..schemas import ChangePasswordModel, LoginModel, RefreshModel, RegisterModel
 from ._common import repos
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -52,9 +63,24 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # --- cookie helpers -------------------------------------------------------
 
-def _set_auth_cookies(response: Response, user_id: uuid.UUID) -> str:
-    """Issue access+refresh+csrf cookies and persist the refresh token row.
-    Returns the csrf token (also returned in the body for SPA convenience)."""
+class _IssuedTokens:
+    """Access + refresh + csrf issued together — cookies are set as a side
+    effect on ``response``, and the raw values are also returned so the
+    router can put ``access_token``/``refresh_token`` in the JSON body for
+    native (Bearer) clients."""
+
+    __slots__ = ("csrf", "access", "refresh")
+
+    def __init__(self, csrf: str, access: str, refresh: str):
+        self.csrf = csrf
+        self.access = access
+        self.refresh = refresh
+
+
+def _set_auth_cookies(response: Response, user_id: uuid.UUID) -> _IssuedTokens:
+    """Issue access+refresh+csrf, set them as cookies (web), and persist the
+    refresh token row. Also returns the raw values for the JSON body
+    (native)."""
     secure = cookie_secure()
 
     access = issue_access_token(user_id)
@@ -81,12 +107,12 @@ def _set_auth_cookies(response: Response, user_id: uuid.UUID) -> str:
         CSRF_COOKIE, csrf, httponly=False, secure=secure,
         samesite="lax", max_age=refresh_max_age(), path="/",
     )
-    return csrf
+    return _IssuedTokens(csrf, access, refresh)
 
 
 def _rotate_refresh(
     response: Response, user_id: uuid.UUID, family_id: str, prev_id: uuid.UUID
-) -> str:
+) -> _IssuedTokens:
     """Issue a fresh access + rotated refresh in the same family."""
     secure = cookie_secure()
 
@@ -115,7 +141,7 @@ def _rotate_refresh(
         CSRF_COOKIE, csrf, httponly=False, secure=secure,
         samesite="lax", max_age=refresh_max_age(), path="/",
     )
-    return csrf
+    return _IssuedTokens(csrf, access, refresh)
 
 
 def _clear_auth_cookies(response: Response) -> None:
@@ -154,13 +180,22 @@ def login(body: LoginModel, response: Response):
     ok = verify_password(body.password, stored or "")
     if not stored or user is None or not user.is_active or not ok:
         raise HTTPException(401, "Invalid credentials")
-    csrf = _set_auth_cookies(response, user.id)
-    return {"user": user.to_dict(), "csrf_token": csrf}
+    issued = _set_auth_cookies(response, user.id)
+    return {
+        "user": user.to_dict(),
+        "csrf_token": issued.csrf,
+        "access_token": issued.access,
+        "refresh_token": issued.refresh,
+        "expires_in": access_max_age(),
+    }
 
 
 @router.post("/refresh")
-def refresh(request: Request, response: Response):
-    presented = request.cookies.get(REFRESH_COOKIE)
+def refresh(request: Request, response: Response, body: Optional[RefreshModel] = None):
+    # Cookie (web) takes precedence when both are present; native has no
+    # cookie jar to rely on cross-origin, so it sends the refresh token it
+    # stored client-side in the body instead.
+    presented = request.cookies.get(REFRESH_COOKIE) or (body.refresh_token if body else None)
     if not presented:
         raise HTTPException(401, "No refresh token")
     row = repos.auth_tokens.get_by_hash(hash_refresh(presented))
@@ -175,9 +210,14 @@ def refresh(request: Request, response: Response):
         _clear_auth_cookies(response)
         raise HTTPException(401, "Refresh token expired")
     # Rotate: mint a successor in the same family, revoke the presented one.
-    csrf = _rotate_refresh(response, row.user_id, row.family_id, row.id)
+    issued = _rotate_refresh(response, row.user_id, row.family_id, row.id)
     repos.auth_tokens.revoke(row.id, datetime.now(timezone.utc))
-    return {"csrf_token": csrf}
+    return {
+        "csrf_token": issued.csrf,
+        "access_token": issued.access,
+        "refresh_token": issued.refresh,
+        "expires_in": access_max_age(),
+    }
 
 
 @router.post("/change-password")
@@ -193,13 +233,13 @@ def change_password(body: ChangePasswordModel, request: Request, response: Respo
         raise HTTPException(422, "Password must be at least 8 characters")
     repos.users.update(user.id, {"password_hash": hash_password(body.new_password)})
     repos.auth_tokens.revoke_all_for_user(user.id, datetime.now(timezone.utc))
-    csrf = _set_auth_cookies(response, user.id)
-    return {"ok": True, "csrf_token": csrf}
+    issued = _set_auth_cookies(response, user.id)
+    return {"ok": True, "csrf_token": issued.csrf}
 
 
 @router.post("/logout")
-def logout(request: Request, response: Response):
-    presented = request.cookies.get(REFRESH_COOKIE)
+def logout(request: Request, response: Response, body: Optional[RefreshModel] = None):
+    presented = request.cookies.get(REFRESH_COOKIE) or (body.refresh_token if body else None)
     if presented:
         row = repos.auth_tokens.get_by_hash(hash_refresh(presented))
         if row is not None:

@@ -7,6 +7,7 @@ import { importsService } from "@/services/imports";
 import { sessionsService } from "@/services/sessions";
 import { putToUploadUrl } from "@/api/media";
 import { ApiError } from "@/api/client";
+import { useShareTarget } from "@/hooks/useShareTarget";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
@@ -15,11 +16,14 @@ import type { ImportRow, UUID } from "@/types";
 
 type Phase = "form" | "uploading" | "processing" | "done" | "failed";
 
-/** Manual GPX/CSV import wizard: register → PUT bytes → complete → poll. */
+/** GPX/CSV import wizard: register → PUT bytes → complete → poll. Handles
+ * both a manually-picked file and one arriving from the OS share sheet
+ * (native only, see hooks/useShareTarget) through the same code path. */
 export function ImportPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+  const { pendingFile, clearPendingShare } = useShareTarget();
   const [boatId, setBoatId] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
   const [row, setRow] = useState<ImportRow | null>(null);
@@ -36,8 +40,9 @@ export function ImportPage() {
   });
 
   const start = async () => {
-    const file = fileRef.current?.files?.[0];
+    const file = pendingFile ?? fileRef.current?.files?.[0];
     if (!file || !boatId) return;
+    clearPendingShare();
     setError(null);
     setUploadProgress(0);
     try {
@@ -87,10 +92,16 @@ export function ImportPage() {
     <Card title={t("sessions.importTitle")}>
       {phase === "form" && (
         <>
-          <label className="sf-field">
-            <span className="sf-field__label">{t("sessions.importFile")}</span>
-            <input ref={fileRef} type="file" accept=".gpx,.csv" className="sf-field__input" />
-          </label>
+          {pendingFile ? (
+            <p className="sf-field__label">
+              {t("sessions.importFile")}: {pendingFile.name}
+            </p>
+          ) : (
+            <label className="sf-field">
+              <span className="sf-field__label">{t("sessions.importFile")}</span>
+              <input ref={fileRef} type="file" accept=".gpx,.csv" className="sf-field__input" />
+            </label>
+          )}
           <Select
             label={t("sessions.importBoat")}
             id="import-boat"

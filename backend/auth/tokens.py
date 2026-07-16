@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
+from fastapi import Request
 
 ACCESS_COOKIE = "sf_access"
 REFRESH_COOKIE = "sf_refresh"
@@ -66,6 +67,17 @@ def decode_access_token(token: str) -> Optional[uuid.UUID]:
 
 def access_max_age() -> int:
     return _ACCESS_TTL_MIN * 60
+
+
+def bearer_token(request: Request) -> Optional[str]:
+    """Extract the token from an ``Authorization: Bearer <token>`` header,
+    or ``None`` if absent/malformed. Preferred over the ``sf_access`` cookie
+    since it's the only reliable option for native (Capacitor) clients,
+    whose WebView cookie jars don't survive cross-origin requests."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    return auth[len("Bearer "):].strip() or None
 
 
 # --- Refresh (opaque) ---

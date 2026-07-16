@@ -5,6 +5,16 @@ import { fileURLToPath, URL } from "node:url";
 // Dev server proxies /api to the FastAPI backend so cookies stay first-party
 // (the browser only ever talks to :5173). Run the backend with
 // SAILFRAMES_COOKIE_SECURE=0 so cookies are set over plain http in dev.
+//
+// Native (Capacitor) builds have no such proxy — the WebView talks directly
+// to whatever origin VITE_API_BASE points at, so it must be set to the full
+// backend URL (e.g. https://api.xgsail.com/api — the direct-to-backend
+// Cloudflare Tunnel route, NOT xgsail.com/api which goes through nginx) at
+// build time. See frontend/.env.native.example and docs/native-apps.md.
+// This is also why native auth uses Bearer tokens rather than cookies (see
+// api/client.ts), and why the WebView origin needs to be in the backend's
+// SAILFRAMES_CORS_ORIGINS (see deploy/README.md) — unlike a fully native
+// HTTP client, a WebView's fetch() is still subject to CORS.
 export default defineConfig({
   plugins: [react()],
   resolve: {

@@ -6,8 +6,9 @@ Two imperative guards, mirroring how endpoints already call
 - ``require_admin(request)`` — broad admin gate.
 - ``require_permission(request, key, club_id=...)`` — fine-grained RBAC check.
 
-Identity comes from the ``sf_access`` JWT cookie; roles/permissions live in
-Postgres (with optional per-club scope). ``SAILFRAMES_ADMIN_BYPASS``, when set,
+Identity comes from an ``Authorization: Bearer`` JWT (preferred) or the
+``sf_access`` cookie (web fallback); roles/permissions live in Postgres
+(with optional per-club scope). ``SAILFRAMES_ADMIN_BYPASS``, when set,
 short-circuits every check — a dev-only escape hatch.
 """
 
@@ -19,16 +20,18 @@ from typing import Optional
 from fastapi import HTTPException, Request
 from sqlalchemy import select
 
-from .tokens import ACCESS_COOKIE, CSRF_COOKIE, decode_access_token
+from .tokens import ACCESS_COOKIE, CSRF_COOKIE, bearer_token, decode_access_token
 
 
 def current_user(request: Request):
-    """Resolve the authenticated user (a ``UserORM``) from the access JWT
-    cookie, or ``None`` for anonymous callers. Does NOT raise — use
-    ``require_user`` when auth is mandatory."""
+    """Resolve the authenticated user (a ``UserORM``) from an
+    ``Authorization: Bearer`` header (preferred — required for native
+    clients) or, failing that, the ``sf_access`` cookie (web). Returns
+    ``None`` for anonymous callers; does NOT raise — use ``require_user``
+    when auth is mandatory."""
     from ..repositories import get_repos
 
-    token = request.cookies.get(ACCESS_COOKIE)
+    token = bearer_token(request) or request.cookies.get(ACCESS_COOKIE)
     if not token:
         return None
     uid = decode_access_token(token)
@@ -176,7 +179,12 @@ def can_edit_activity(activity, user) -> bool:
 def verify_csrf(request: Request) -> None:
     """Double-submit CSRF check, enforced only for cookie-authenticated
     requests. Send ``X-SF-CSRF`` equal to the ``sf_csrf`` cookie on every
-    state-changing request."""
+    state-changing request.
+
+    Bearer-authenticated requests (native clients) never carry the access
+    cookie, so they short-circuit here and skip the check entirely — CSRF
+    only matters for ambient/cookie credentials a browser attaches
+    automatically; a Bearer header is never sent ambiently."""
     if not request.cookies.get(ACCESS_COOKIE):
         return
     header = request.headers.get("X-SF-CSRF")
