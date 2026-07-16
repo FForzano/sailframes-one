@@ -12,11 +12,12 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 
-from ..auth import current_user, require_user, session_visible_to, verify_csrf
+from ..auth import can_edit_activity, current_user, require_user, session_visible_to, verify_csrf
 from ..schemas import (
     ManeuverCorrectionModel,
     ManeuverCreateModel,
     ManeuverRejectionModel,
+    SessionAttachModel,
     SessionCrewModel,
     SessionTrimModel,
     SessionWriteModel,
@@ -109,6 +110,36 @@ def update_session(session_id: uuid.UUID, body: SessionWriteModel, request: Requ
     changes.pop("activity_id", None)  # re-parenting is a race/compute concern
     changes.pop("boat_id", None)
     return repos.sessions.update(session_id, changes).to_dict()
+
+
+@router.post("/{session_id}/attach-to-activity")
+def attach_to_activity(session_id: uuid.UUID, body: SessionAttachModel, request: Request):
+    """Move a standalone recording (a private, auto-created ``solo`` activity
+    wrapping exactly this one session — see
+    ``services.ingestion.find_or_create_session``) into an existing
+    activity/regatta. Deliberately narrower than a general "re-parent this
+    session" endpoint (``PATCH /sessions/{id}`` strips ``activity_id`` for
+    exactly that reason — see ``update_session`` above): only allowed while
+    the session's current activity is still a lone standalone wrapper, so a
+    session that's already part of a real multi-session activity or race
+    can't be silently moved elsewhere."""
+    verify_csrf(request)
+    user = require_user(request)
+    session = _require_session(session_id)
+    if not _can_edit(session, user):
+        raise HTTPException(403, "Not allowed")
+    current_activity = repos.activities.get(session.activity_id)
+    if (current_activity is None or current_activity.type != "solo"
+            or len(repos.sessions.list(activity_id=current_activity.id)) != 1):
+        raise HTTPException(409, "Only a standalone recording can be reassigned")
+    target_activity = repos.activities.get(body.activity_id)
+    if target_activity is None:
+        raise HTTPException(404, "Activity not found")
+    if not can_edit_activity(target_activity, user):
+        raise HTTPException(403, "Not allowed to attach to this activity")
+    updated = repos.sessions.update(session_id, {"activity_id": body.activity_id})
+    repos.activities.delete(current_activity.id)
+    return updated.to_dict()
 
 
 @router.delete("/{session_id}")

@@ -12,6 +12,7 @@ import { ActivitiesPage } from "@/pages/diario/ActivitiesPage";
 import { ActivityDetailPage } from "@/pages/diario/ActivityDetailPage";
 import { RegattasPage } from "@/pages/diario/RegattasPage";
 import { RacePage } from "@/pages/diario/RacePage";
+import { RegistraPage } from "@/pages/registra/RegistraPage";
 import { GruppiLayout } from "@/pages/gruppi/GruppiLayout";
 import { GroupsPage } from "@/pages/gruppi/GroupsPage";
 import { GroupDetailPage } from "@/pages/gruppi/GroupDetailPage";
@@ -51,6 +52,10 @@ export default function App() {
           </Route>
           {/* The race dashboard is full-width, outside the tabbed layout. */}
           <Route path="/diario/regate/race/:raceId" element={<RacePage />} />
+
+          {/* Native-only — see AppShell's Capacitor.isNativePlatform() gate;
+              the route itself is harmless on web (just unreachable). */}
+          <Route path="/registra" element={<RegistraPage />} />
 
           <Route path="/gruppi" element={<GruppiLayout />}>
             <Route index element={<Navigate to="gruppi" replace />} />

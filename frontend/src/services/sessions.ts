@@ -32,6 +32,11 @@ export const sessionsService = {
   get: (id: UUID) => api.get<Session>(`/sessions/${id}`),
   update: (id: UUID, body: Partial<Session>) => api.patch<Session>(`/sessions/${id}`, body),
   remove: (id: UUID) => api.del(`/sessions/${id}`),
+  // Only valid while the session is still a standalone recording (a private
+  // auto-created "solo" activity wrapping just this one session) — see
+  // backend/routers/sessions.py::attach_to_activity.
+  attachToActivity: (id: UUID, activityId: UUID) =>
+    api.post<Session>(`/sessions/${id}/attach-to-activity`, { activity_id: activityId }),
   reanalyze: (id: UUID) =>
     api.post<{ ok: boolean; session_upload_id: UUID; status: "running" }>(`/sessions/${id}/reanalyze`),
   refreshWind: (id: UUID) =>

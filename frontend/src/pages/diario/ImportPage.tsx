@@ -1,20 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { boatsService, boatKeys } from "@/services/boats";
-import { importsService } from "@/services/imports";
 import { sessionsService } from "@/services/sessions";
-import { putToUploadUrl } from "@/api/media";
-import { ApiError } from "@/api/client";
 import { useShareTarget } from "@/hooks/useShareTarget";
+import { useImportUpload } from "@/hooks/useImportUpload";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
-import type { ImportRow, UUID } from "@/types";
-
-type Phase = "form" | "uploading" | "processing" | "done" | "failed";
+import type { UUID } from "@/types";
 
 /** GPX/CSV import wizard: register → PUT bytes → complete → poll. Handles
  * both a manually-picked file and one arriving from the OS share sheet
@@ -25,10 +21,7 @@ export function ImportPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const { pendingFile, clearPendingShare } = useShareTarget();
   const [boatId, setBoatId] = useState("");
-  const [phase, setPhase] = useState<Phase>("form");
-  const [row, setRow] = useState<ImportRow | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const { phase, row, error, uploadProgress, start, reset } = useImportUpload();
 
   const boats = useQuery({ queryKey: boatKeys.mine, queryFn: () => boatsService.list(true) });
   // Only the session's own detail route needs the parent activity — fetched
@@ -39,58 +32,20 @@ export function ImportPage() {
     enabled: phase === "done" && !!row?.session_id,
   });
 
-  const start = async () => {
+  const onStart = async () => {
     const file = pendingFile ?? fileRef.current?.files?.[0];
     if (!file || !boatId) return;
     clearPendingShare();
-    setError(null);
-    setUploadProgress(0);
     try {
-      setPhase("uploading");
-      const ticket = await importsService.create(file.name);
-      // Must match the content_type `upload_ref` signed the URL with
-      // (backend/routers/imports.py, defaults to this — see storage/
-      // object_store.py's `upload_ref`): when a public S3/MinIO endpoint is
-      // configured, ContentType is part of the presigned signature, so a
-      // mismatching (or browser-guessed) header here fails as a 403
-      // SignatureDoesNotMatch rather than an upload error.
-      await putToUploadUrl(ticket.upload_url, file, "application/octet-stream", setUploadProgress);
-      setPhase("processing");
-      const completed = await importsService.complete(ticket.import_id, {
-        boat_id: boatId as UUID,
-      });
-      setRow(completed);
-      if (completed.status === "processed") setPhase("done");
-      else if (completed.status === "failed") setPhase("failed");
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e));
-      setPhase("failed");
+      await start(file, { boatId: boatId as UUID });
+    } catch {
+      // surfaced via `error` below
     }
   };
 
-  // CSV imports finish asynchronously (worker pipeline) — poll until final.
-  useEffect(() => {
-    if (phase !== "processing" || !row) return;
-    if (row.status === "processed") {
-      setPhase("done");
-      return;
-    }
-    if (row.status === "failed") {
-      setPhase("failed");
-      return;
-    }
-    const id = window.setInterval(async () => {
-      const fresh = await importsService.get(row.id);
-      setRow(fresh);
-      if (fresh.status === "processed") setPhase("done");
-      if (fresh.status === "failed") setPhase("failed");
-    }, 3000);
-    return () => window.clearInterval(id);
-  }, [phase, row]);
-
   return (
     <Card title={t("sessions.importTitle")}>
-      {phase === "form" && (
+      {phase === "idle" && (
         <>
           {pendingFile ? (
             <p className="sf-field__label">
@@ -119,7 +74,7 @@ export function ImportPage() {
             ))}
           </Select>
           <div className="sf-form__actions">
-            <Button onClick={() => void start()} disabled={!boatId}>
+            <Button onClick={() => void onStart()} disabled={!boatId}>
               {t("sessions.importStart")}
             </Button>
           </div>
@@ -169,7 +124,7 @@ export function ImportPage() {
             {error ? ` — ${error}` : row?.error ? ` — ${row.error}` : ""}
           </p>
           <div className="sf-form__actions">
-            <Button variant="ghost" onClick={() => setPhase("form")}>
+            <Button variant="ghost" onClick={reset}>
               {t("common.cancel")}
             </Button>
           </div>

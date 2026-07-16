@@ -1,6 +1,7 @@
 {
   "nav": {
     "diario": "Logbook",
+    "registra": "Record",
     "gruppi": "Groups",
     "profilo": "Profile",
     "admin": "Admin"
@@ -298,6 +299,25 @@
     },
     "target": "Target",
     "optimalAnglesNote": "From your recorded performance in this session (not the boat's reference polar)."
+  },
+  "registra": {
+    "title": "Record a GPS track",
+    "start": "Start recording",
+    "stop": "Stop recording",
+    "recording": "Recording in progress",
+    "points": "points",
+    "linkTo": "Link to",
+    "standalone": "Standalone outing",
+    "upload": "Upload",
+    "reassign": "Reassign",
+    "empty": "No local recordings.",
+    "status": {
+      "recording": "Recording",
+      "stopped": "Ready to upload",
+      "uploading": "Uploading…",
+      "uploaded": "Uploaded",
+      "failed": "Upload failed"
+    }
   },
   "activities": {
     "title": "Activities",
