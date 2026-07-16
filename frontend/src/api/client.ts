@@ -79,7 +79,18 @@ interface RequestOptions {
   _retried?: boolean;
 }
 
-let refreshing: Promise<boolean> | null = null;
+// "rejected" means the server explicitly said the refresh token is no good
+// (expired/revoked/reuse-detected) — that's a real logout. "network-error"
+// means the fetch itself never got a response (offline, request killed by
+// the OS while the app was backgrounded/locked, etc.); the refresh token
+// itself was never actually judged, so it must NOT be treated as a logout
+// — this request just fails and the next one gets a fresh chance to
+// refresh once connectivity is back. Conflating the two used to log
+// everyone out whenever a refresh attempt happened to race a phone
+// lock/unlock, even though the session was perfectly valid.
+type RefreshOutcome = "ok" | "rejected" | "network-error";
+
+let refreshing: Promise<RefreshOutcome> | null = null;
 
 // A 401 on these is expected (bad creds) or would loop the refresh itself.
 const NO_REFRESH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh"];
@@ -89,7 +100,7 @@ interface RefreshResponse {
   refresh_token: string;
 }
 
-async function doRefresh(): Promise<boolean> {
+async function doRefresh(): Promise<RefreshOutcome> {
   try {
     const nativeRefreshToken = refreshTokenProvider?.() ?? null;
     const res = await fetch(`${BASE}/auth/refresh`, {
@@ -98,16 +109,16 @@ async function doRefresh(): Promise<boolean> {
       headers: nativeRefreshToken ? { "Content-Type": "application/json" } : undefined,
       body: nativeRefreshToken ? JSON.stringify({ refresh_token: nativeRefreshToken }) : undefined,
     });
-    if (!res.ok) return false;
+    if (!res.ok) return "rejected";
     const body = (await res.json()) as RefreshResponse;
     setAccessToken(body.access_token);
     // Must be awaited: the server has already revoked the old refresh
     // token, so this write persisting the new one has to land before we
     // consider the refresh "done" — see setNativeRefreshSink's comment.
     if (nativeRefreshToken) await onNativeRefreshRotated?.(body.refresh_token);
-    return true;
+    return "ok";
   } catch {
-    return false;
+    return "network-error";
   }
 }
 
@@ -152,11 +163,13 @@ export async function request<T = unknown>(
     !NO_REFRESH_PATHS.some((p) => path.startsWith(p))
   ) {
     // Single-flight refresh shared across concurrent 401s, then replay once.
-    const ok = await (refreshing ??= doRefresh().finally(() => {
+    const outcome = await (refreshing ??= doRefresh().finally(() => {
       refreshing = null;
     }));
-    if (ok) return request<T>(path, { ...opts, _retried: true });
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    if (outcome === "ok") return request<T>(path, { ...opts, _retried: true });
+    if (outcome === "rejected") window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    // "network-error": fall through and let the original 401 response
+    // surface as a normal ApiError below — no logout, session untouched.
   }
 
   if (!res.ok) throw new ApiError(res.status, await safeJson(res));
