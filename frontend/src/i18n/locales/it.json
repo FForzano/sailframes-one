@@ -1,6 +1,7 @@
 {
   "nav": {
     "diario": "Diario",
+    "registra": "Registra",
     "gruppi": "Gruppi",
     "profilo": "Profilo",
     "admin": "Admin"
@@ -214,7 +215,7 @@
     "sailingRole": "Ruolo",
     "sailingRoles": {
       "skipper": "Timoniere",
-      "crew": "Equipaggio",
+      "crew": "Prodiere",
       "guest": "Ospite"
     },
     "photos": "Foto",
@@ -298,6 +299,25 @@
     },
     "target": "Target",
     "optimalAnglesNote": "Dalla tua performance registrata in questa sessione (non dal polare della barca)."
+  },
+  "registra": {
+    "title": "Registra traccia GPS",
+    "start": "Avvia registrazione",
+    "stop": "Ferma registrazione",
+    "recording": "Registrazione in corso",
+    "points": "punti",
+    "linkTo": "Collega a",
+    "standalone": "Uscita singola",
+    "upload": "Carica",
+    "reassign": "Riassegna",
+    "empty": "Nessuna registrazione locale.",
+    "status": {
+      "recording": "In registrazione",
+      "stopped": "Da caricare",
+      "uploading": "Caricamento…",
+      "uploaded": "Caricata",
+      "failed": "Caricamento fallito"
+    }
   },
   "activities": {
     "title": "Attività",

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { Capacitor } from "@capacitor/core";
 import { useAuth } from "@/hooks/useAuth";
 import { useShareTarget } from "@/hooks/useShareTarget";
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation";
@@ -49,6 +50,12 @@ export function AppShell() {
 
   const sections = [
     { to: "/diario", label: t("nav.diario"), icon: "📔" },
+    // Native-only: recording a GPS track directly from the phone (with the
+    // screen locked) has no equivalent on the web, which has no background
+    // GPS/foreground-service access — see services/nativeRecording.ts.
+    ...(Capacitor.isNativePlatform()
+      ? [{ to: "/registra", label: t("nav.registra"), icon: "⏺️" }]
+      : []),
     { to: "/gruppi", label: t("nav.gruppi"), icon: "👥" },
     { to: "/profilo", label: t("nav.profilo"), icon: "👤" },
     ...(user?.is_superadmin

@@ -40,3 +40,7 @@ class SessionTrimModel(BaseModel):
     trim — rather than relying on omission."""
     trim_start_time: Optional[float] = None
     trim_end_time: Optional[float] = None
+
+
+class SessionAttachModel(BaseModel):
+    activity_id: uuid.UUID
