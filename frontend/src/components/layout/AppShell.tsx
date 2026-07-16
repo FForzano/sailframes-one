@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Capacitor } from "@capacitor/core";
+import { Disc, NotebookText, Settings, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useShareTarget } from "@/hooks/useShareTarget";
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation";
@@ -49,17 +50,20 @@ export function AppShell() {
   }, [me.data?.unit_system]);
 
   const sections = [
-    { to: "/diario", label: t("nav.diario"), icon: "📔" },
+    { to: "/diario", label: t("nav.diario"), Icon: NotebookText },
     // Native-only: recording a GPS track directly from the phone (with the
     // screen locked) has no equivalent on the web, which has no background
     // GPS/foreground-service access — see services/nativeRecording.ts.
     ...(Capacitor.isNativePlatform()
-      ? [{ to: "/registra", label: t("nav.registra"), icon: "⏺️" }]
+      ? [{ to: "/registra", label: t("nav.registra"), Icon: Disc }]
       : []),
-    { to: "/gruppi", label: t("nav.gruppi"), icon: "👥" },
-    { to: "/profilo", label: t("nav.profilo"), icon: "👤" },
+    { to: "/gruppi", label: t("nav.gruppi"), Icon: Users },
+    // Icon unused for /profilo (the action bar always shows the Avatar for
+    // it instead, see below) — kept only so every section has the same
+    // shape.
+    { to: "/profilo", label: t("nav.profilo"), Icon: Users },
     ...(user?.is_superadmin
-      ? [{ to: "/admin", label: t("nav.admin"), icon: "⚙️" }]
+      ? [{ to: "/admin", label: t("nav.admin"), Icon: Settings }]
       : []),
   ];
   const navLinkSections = sections.filter((s) => s.to !== "/profilo");
@@ -114,7 +118,7 @@ export function AppShell() {
               />
             ) : (
               <span className="sf-actionbar__icon" aria-hidden>
-                {s.icon}
+                <s.Icon size={22} strokeWidth={1.75} />
               </span>
             )}
             <span className="sf-actionbar__label">{s.label}</span>

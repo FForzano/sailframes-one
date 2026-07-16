@@ -237,7 +237,7 @@ h1, h2, h3 {
   /* Extra specificity (over .sf-avatar--sm's single class) so this reliably
      wins regardless of stylesheet order — same fixed height as
      .sf-actionbar__icon's box, so every item's label sits at the same
-     baseline whether it's an emoji icon or the profile avatar. */
+     baseline whether it's a lucide-react icon or the profile avatar. */
   .sf-actionbar__item .sf-avatar.sf-actionbar__avatar {
     width: 28px;
     height: 28px;

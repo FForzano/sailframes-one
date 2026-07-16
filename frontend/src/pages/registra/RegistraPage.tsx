@@ -7,6 +7,7 @@ import { sessionsService } from "@/services/sessions";
 import { useImportUpload } from "@/hooks/useImportUpload";
 import * as nativeRecording from "@/services/nativeRecording";
 import type { RecordingMeta } from "@/services/nativeRecording";
+import { activityDisplayName } from "@/utils/activityName";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
@@ -33,7 +34,7 @@ function ActivityPicker({
       <option value={STANDALONE}>{t("registra.standalone")}</option>
       {activities.data?.map((a) => (
         <option key={a.id} value={a.id}>
-          {a.name ?? a.id}
+          {activityDisplayName(a, t)}
         </option>
       ))}
     </Select>
