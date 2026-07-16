@@ -328,6 +328,14 @@ h1, h2, h3 {
   padding: 0.3rem 0.7rem;
   font-size: 0.85rem;
 }
+/* Round icon-only control (record/pause/resume/stop) — bigger than a
+   regular button since these are the primary tap targets while recording. */
+.sf-btn--icon {
+  width: 3.25rem;
+  height: 3.25rem;
+  padding: 0;
+  border-radius: 50%;
+}
 
 /* ---------- Cards / forms / fields ---------- */
 .sf-card {

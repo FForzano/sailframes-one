@@ -313,6 +313,7 @@
     "upload": "Carica",
     "reassign": "Riassegna",
     "empty": "Nessuna registrazione locale.",
+    "batteryHint": "Su alcuni telefoni (Xiaomi, Huawei, Samsung, Oppo/Vivo/OnePlus...) il risparmio energetico del produttore può comunque interrompere la registrazione in background: se si interrompe, disattivalo manualmente per XGSail nelle impostazioni batteria del telefono.",
     "status": {
       "recording": "In registrazione",
       "paused": "In pausa",

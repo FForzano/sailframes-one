@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { Disc, Pause, Play, Square } from "lucide-react";
 import { boatsService, boatKeys } from "@/services/boats";
 import { activitiesService, activityKeys } from "@/services/activities";
 import { sessionsService } from "@/services/sessions";
@@ -76,8 +77,12 @@ async function uploadRecording(
     await nativeRecording.setStatus(recording.id, "uploaded", completed.session_id ?? undefined);
     return { error: null };
   } catch (e) {
-    await nativeRecording.setStatus(recording.id, "failed");
-    return { error: e instanceof Error ? e.message : String(e) };
+    const message = e instanceof Error ? e.message : String(e);
+    // Persisted on the recording itself (not just returned) so a failure
+    // triggered automatically after stop — with no caller around to show a
+    // local error state — is still visible once it lands in the list.
+    await nativeRecording.setStatus(recording.id, "failed", undefined, message);
+    return { error: message };
   }
 }
 
@@ -150,7 +155,7 @@ function RecordingRow({ recording, onChanged }: { recording: RecordingMeta; onCh
           </Button>
         )}
       </div>
-      {error && <p className="sf-form__error">{error}</p>}
+      {(error ?? recording.error) && <p className="sf-form__error">{error ?? recording.error}</p>}
     </Card>
   );
 }
@@ -225,14 +230,26 @@ export function RegistraPage() {
             <p className="sf-field__label">{elapsedLabel(active.startedAt)}</p>
             <div className="sf-form__actions">
               {active.status === "paused" ? (
-                <Button onClick={() => void onResume()}>{t("registra.resume")}</Button>
+                <Button className="sf-btn--icon" onClick={() => void onResume()} aria-label={t("registra.resume")}>
+                  <Play size={22} strokeWidth={1.75} />
+                </Button>
               ) : (
-                <Button variant="ghost" onClick={() => void onPause()}>
-                  {t("registra.pause")}
+                <Button
+                  className="sf-btn--icon"
+                  variant="ghost"
+                  onClick={() => void onPause()}
+                  aria-label={t("registra.pause")}
+                >
+                  <Pause size={22} strokeWidth={1.75} />
                 </Button>
               )}
-              <Button variant="danger" onClick={() => void onStop()}>
-                {t("registra.stop")}
+              <Button
+                className="sf-btn--icon"
+                variant="danger"
+                onClick={() => void onStop()}
+                aria-label={t("registra.stop")}
+              >
+                <Square size={22} strokeWidth={1.75} />
               </Button>
             </div>
           </>
@@ -256,10 +273,16 @@ export function RegistraPage() {
             </Select>
             <ActivityPicker id="registra-activity" value={activityId} onChange={setActivityId} />
             <div className="sf-form__actions">
-              <Button onClick={() => void onStart()} disabled={!boatId}>
-                {t("registra.start")}
+              <Button
+                className="sf-btn--icon"
+                onClick={() => void onStart()}
+                disabled={!boatId}
+                aria-label={t("registra.start")}
+              >
+                <Disc size={22} strokeWidth={1.75} />
               </Button>
             </div>
+            <p className="sf-muted">{t("registra.batteryHint")}</p>
             {error && <p className="sf-form__error">{error}</p>}
           </>
         )}

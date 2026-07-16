@@ -20,6 +20,9 @@ project(':capacitor-local-notifications').projectDir = new File('../node_modules
 include ':capacitor-status-bar'
 project(':capacitor-status-bar').projectDir = new File('../node_modules/@capacitor/status-bar/android')
 
+include ':capawesome-team-capacitor-android-battery-optimization'
+project(':capawesome-team-capacitor-android-battery-optimization').projectDir = new File('../node_modules/@capawesome-team/capacitor-android-battery-optimization/android')
+
 include ':capgo-capacitor-share-target'
 project(':capgo-capacitor-share-target').projectDir = new File('../node_modules/@capgo/capacitor-share-target/android')
 

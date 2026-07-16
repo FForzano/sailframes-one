@@ -313,6 +313,7 @@
     "upload": "Upload",
     "reassign": "Reassign",
     "empty": "No local recordings.",
+    "batteryHint": "On some phones (Xiaomi, Huawei, Samsung, Oppo/Vivo/OnePlus...) the manufacturer's own battery saver can still interrupt background recording: if it stops, disable it manually for XGSail in the phone's battery settings.",
     "status": {
       "recording": "Recording",
       "paused": "Paused",

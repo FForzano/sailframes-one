@@ -2,6 +2,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { LocalNotifications } from "@capacitor/local-notifications";
+import { BatteryOptimization } from "@capawesome-team/capacitor-android-battery-optimization";
 import type { UUID } from "@/types";
 
 // Native-only: records a GPS track while the app is backgrounded/the phone
@@ -47,6 +48,7 @@ export interface RecordingMeta {
   status: RecordingStatus;
   pointCount: number;
   sessionId?: UUID; // set once uploaded
+  error?: string; // set when status is "failed", so a retry isn't required just to see why
 }
 
 // A fix is only persisted at most once per this interval — the plugin can
@@ -195,6 +197,16 @@ export async function start(boatId: UUID, activityId: UUID | null): Promise<UUID
   // declares the permission in its manifest, it never requests it itself.
   await LocalNotifications.requestPermissions();
 
+  // Doze/App Standby can otherwise pause GPS updates once the screen locks.
+  // This only covers the standard Android exemption — some OEMs (Xiaomi,
+  // Huawei, Samsung, Oppo/Vivo/OnePlus, ...) layer their own battery
+  // manager on top that no standard API can request; RegistraPage shows a
+  // static hint about that, since it can't be detected/handled here.
+  if (Capacitor.getPlatform() === "android") {
+    const { enabled } = await BatteryOptimization.isBatteryOptimizationEnabled();
+    if (enabled) await BatteryOptimization.requestIgnoreBatteryOptimization();
+  }
+
   const id = crypto.randomUUID() as UUID;
   await loadIndex();
   index.push({
@@ -253,12 +265,18 @@ export async function list(): Promise<RecordingMeta[]> {
   return [...(await loadIndex())].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-export async function setStatus(id: UUID, status: RecordingStatus, sessionId?: UUID): Promise<void> {
+export async function setStatus(
+  id: UUID,
+  status: RecordingStatus,
+  sessionId?: UUID,
+  error?: string,
+): Promise<void> {
   await loadIndex();
   const entry = index.find((r) => r.id === id);
   if (!entry) return;
   entry.status = status;
   if (sessionId) entry.sessionId = sessionId;
+  entry.error = status === "failed" ? error : undefined;
   await saveIndex();
 }
 
