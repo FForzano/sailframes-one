@@ -24,7 +24,12 @@ import { BoatsPage } from "@/pages/profilo/BoatsPage";
 import { BoatDetailPage } from "@/pages/profilo/BoatDetailPage";
 import { DevicesPage } from "@/pages/profilo/DevicesPage";
 import { DeviceDetailPage } from "@/pages/profilo/DeviceDetailPage";
-import { AdminPage } from "@/pages/admin/AdminPage";
+import { AdminLayout } from "@/pages/admin/AdminLayout";
+import { AppSettingsPage } from "@/pages/admin/AppSettingsPage";
+import { WindStationsPage } from "@/pages/admin/WindStationsPage";
+import { UsersPage } from "@/pages/admin/UsersPage";
+import { DeviceTypesPage } from "@/pages/admin/DeviceTypesPage";
+import { BoatClassesPage } from "@/pages/admin/BoatClassesPage";
 
 export default function App() {
   return (
@@ -66,7 +71,14 @@ export default function App() {
           </Route>
 
           <Route element={<RequireSuperadmin />}>
-            <Route path="/admin" element={<AdminPage />} />
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<Navigate to="settings" replace />} />
+              <Route path="settings" element={<AppSettingsPage />} />
+              <Route path="wind" element={<WindStationsPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="device-types" element={<DeviceTypesPage />} />
+              <Route path="boat-classes" element={<BoatClassesPage />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<NotFoundPage />} />

@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useShareTarget } from "@/hooks/useShareTarget";
+import { useSwipeNavigation } from "@/hooks/useSwipeNavigation";
 import { ToastViewport } from "@/components/ui/ToastViewport";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProfileMenu } from "@/components/layout/ProfileMenu";
@@ -56,6 +57,14 @@ export function AppShell() {
   ];
   const navLinkSections = sections.filter((s) => s.to !== "/profilo");
 
+  // Drag left/right within the page to switch between the action bar's
+  // sections, Instagram-tab-style — same order as the bar itself.
+  const location = useLocation();
+  const mainRef = useSwipeNavigation<HTMLElement>(
+    sections.map((s) => s.to),
+    location.pathname,
+  );
+
   return (
     <div className="sf-shell">
       <header className="sf-navbar">
@@ -82,7 +91,7 @@ export function AppShell() {
           email={user?.email}
         />
       </header>
-      <main className="sf-main">
+      <main className="sf-main" ref={mainRef}>
         <Outlet />
       </main>
       <nav className="sf-actionbar" aria-label="Main">

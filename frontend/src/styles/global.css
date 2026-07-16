@@ -80,6 +80,10 @@ h1, h2, h3 {
   max-width: 1180px;
   margin: 0 auto;
   padding: 1.25rem 1.25rem 3rem;
+  /* Tells the browser up front that vertical scroll is native and it
+     shouldn't wait to see if a touch turns into a horizontal gesture —
+     useSwipeNavigation handles that case itself via preventDefault. */
+  touch-action: pan-y;
 }
 .sf-main--wide {
   max-width: none;
@@ -179,7 +183,18 @@ h1, h2, h3 {
     position: sticky;
     top: 0;
     z-index: 55;
-    padding-top: env(safe-area-inset-top, 0px);
+    /* .sf-main's own padding-top already clears the notch for the
+       unscrolled page (see its comment above); .sf-tabs only needs its own
+       copy once it's actually pinned to the real viewport top. Without the
+       matching negative margin, both applied at once double the gap at
+       rest — visible as extra space at the top that "snaps" away after a
+       few px of scroll once .sf-tabs sticks and .sf-main's padding scrolls
+       out of view. */
+    margin-top: calc(-1 * env(safe-area-inset-top, 0px));
+    /* 0.5rem here is a deliberate breathing-room gap above the tabs even
+       once pinned to the real viewport top — env(...) alone would put them
+       flush against the very top edge once stuck. */
+    padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
     background: var(--sf-bg);
   }
   .sf-actionbar {
@@ -209,12 +224,20 @@ h1, h2, h3 {
     color: var(--sf-primary);
   }
   .sf-actionbar__icon {
-    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    font-size: 1.6rem;
     line-height: 1;
   }
-  .sf-actionbar__avatar {
-    width: 22px;
-    height: 22px;
+  /* Extra specificity (over .sf-avatar--sm's single class) so this reliably
+     wins regardless of stylesheet order — same fixed height as
+     .sf-actionbar__icon's box, so every item's label sits at the same
+     baseline whether it's an emoji icon or the profile avatar. */
+  .sf-actionbar__item .sf-avatar.sf-actionbar__avatar {
+    width: 28px;
+    height: 28px;
   }
   /* Keep content clear of the fixed bar. */
   .sf-main {

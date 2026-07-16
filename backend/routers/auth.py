@@ -192,10 +192,14 @@ def login(body: LoginModel, response: Response):
 
 @router.post("/refresh")
 def refresh(request: Request, response: Response, body: Optional[RefreshModel] = None):
-    # Cookie (web) takes precedence when both are present; native has no
-    # cookie jar to rely on cross-origin, so it sends the refresh token it
-    # stored client-side in the body instead.
-    presented = request.cookies.get(REFRESH_COOKIE) or (body.refresh_token if body else None)
+    # Body (native's explicit token) takes precedence when both are present.
+    # Native's WebView is same-site with the API (see verify_csrf's comment),
+    # so its sf_refresh cookie now gets attached ambiently too — but the
+    # value native explicitly persisted client-side is the one guaranteed to
+    # be current. Trusting the ambient cookie first risked presenting a
+    # stale, already-rotated token whenever the two fell out of sync,
+    # tripping reuse detection and force-revoking the whole session.
+    presented = (body.refresh_token if body else None) or request.cookies.get(REFRESH_COOKIE)
     if not presented:
         raise HTTPException(401, "No refresh token")
     row = repos.auth_tokens.get_by_hash(hash_refresh(presented))
@@ -239,7 +243,8 @@ def change_password(body: ChangePasswordModel, request: Request, response: Respo
 
 @router.post("/logout")
 def logout(request: Request, response: Response, body: Optional[RefreshModel] = None):
-    presented = request.cookies.get(REFRESH_COOKIE) or (body.refresh_token if body else None)
+    # Same precedence as /refresh — see its comment.
+    presented = (body.refresh_token if body else None) or request.cookies.get(REFRESH_COOKIE)
     if presented:
         row = repos.auth_tokens.get_by_hash(hash_refresh(presented))
         if row is not None:

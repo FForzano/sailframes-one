@@ -38,7 +38,10 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 echo "==> building frontend (native target, VITE_API_BASE=$OTA_API_BASE) for version $VERSION"
-( cd "$ROOT/frontend" && VITE_API_BASE="$OTA_API_BASE" npm run build )
+# VITE_APP_MODE=native is required here, not just VITE_API_BASE — without it
+# this ships a *web* bundle (marketing landing page, no native-only gating)
+# as the native app's OTA update. See config/platform.ts / .env.native.example.
+( cd "$ROOT/frontend" && VITE_API_BASE="$OTA_API_BASE" VITE_APP_MODE=native npm run build )
 
 echo "==> zipping dist/"
 ( cd "$ROOT/frontend/dist" && zip -qr "$WORKDIR/bundle.zip" . )
