@@ -29,14 +29,14 @@ rather than through code that assumes a specific board. See
   stack locally (Postgres + MinIO + backend + frontend + workers), with
   the same code deploying to AWS (S3/Lambda) via env-gated config — no
   code forks between the two targets.
-- **Current focus (branch `feature/introduce-users-login-and-roles`):**
-  a from-scratch redesign of the data model, API surface, and frontend
-  around users/auth/roles/clubs/groups — actively specified in
-  `docs/er-project.md`, `docs/api-project.md`, `docs/frontend-project.md`,
-  and `docs/device-protocol.md`. Treat those four files as the source of
-  truth for where the schema/API/frontend are heading; the existing
-  `backend/db/models` and `backend/routers` reflect the current
-  in-progress state, not necessarily the final shape.
+- **Status:** the users/auth/roles/clubs/groups/devices redesign (formerly
+  tracked on `feature/introduce-users-login-and-roles`) has landed on
+  `main` — schema, API, and frontend already reflect it. `docs/` now
+  holds `device-protocol.md` (the ingestion contract, still the source of
+  truth) and `estimation-pipeline.md` (how raw sensor/API data becomes
+  legs/maneuvers/VMG/polar numbers); the original `er-project.md` /
+  `api-project.md` / `frontend-project.md` design docs have been
+  retired now that the redesign they specified is implemented.
 
 ---
 
@@ -73,45 +73,51 @@ core/
 ├── CLAUDE.md              # This file
 ├── README.md               # Project scope: what XGSail is / isn't
 ├── docs/
-│   ├── er-project.md        # New ER schema (users/roles/clubs/groups/devices/sessions)
-│   ├── api-project.md        # API roles/permissions matrix + ingestion endpoints
-│   ├── frontend-project.md    # Simplified frontend page structure
-│   └── device-protocol.md      # Hardware-agnostic device integration protocol
+│   ├── device-protocol.md   # Hardware-agnostic device integration protocol
+│   └── estimation-pipeline.md # Position/wind/maneuver estimation pipeline
 ├── backend/                # FastAPI REST API (API-only, no static mount)
 │   ├── main.py               # Composition root: CORS, RBAC startup seed, routers
 │   ├── routers/               # One module per resource (see below)
-│   ├── services/                # Business logic (course, geo, gpx parsing/processing)
+│   ├── services/                # Business logic (course, geo, gpx, wind estimation,
+│   │                               import processing, maneuver reconciliation)
 │   ├── repositories/              # Data-access layer (base.py + sql/ implementation)
 │   ├── auth/                        # passwords, tokens, permissions, RBAC seed
 │   ├── db/                            # SQLAlchemy models + base, Alembic-migrated
 │   ├── storage/                        # Object-store abstraction (S3/MinIO)
 │   ├── schemas/                          # Pydantic request/response models
 │   └── alembic/                            # DB migrations
-├── frontend/                # Vite + TypeScript SPA
-│   └── src/                   # components, pages, contexts, hooks, services, stores,
-│                                 i18n, styles, types, utils
+├── frontend/                # Vite + TypeScript SPA (TanStack Query, react-router,
+│   └── src/                   # leaflet, recharts, i18next)
+│       # pages/ groups routes by area: diario/ (activities, sessions, races,
+│       # regattas, import), gruppi/ (clubs, groups, devices), profilo/
+│       # (account, boats, devices, password), admin/ (superadmin)
 ├── workers/                 # Heavy-processing workers — same handler runs on AWS
-│   ├── process_upload/        # Lambda (container image) and locally via the Lambda
-│   └── video/                  # Runtime Interface Emulator shipped in the base image
+│   ├── process_upload/        # Lambda (container image): GPS/CSV/GPX → analysis
+│   ├── train_maneuver/         # Maneuver-detector training/export tooling
+│   └── video/                   # MP4 → HLS via ffmpeg, Lambda Runtime Interface Emulator
 ├── deploy/                  # Self-hosted stack: Dockerfile.backend, minio-init.sh
-├── scripts/                 # One-off/maintenance scripts (migrations, backfills)
-└── docker-compose.yml       # One-command local stack (postgres/minio/backend/frontend/workers)
+├── scripts/                 # One-off/maintenance scripts (migrations, backfills,
+│                              wind-weight calibration, training-data export)
+└── docker-compose.yml       # One-command local stack (postgres/minio/backend/
+                               frontend/process_upload/video/train_maneuver)
 ```
 
 ### Backend routers (`backend/routers/`)
 
-One module per resource: `auth`, `boats`, `clubs`, `groups`, `devices`,
-`sessions`, `data`, `analysis`, `leaderboard`, `races`, `regattas`,
-`racedays`, `uploads`, `ingest`, `download`, `video`, `buoys`, `fleet`.
-Shared HTTP helpers live in `routers/_common.py` — put anything reused
-across routers there, not copy-pasted.
+One module per resource, registered in `routers/__init__.py`
+(`ALL_ROUTERS`): `auth`, `users`, `rbac`, `boats`, `clubs`, `groups`,
+`devices`, `activities`, `sessions`, `polars`, `regattas`, `racedays`,
+`races`, `device_api`, `imports`, `ingest`, `uploads`, `download`,
+`wind`, `system`, `video`. Shared HTTP helpers live in
+`routers/_common.py` — put anything reused across routers there, not
+copy-pasted.
 
-`e1.py` and `fleet.py` are legacy-compatibility routes that keep the
-existing physical E1 fleet hardware working (direct-to-storage upload
-path, fleet health snapshot) while new ingestion moves toward the
-hardware-agnostic contract in `docs/device-protocol.md`. Don't extend
-`e1.py`-style patterns for new device types — use the claim + device-key
-flow described there instead.
+Principals differ per router: cookie-authenticated users (most
+routers), `DeviceKey`-authenticated hardware (`device_api`), hook-token
+system callers (`system` + the `ingest` webhook), and the token-signed
+upload/download proxies (`uploads`, `download`). Devices integrate via
+the claim + device-key flow in `docs/device-protocol.md` — there is no
+device-specific upload path left in the router layer.
 
 ---
 
@@ -134,10 +140,9 @@ flow described there instead.
   object storage (processed data, referenced by data_ref/raw_ref)
 ```
 
-This mirrors the ingestion model being formalized in `docs/er-project.md`
-(`session_uploads`, `session_streams`) and `docs/api-project.md`
-("Caricamento file raw e grandi", "Registrazione device e ingestion
-dati") — read those before changing anything upload-related.
+See `docs/estimation-pipeline.md` for how raw GPS/wind readings become
+the legs/maneuvers/VMG/polar numbers shown in session analysis, and
+`docs/device-protocol.md` before changing anything upload/ingestion-related.
 
 ---
 
@@ -151,40 +156,42 @@ docker compose up --build
 Services (see `docker-compose.yml`): `postgres` (metadata), `minio`
 (S3-compatible blob storage, console on :9001), `backend` (FastAPI,
 :8000), `frontend` (nginx serving the SPA build + proxying `/api` →
-backend, same-origin), plus the `process_upload`/`video` workers invoked
-by the backend on MinIO upload events. See `deploy/README.md` for the
-full request-flow diagram and how the self-hosted (MinIO) path differs
-from the AWS (S3/Lambda) path — same code, env-gated.
+backend, same-origin), plus the `process_upload`/`video`/`train_maneuver`
+workers invoked by the backend on MinIO upload events. See
+`deploy/README.md` for the full request-flow diagram and how the
+self-hosted (MinIO) path differs from the AWS (S3/Lambda) path — same
+code, env-gated.
 
 ---
 
 ## Weather Data Integration
 
-- **NOAA NDBC buoys** and **METAR** stations, fetched via
-  `backend/noaa_buoys.py` / `backend/routers/buoys.py`.
-- The ER redesign in `docs/er-project.md` introduces `wind_stations` +
-  `wind_observations` as a local cache of this external data (avoids
-  re-fetching on every render, preserves history past whatever window
-  the upstream API retains). Station selection/aggregation logic is
-  runtime, not persisted as a per-regatta default (open design question,
-  deliberately deferred).
+- **NOAA NDBC buoys**, **METAR** stations, and **Cumulus** personal
+  weather stations, fetched via `backend/services/wind_providers/` and
+  exposed through `backend/routers/wind.py`.
+- `wind_stations` / `wind_observations` (see `backend/db/models/wind.py`)
+  cache this external data locally (avoids re-fetching on every render,
+  preserves history past whatever window the upstream API retains).
+  Station selection/aggregation and the estimation algorithms that turn
+  raw observations into a usable wind signal are documented in
+  `docs/estimation-pipeline.md`.
 
 ---
 
 ## Auth & RBAC
 
-Two authorization layers (see `docs/api-project.md`, "Ruoli e permessi
-per classe di API", for the full matrix):
+Two authorization layers:
 
-1. **Scoped RBAC** (`roles`/`permissions`/`role_permissions`/`user_roles`)
-   for institutional roles (`superadmin`, `club_admin`, `race_officer`)
+1. **Scoped RBAC** (`roles`/`permissions`/`role_permissions`/`user_roles`,
+   see `backend/db/models/rbac.py` + `backend/routers/rbac.py`) for
+   institutional roles (`superadmin`, `club_admin`, `race_officer`)
    scoped via `user_roles.scope_club_id`.
 2. **Per-resource ownership** (`user_boats.role`, `user_groups.role`) for
    personal/boat-scoped resources — no centralized permission check, the
    relationship itself grants access.
 
 `backend/auth/` implements passwords, JWT tokens, and the RBAC seed run
-at startup (`seed_superadmin`, `seed_devices`, `seed_defaults` in
+at startup (`seed_superadmin`, `seed_device_types`, `seed_defaults` in
 `main.py`).
 
 ---
