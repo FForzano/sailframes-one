@@ -1,0 +1,25 @@
+{
+  "name": "xgsail-ota-service",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Standalone OTA update server for the XGSail native app — serves a self-hosted @capgo/capacitor-updater manifest + bundle URLs from MinIO. No dependency on the FastAPI backend or the database.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "minio": "^8.0.7"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -106,6 +106,7 @@ this repo, since a token-based tunnel's routing lives in the dashboard:
 | `xgsail.com` | `http://frontend:80` |
 | `minio.xgsail.com` | `http://minio:9000` |
 | `api.xgsail.com` | `http://backend:8000` |
+| `ota.xgsail.com` | `http://ota-service:8081` |
 | `ssh.xgsail.com` (type **SSH**, not HTTP) | `host.docker.internal:22` |
 
 `minio.xgsail.com` is what browsers use for presigned upload/download URLs
@@ -116,10 +117,22 @@ presigned URLs are self-authenticating, same as real S3.
 hits the backend directly — bypassing the frontend's nginx proxy (and its
 10 MB `client_max_body_size` cap on `/api/`, see `frontend/nginx.conf`).
 The web SPA keeps using its same-origin `/api` (via `frontend`), so this
-hostname is additive, not a replacement. If a browser-based client (not
-just native apps) ever calls `api.xgsail.com` directly, add its origin to
-`SAILFRAMES_CORS_ORIGINS` (CSV, see `backend/main.py`) — native HTTP
-clients aren't subject to CORS, so no change is needed for them.
+hostname is additive, not a replacement.
+
+The native (Capacitor) app's WebView calls `api.xgsail.com` via `fetch()` —
+unlike a fully native HTTP client (URLSession/OkHttp), that request **is**
+subject to CORS, since it's still a browser engine under the hood. Its
+origins (`capacitor://localhost` on iOS, `https://localhost` on Android)
+must be in `SAILFRAMES_CORS_ORIGINS` (CSV, see `backend/main.py` and
+`.env.example`) — set as the default in
+`deploy/docker-compose.prod.yml`'s `backend` service already. If any other
+browser-based client calls `api.xgsail.com` directly, add its origin too.
+
+`ota.xgsail.com` is the standalone OTA update server (`ota-service/`,
+public/read-only, no auth) the native app polls for JS-bundle updates —
+see `docs/ota-updates.md`. `frontend/capacitor.config.ts`'s
+`CapacitorUpdater.updateUrl` must point at
+`https://ota.xgsail.com/manifest.json`.
 
 ### Reaching the VM (private network, no public IP)
 

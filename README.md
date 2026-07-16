@@ -24,6 +24,7 @@ It provides:
 - Session and race analysis workflows (legs, maneuvers, VMG, polar performance)
 - Replay and coaching-oriented review tools (track playback, session photos)
 - Hardware-agnostic ingestion through a defined protocol (`docs/device-protocol.md`) — devices claim themselves, then upload data with a per-device key
+- Native iOS/Android app shells (Capacitor) around the same frontend, with self-hosted OTA JS-bundle updates (`docs/native-apps.md`, `docs/ota-updates.md`) — still frontend application + deployment configuration scope, not a hardware artifact
 
 The goal is to provide an open platform for sailing analytics that can work with dedicated devices, custom integrations, or external data sources, without tying the application to one specific hardware stack.
 
@@ -43,6 +44,7 @@ This repository contains:
 - Authentication and authorization (`backend/auth/`)
 - Storage and ingestion services (`backend/storage/`, `backend/services/`)
 - Processing workers (`workers/`)
+- Standalone OTA update server for the native app (`ota-service/`)
 - Protocol and integration documentation (`docs/`)
 - Self-hosted deployment configuration (`deploy/`, `docker-compose.yml`)
 

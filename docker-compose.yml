@@ -11,6 +11,8 @@
 #   minio     — S3-compatible blob storage (+ one-time init + ingest webhook)
 #   backend   — the REST API (FastAPI)
 #   frontend  — the SPA (nginx: serves the build + proxies /api → backend)
+#   ota-service — standalone OTA update server for the native (Capacitor)
+#            app; talks only to MinIO, no dependency on backend/postgres.
 #   process_upload / video — heavy-processing workers. Same handler runs on AWS
 #            Lambda (container image) and here via the Lambda Runtime Interface
 #            Emulator that ships in the base image; the backend invokes them over
@@ -66,6 +68,7 @@ services:
       MINIO_ROOT_USER: *minio-user
       MINIO_ROOT_PASSWORD: *minio-pass
       SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET:-sailframes-fleet-data-prod}
+      SAILFRAMES_OTA_PREFIX: ${SAILFRAMES_OTA_PREFIX:-app-updates}
       # Frontend origin allowed to CORS-fetch presigned URLs directly from MinIO.
       SAILFRAMES_PUBLIC_ORIGIN: ${SAILFRAMES_PUBLIC_ORIGIN:-http://localhost:8080}
     entrypoint: ["/bin/sh", "/init/minio-init.sh"]
@@ -125,6 +128,28 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+  ota-service:
+    build:
+      context: .
+      dockerfile: ota-service/Dockerfile
+    environment:
+      SAILFRAMES_BUCKET: ${SAILFRAMES_BUCKET:-sailframes-fleet-data-prod}
+      SAILFRAMES_OTA_PREFIX: ${SAILFRAMES_OTA_PREFIX:-app-updates}
+      SAILFRAMES_S3_ENDPOINT: "http://minio:9000"
+      MINIO_ROOT_USER: *minio-user
+      MINIO_ROOT_PASSWORD: *minio-pass
+      OTA_PORT: "8081"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8081/health', r => process.exit(r.statusCode===200?0:1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
 
   process_upload:
     build:

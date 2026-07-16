@@ -7,9 +7,15 @@ import {
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ApiError, AUTH_EXPIRED_EVENT } from "@/api/client";
+import { Capacitor } from "@capacitor/core";
+import { ApiError, AUTH_EXPIRED_EVENT, setAccessToken } from "@/api/client";
 import { authService } from "@/services/auth";
 import type { Capabilities, User } from "@/types";
+
+// Dynamic import: keeps @aparajita/capacitor-secure-storage out of the web
+// bundle entirely (see services/nativeAuth.ts) — this module is only ever
+// touched when actually running inside the native shell.
+const nativeAuth = () => import("@/services/nativeAuth");
 
 export type AuthStatus = "loading" | "authed" | "anon";
 
@@ -56,12 +62,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void loadIdentity();
+    // Loads the persisted native refresh token (if any) before the first
+    // capabilities call, so a returning native user doesn't have to log in
+    // again — a no-op on web.
+    const init = Capacitor.isNativePlatform()
+      ? nativeAuth().then((m) => m.initNativeAuth())
+      : Promise.resolve();
+    void init.then(loadIdentity);
   }, [loadIdentity]);
 
   // The api client dispatches this when a refresh attempt fails.
   useEffect(() => {
     const onExpired = () => {
+      setAccessToken(null);
       setCaps(null);
       setStatus("anon");
       queryClient.clear();
@@ -72,7 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      await authService.login(email, password);
+      const res = await authService.login(email, password);
+      if (Capacitor.isNativePlatform()) {
+        await (await nativeAuth()).persistNativeLogin(res);
+      }
       await loadIdentity();
     },
     [loadIdentity],
@@ -88,8 +104,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await authService.logout();
+      if (Capacitor.isNativePlatform()) {
+        const m = await nativeAuth();
+        await authService.logout(m.getNativeRefreshToken() ?? undefined);
+        await m.clearNativeAuth();
+      } else {
+        await authService.logout();
+      }
     } finally {
+      setAccessToken(null);
       setCaps(null);
       setStatus("anon");
       queryClient.clear();

@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
+import { useShareTarget } from "@/hooks/useShareTarget";
 import { ToastViewport } from "@/components/ui/ToastViewport";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProfileMenu } from "@/components/layout/ProfileMenu";
@@ -19,6 +20,15 @@ import { unitsStore } from "@/stores/unitsStore";
 export function AppShell() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { pendingFile } = useShareTarget();
+
+  // A GPX shared from another app (e.g. Waterspeed) can arrive while the
+  // user is anywhere in the app — jump to the import wizard so ImportPage
+  // (which also reads useShareTarget()) can pick it up.
+  useEffect(() => {
+    if (pendingFile) navigate("/diario/activities/import");
+  }, [pendingFile, navigate]);
   // Resolved profile_image URL isn't on the auth capabilities payload, only
   // on /users/me — same query key as AnagraficaPage so it's cached, not
   // re-fetched.
