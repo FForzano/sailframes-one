@@ -168,6 +168,20 @@ h1, h2, h3 {
   .sf-main {
     padding-top: calc(1.25rem + env(safe-area-inset-top, 0px));
   }
+  /* Sticky (not just top-of-page) notch/status-bar coverage: once scrolled,
+     the section's own tab bar pins to the real viewport top and its padding
+     — not .sf-main's, which only protects the very first screen before any
+     scrolling — permanently covers the cutout area. SectionLayout renders
+     the tabs before any `header` (e.g. Gruppi's MembershipStrip) precisely
+     so the tabs are the first scrollable element and stick immediately,
+     instead of a variable-height header transiting under the cutout. */
+  .sf-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 55;
+    padding-top: env(safe-area-inset-top, 0px);
+    background: var(--sf-bg);
+  }
   .sf-actionbar {
     position: fixed;
     bottom: 0;
