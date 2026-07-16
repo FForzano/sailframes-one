@@ -181,11 +181,18 @@ def verify_csrf(request: Request) -> None:
     requests. Send ``X-SF-CSRF`` equal to the ``sf_csrf`` cookie on every
     state-changing request.
 
-    Bearer-authenticated requests (native clients) never carry the access
-    cookie, so they short-circuit here and skip the check entirely — CSRF
-    only matters for ambient/cookie credentials a browser attaches
-    automatically; a Bearer header is never sent ambiently."""
-    if not request.cookies.get(ACCESS_COOKIE):
+    Skips whenever a Bearer header is present (mirrors ``current_user``'s
+    own precedence — Bearer wins over any cookie) rather than merely
+    checking cookie absence: since ``capacitor.config.ts``'s
+    ``server.hostname`` put the native WebView on the same registrable
+    domain as the API (``app.xgsail.com`` / ``api.xgsail.com``), its
+    SameSite=Lax cookies now DO get set and re-attached automatically by
+    the WebView's cookie jar (same-site requests aren't blocked by Lax,
+    only cross-site ones) — even though native still authenticates via
+    Bearer and can't read a cross-origin cookie to echo back in
+    ``X-SF-CSRF``. A Bearer header is never sent ambiently (unlike a
+    cookie), so its presence alone rules out a forged cross-site request."""
+    if bearer_token(request) or not request.cookies.get(ACCESS_COOKIE):
         return
     header = request.headers.get("X-SF-CSRF")
     cookie = request.cookies.get(CSRF_COOKIE)

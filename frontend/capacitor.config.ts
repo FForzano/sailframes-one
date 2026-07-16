@@ -33,8 +33,13 @@ const config: CapacitorConfig = {
       updateUrl: "https://ota.xgsail.com/manifest.json",
       // Self-hosted: no Capgo cloud analytics endpoint.
       statsUrl: "",
-      // Check for updates on launch rather than silently patching mid-session
-      // — keeps update behavior visible/predictable for App Store review.
+      // `true` = "atBackground": checks for an update on every foreground
+      // transition (app opened/resumed) and downloads it silently, but only
+      // applies it on the *next* background/restart — never hot-swapping
+      // the running session. So a fresh install needs one full
+      // open-close-reopen cycle before an update becomes visible. Keeps
+      // update behavior predictable for App Store review (no mid-session
+      // code swap).
       autoUpdate: true,
       resetWhenUpdate: true,
     },

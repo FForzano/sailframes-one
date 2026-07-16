@@ -18,11 +18,25 @@ let cachedRefreshToken: string | null = null;
  * request), e.g. from a top-level native-only bootstrap effect. */
 export async function initNativeAuth(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
-  cachedRefreshToken = (await SecureStorage.getItem(REFRESH_TOKEN_KEY)) as string | null;
+  try {
+    cachedRefreshToken = (await SecureStorage.getItem(REFRESH_TOKEN_KEY)) as string | null;
+  } catch {
+    // Corrupt/inaccessible keystore entry: treat as logged-out instead of
+    // throwing here, which would otherwise reject the unhandled promise
+    // chain in AuthContext's `init.then(loadIdentity)` and leave `status`
+    // stuck on "loading" forever.
+    cachedRefreshToken = null;
+  }
   setRefreshTokenProvider(() => cachedRefreshToken);
-  setNativeRefreshSink((token) => {
+  setNativeRefreshSink(async (token) => {
     cachedRefreshToken = token;
-    void SecureStorage.setItem(REFRESH_TOKEN_KEY, token);
+    // Awaited (not fire-and-forget): the server has already rotated and
+    // revoked the previous refresh token by the time this runs, so if the
+    // app process is killed before this write lands, the next launch reads
+    // the stale, now-revoked token — the server's reuse-detection then
+    // revokes the whole session and forces a re-login. See api/client.ts's
+    // doRefresh, which awaits this callback before resolving.
+    await SecureStorage.setItem(REFRESH_TOKEN_KEY, token);
   });
 }
 
