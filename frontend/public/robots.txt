@@ -1,0 +1,10 @@
+# XGSail is a public marketing page ("/") in front of an authenticated
+# app. Everything past login (dashboards, sessions, races, etc.) requires
+# a session and isn't meaningfully crawlable, so keep crawlers off it.
+User-agent: *
+Allow: /$
+Allow: /login$
+Allow: /register$
+Disallow: /
+
+Sitemap: https://xgsail.com/sitemap.xml

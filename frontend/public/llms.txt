@@ -1,0 +1,17 @@
+# XGSail
+
+> XGSail is a self-hostable, hardware-agnostic sailing analytics platform for race analysis, session replay, and fleet performance. It is an open-source (Apache 2.0) fork of SailFrames, focused on the software application layer: user management, authentication, roles, data ingestion, storage, analytics, and web-based workflows for sailors, coaches, and teams.
+
+XGSail records sailing sessions and races from any GPS/wind tracker, then lets crews replay tracks on a map, analyze performance (polars, VMG, tack/gybe comparisons), manage races and regattas with automatic scoring and a live leaderboard, and share activities within clubs and groups with role-based permissions. Devices integrate through a documented, vendor-agnostic protocol rather than proprietary hardware.
+
+It can be run self-hosted with a single `docker compose up`, or used as a hosted service at https://xgsail.com.
+
+## Docs
+
+- [Repository](https://github.com/FForzano/xgsail): source code, self-host instructions, and architecture overview
+- [License](https://github.com/FForzano/xgsail/blob/main/LICENSE): Apache 2.0
+- [SailFrames](https://github.com/sailframes/core): the original upstream project (hardware/firmware, out of scope for XGSail)
+
+## Contact
+
+- f.forzano@ieee.org
