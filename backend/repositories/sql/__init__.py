@@ -23,6 +23,7 @@ from .media_repo import SqlMediaRepo
 from .wind_repo import SqlWindRepo
 from .polar_repo import SqlPolarRepo
 from .rbac_repo import SqlRbacRepo
+from .app_config_repo import SqlAppConfigRepo
 
 
 def build_sql_repos(blob: BlobStore, data_prefix: str) -> Repositories:
@@ -45,6 +46,7 @@ def build_sql_repos(blob: BlobStore, data_prefix: str) -> Repositories:
         wind=SqlWindRepo(sf),
         polars=SqlPolarRepo(sf),
         rbac=SqlRbacRepo(sf),
+        app_config=SqlAppConfigRepo(sf),
     )
 
 
@@ -66,4 +68,5 @@ __all__ = [
     "SqlWindRepo",
     "SqlPolarRepo",
     "SqlRbacRepo",
+    "SqlAppConfigRepo",
 ]

@@ -30,6 +30,7 @@ class Repositories:
         wind,
         polars,
         rbac,
+        app_config,
     ):
         self.users = users
         self.auth_tokens = auth_tokens
@@ -47,3 +48,4 @@ class Repositories:
         self.wind = wind
         self.polars = polars
         self.rbac = rbac
+        self.app_config = app_config

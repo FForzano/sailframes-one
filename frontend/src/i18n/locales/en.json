@@ -417,6 +417,15 @@
     "spinnaker_none": "None",
     "spinnaker_asymmetric": "Asymmetric",
     "spinnaker_symmetric": "Symmetric",
-    "ryaClassId": "RYA Class ID"
+    "ryaClassId": "RYA Class ID",
+    "appSettings": "App settings",
+    "minNativeVersionAndroid": "Minimum native app version (Android)",
+    "minNativeVersionIos": "Minimum native app version (iOS)",
+    "minNativeVersionHint": "Blocks the app below this version (e.g. 1.4.0) with a mandatory update screen. Leave empty to disable — set separately for Android and iOS."
+  },
+  "updateRequired": {
+    "title": "Update required",
+    "body": "A new version of XGSail is available. Please update the app to continue.",
+    "cta": "Open Play Store"
   }
 }

@@ -6,6 +6,7 @@ import { Capacitor } from "@capacitor/core";
 import { ApiError } from "@/api/client";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/contexts/ToastContext";
+import { NativeVersionGate } from "@/components/native/NativeVersionGate";
 import App from "./App";
 import "./i18n";
 import "./styles/global.css";
@@ -29,14 +30,16 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ToastProvider>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </ToastProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <NativeVersionGate>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <ToastProvider>
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          </ToastProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </NativeVersionGate>
   </StrictMode>,
 );

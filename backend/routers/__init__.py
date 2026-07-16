@@ -11,6 +11,7 @@ blob download proxy (``download``).
 """
 
 from . import (
+    app_config,
     auth,
     users,
     rbac,
@@ -35,6 +36,8 @@ from . import (
 )
 
 ALL_ROUTERS = [
+    # App config (public min-version check + superadmin edit)
+    app_config.router,
     # Accounts & authorization
     auth.router,
     users.router,

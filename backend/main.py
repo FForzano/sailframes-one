@@ -44,8 +44,9 @@ app.add_middleware(
 @app.on_event("startup")
 def _seed():
     """Run migrations (via repo build) then seed the bootstrap superadmin, the
-    device-type catalog, and the default RBAC roles/permissions."""
-    from .auth import seed_defaults, seed_superadmin, seed_device_types
+    device-type catalog, the default RBAC roles/permissions, and the
+    singleton app_config row."""
+    from .auth import seed_defaults, seed_superadmin, seed_device_types, seed_app_config
     from .db import get_sessionmaker
     from .repositories import get_repos
 
@@ -53,6 +54,7 @@ def _seed():
     seed_superadmin(repos)
     seed_device_types(get_sessionmaker())
     seed_defaults(get_sessionmaker())
+    seed_app_config(get_sessionmaker())
 
 
 @app.get("/api/health")
