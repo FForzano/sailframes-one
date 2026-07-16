@@ -131,7 +131,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function ManeuverSummary({ summary }: { summary: Record<string, unknown> }) {
   const { t } = useTranslation();
-  const rows = ["tacks", "gybes"] as const;
+  const rows = ["tacks", "gybes", "course_changes"] as const;
   const cols: [string, string][] = [
     ["count", t("sessions.count")],
     ["avg_speed_loss_kts", t("sessions.avgSpeedLoss")],

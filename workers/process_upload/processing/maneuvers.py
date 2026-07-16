@@ -1,15 +1,19 @@
 """Maneuver detection — two-stage pipeline.
 
-Stage 1 (this module): ``_detect_candidates`` finds significant course changes
-(debounced tack-side transitions), refines their boundaries, computes the
+Stage 1 (this module): ``_detect_candidates`` segments the track into
+roughly-constant-heading legs and emits a candidate for every turn between them
+(``_turn_pivots``) — a purely geometric, WIND-AGNOSTIC step that does not decide
+what kind of turn it is. It refines each turn's boundaries, computes the
 type-independent performance metrics, and extracts a configurable statistical
 feature vector (see ``maneuver_features``). Stage 2
-(``maneuver_classification``): a pluggable classifier maps each candidate to a
-``ManeuverType`` — or to ``None`` (false alarm) so the candidate is dropped.
+(``maneuver_classification``): a pluggable classifier scores each candidate and
+maps it to a ``ManeuverType`` — or to ``None`` (false alarm) so the candidate is
+dropped. The wind axis is resolved here only to *describe* candidates
+(``rel_before``/``rel_after`` for the classifier), never to find them.
 
-``detect_maneuvers`` is the unchanged public entry point that composes the two
-stages; today's active ``geometric`` classifier reproduces the previous
-tack/gybe behavior exactly.
+``detect_maneuvers`` is the public entry point that composes the two stages; the
+active ``probabilistic`` classifier owns rejection and the
+tack/gybe/course_change labelling.
 """
 
 import numpy as np
@@ -26,20 +30,23 @@ MAX_MANEUVER_DURATION_SEC = 30  # max time for heading change
 MIN_BOAT_SPEED_KTS = 1.5  # ignore turns while nearly stopped
 SPEED_RECOVERY_THRESHOLD = 0.9  # 90% of entry speed
 MAX_RECOVERY_WINDOW_SEC = 60
-TURN_RATE_THRESHOLD = 3.0  # deg/sec to detect turn
-TURN_WINDOW_EXTEND_SEC = 5  # extend window before/after rapid portion
+TURN_RATE_THRESHOLD = 2.0  # deg/sec — a sample counts as "turning" above this.
+# Matches the boundary-refine scan's own "turn begins" bar (10 deg / 5 samples
+# below) so a slow, wide mark rounding (e.g. bolina->lasco over 20-30s, only
+# ~2-3 deg/s) still crosses it — a real rounding is a sustained turn, not a
+# snap one, so this must not be tuned to tack/gybe speeds alone.
+TURN_WINDOW_EXTEND_SEC = 5  # bridge turning runs split by a brief rate dip
+MIN_TURN_CANDIDATE_DEG = 15  # net heading change for a turn to be a candidate
 MIN_MANEUVER_SPACING_SEC = 20  # minimum time between maneuvers to avoid duplicates
 # backend/services/maneuver_reconciliation.py::OVERLAP_TOLERANCE_SEC (15s)
 # must stay strictly below this — see that module's docstring.
 HEADING_SMOOTH_WINDOW = 5  # samples, circular moving average before detection
-HOLD_WINDOW_SEC = 12  # min dwell time on a side for it to count as a real tack
-# A genuine tack/gybe is a real rotation, not just a slow drift that happens
-# to cross the wind-axis boundary the side-debounce logic tracks (e.g. a
-# zero-duration/zero-change "maneuver" is a detection glitch, not a real
-# one). Gybes have no dead zone the way tacking does — a boat already
-# sailing deep can gybe with a fairly modest heading change — so this floor
-# is only high enough to reject the degenerate cases, not to demand a wide
-# rotation.
+# Per-type minimum heading change (fallback floor). Both production paths call
+# _finalize with enforce_min_heading_change=False — automatic detection leaves
+# rejection to the probabilistic classifier's confidence score, manual add to
+# the user's judgement — so this floor is the documented minimum sensible
+# rotation, exercised directly only by unit tests. A gybe needs less than a
+# tack: a boat already sailing deep can gybe with a fairly modest rotation.
 MIN_TACK_HEADING_CHANGE_DEG = 40
 MIN_GYBE_HEADING_CHANGE_DEG = 20
 
@@ -50,15 +57,14 @@ def detect_maneuvers(
     twd_deg: float | None = None,
     true_wind: list[dict] | None = None,
 ) -> list[Maneuver]:
-    """Detect tacks and gybes from heading changes (public entry point).
+    """Detect tacks, gybes and course changes from heading changes (public
+    entry point).
 
     Composes the two stages: Stage 1 (``_detect_candidates``) produces the
-    significant-course-change candidates with their metrics + features; Stage 2
-    (``classify_maneuver``) labels each one (or rejects it as a false alarm).
-    The per-type minimum-heading-change filter and the inter-maneuver spacing
-    gate stay HERE, interleaved with classification and only advancing
-    ``last_maneuver_end`` on a real append — preserving the exact ordering of
-    the previous single-loop implementation.
+    turn candidates with their metrics + features; Stage 2 (``classify_maneuver``)
+    scores each one — labelling it tack/gybe/course_change or rejecting it as a
+    false alarm. The inter-maneuver spacing gate stays HERE, interleaved with
+    classification and only advancing ``last_maneuver_end`` on a real append.
 
     ``true_wind`` (per-point series) only feeds the TWA/VMG-based *features*;
     it does not affect which maneuvers are detected or how they're classified,
@@ -83,9 +89,11 @@ def detect_maneuvers(
         # from the user, or a training-data sink, would attach — cand.features
         # is fully populated at this point.
 
-        maneuver = _finalize(cand, maneuver_type)
-        if maneuver is None:
-            continue  # below the per-type minimum heading change
+        # The classifier's confidence score already owns rejection, so the hard
+        # per-type min-heading gate is not applied on the automatic path (it
+        # would only duplicate/second-guess the score) — _finalize just builds
+        # the Maneuver here. enforce=False never returns None.
+        maneuver = _finalize(cand, maneuver_type, enforce_min_heading_change=False)
 
         maneuvers.append(maneuver)
         last_maneuver_end = cand.end_time
@@ -99,51 +107,45 @@ def _detect_candidates(
     twd_deg: float | None,
     true_wind: list[dict] | None = None,
 ) -> list[ManeuverCandidate]:
-    """Stage 1: find significant course-change candidates and describe them.
+    """Stage 1: segment the track into constant-heading legs and emit a
+    candidate for every turn between them — wind-agnostic.
 
-    A candidate is a genuine tack-side change (port/starboard relative to the
-    wind axis), not just any rapid heading change — a tactical heading wiggle
-    or an aborted/failed maneuver that rounds back never really settles onto
-    the new side, so neither should count. This is enforced structurally: the
-    whole per-sample side sequence is first debounced (`_debounced_sides`),
-    absorbing any side run shorter than `HOLD_WINDOW_SEC` into its
-    predecessor, so every remaining transition is guaranteed to have *both* a
-    settled "before" and a settled "after" side. Each surviving transition is
-    refined to its precise start/end (where the heading actually starts/stops
-    turning) and gets its type-independent metrics + feature vector computed.
-    Without real wind data (`twd_deg`), falls back to a synthetic axis (the
-    track's circular-mean heading) for the same side test, at reduced
-    confidence.
+    Candidate GENERATION knows nothing about the wind: ``_turn_pivots`` finds
+    every sustained heading change (a turn between two roughly-steady legs),
+    and each such turn is a candidate. Deciding whether a turn is a tack, a
+    gybe, a same-tack course change, or a false alarm is entirely Stage 2's job
+    (`maneuver_classification`), so there is no duplicated "what kind of turn"
+    logic here. The wind axis is still resolved (real ``twd_deg`` when
+    available, else the track's circular-mean heading as a synthetic axis) and
+    passed to ``_candidate_from_window`` only so the candidate carries
+    ``rel_before``/``rel_after`` for the classifier.
 
-    Applies only the classification-INDEPENDENT gates (duration, entry speed).
-    The spacing and per-type min-heading-change gates are applied by the caller
-    (`detect_maneuvers`), interleaved with classification, to preserve the
-    original ordering.
+    Each turn's boundaries are refined to where the heading actually
+    starts/stops turning, then its type-independent metrics + feature vector
+    are computed. Applies only the classification-INDEPENDENT gates (duration,
+    entry speed). The spacing gate is applied by the caller
+    (`detect_maneuvers`), interleaved with classification.
     """
     if len(gps) < 20:
         return []
 
     times, raw_headings, headings, gps_speeds, gps_lats, gps_lons = _detection_arrays(gps)
+    # Resolved to DESCRIBE candidates (rel_before/rel_after), never to find them.
     axis_deg, had_wind_axis = resolve_wind_axis(raw_headings, twd_deg)
 
-    # Window used only to refine each candidate's precise start/end once a
-    # real transition has already been located (see WINDOW_SIZE usage below).
+    # Window used only to refine each candidate's precise start/end once a turn
+    # pivot has already been located (see WINDOW_SIZE usage below).
     WINDOW_SIZE = 25  # samples (seconds at 1Hz)
-
-    sides = np.array([_tack_side(h, axis_deg) for h in headings])
-    sides = _debounced_sides(sides, times, HOLD_WINDOW_SEC)
-    transitions = np.where(np.diff(sides) != 0)[0]
 
     candidates: list[ManeuverCandidate] = []
 
-    for pivot in transitions:
-        # Refine the actual turn boundaries around the debounced transition:
-        # scan backward for where the rapid heading change begins, forward
-        # for where it stabilizes on the new side (same rate-of-turn logic
-        # as before, just anchored on a confirmed real transition). This
-        # boundary search is specific to "found a transition, where exactly
-        # does it start/end" — a manual maneuver skips it entirely since the
-        # user already gives exact boundaries (see compute_manual_maneuver).
+    for pivot in _turn_pivots(times, headings):
+        # Refine the actual turn boundaries around the pivot: scan backward for
+        # where the rapid heading change begins, forward for where it
+        # stabilizes onto the new heading. This boundary search is specific to
+        # "found a turn, where exactly does it start/end" — a manual maneuver
+        # skips it entirely since the user already gives exact boundaries (see
+        # compute_manual_maneuver).
         start_idx = pivot
         floor = max(5, pivot - WINDOW_SIZE)
         while start_idx > floor:
@@ -392,38 +394,64 @@ def _smooth_heading(headings_deg: np.ndarray, window: int = HEADING_SMOOTH_WINDO
     return np.degrees(np.arctan2(sin_s, cos_s)) % 360
 
 
-def _tack_side(heading_deg: float, axis_deg: float) -> int:
-    """+1 = starboard tack (wind from the right of the axis), -1 = port."""
-    return 1 if _angular_diff(heading_deg, axis_deg) > 0 else -1
+def _close_gaps(mask: np.ndarray, max_gap: int) -> np.ndarray:
+    """Fill interior ``False`` runs no longer than ``max_gap`` that sit between
+    two ``True`` runs — used to bridge a brief sub-threshold dip in turn rate
+    in the middle of a single rotation, so one physical turn stays one run."""
+    out = mask.copy()
+    n = len(out)
+    i = 0
+    while i < n:
+        if out[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and not out[j]:
+            j += 1
+        if 0 < i and j < n and (j - i) <= max_gap:
+            out[i:j] = True
+        i = j
+    return out
 
 
-def _debounced_sides(sides: np.ndarray, times: np.ndarray, min_run_sec: float) -> np.ndarray:
-    """Minimum-dwell-time filter on a per-sample tack-side sequence: any run
-    shorter than `min_run_sec` is absorbed into the run before it. This is
-    what actually distinguishes a genuine maneuver from a brief wiggle or an
-    aborted attempt that rounds back — a transition only survives if *both*
-    neighboring sides were themselves genuinely settled, not just the side
-    after it (checking one side only would let an aborted maneuver's rebound
-    read as a fresh, valid transition). Iterates to convergence since
-    absorbing one short run can join two longer runs that then need
-    re-checking (rare in practice, bounded for safety)."""
-    sides = sides.copy()
-    n = len(sides)
-    for _ in range(5):
-        changed = False
-        i = 0
-        while i < n:
-            j = i
-            while j < n and sides[j] == sides[i]:
-                j += 1
-            run_sec = times[min(j, n - 1)] - times[i]
-            if run_sec < min_run_sec and 0 < i < n:
-                sides[i:j] = sides[i - 1]
-                changed = True
-            i = j
-        if not changed:
-            break
-    return sides
+def _turn_pivots(times: np.ndarray, headings: np.ndarray) -> list[int]:
+    """Wind-agnostic turn detection: one pivot index per sustained heading
+    change, so Stage 1 just segments the track into roughly-constant-heading
+    legs and leaves classification to Stage 2.
+
+    A sample is "turning" when the smoothed heading changes faster than
+    ``TURN_RATE_THRESHOLD`` over a short look-ahead; contiguous turning samples
+    (bridging brief sub-threshold dips within one rotation, up to
+    ``TURN_WINDOW_EXTEND_SEC``) form a turn, whose pivot is the sample of peak
+    turn rate. Turns whose net heading change stays below
+    ``MIN_TURN_CANDIDATE_DEG`` are dropped as jitter; a turn-and-back wiggle
+    nets ~0 change here (and is rejected downstream anyway, since its refined
+    window settles back on the original heading)."""
+    n = len(headings)
+    step = HEADING_SMOOTH_WINDOW  # look-ahead, matches the boundary-refine scan
+    rate = np.zeros(n)
+    for i in range(n - step):
+        dt = times[i + step] - times[i]
+        if dt > 0:
+            rate[i] = _angular_diff(headings[i + step], headings[i]) / dt
+
+    turning = np.abs(rate) > TURN_RATE_THRESHOLD
+    turning = _close_gaps(turning, max_gap=int(round(TURN_WINDOW_EXTEND_SEC)))
+
+    pivots: list[int] = []
+    i = 0
+    while i < n:
+        if not turning[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and turning[j]:
+            j += 1
+        net = abs(_angular_diff(headings[j - 1], headings[i]))
+        if net >= MIN_TURN_CANDIDATE_DEG:
+            pivots.append(i + int(np.argmax(np.abs(rate[i:j]))))
+        i = j
+    return pivots
 
 
 def _compute_recovery(
