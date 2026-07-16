@@ -32,6 +32,11 @@ frontend/android/app/build/
 frontend/android/build/
 frontend/android/local.properties
 
+# Android release signing — never commit
+frontend/android/*.keystore
+frontend/android/*.jks
+frontend/android/keystore.properties
+
 # OS
 .DS_Store
 Thumbs.db
