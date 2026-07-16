@@ -1,9 +1,12 @@
-"""GPX track parsing → processed ``gps.json`` point format."""
+"""GPX track parsing/writing ↔ processed ``gps.json`` point format."""
 
 import re
 import xml.etree.ElementTree as ET
 
 from . import geo
+
+_GPX_NS = "http://www.topografix.com/GPX/1/1"
+_KN_TO_MS = 1 / 1.94384
 
 
 def parse_gpx(content: bytes) -> list[dict]:
@@ -68,3 +71,23 @@ def parse_gpx(content: bytes) -> list[dict]:
         })
 
     return result
+
+
+def build_gpx(points: list[dict]) -> bytes:
+    """Serialize processed gps.json points (``t``/``lat``/``lon``/``speed_kn``)
+    into GPX 1.1 XML — the inverse of ``parse_gpx``, used for the "download
+    GPX" export (always regenerated from the processed track, never the
+    original raw upload). ``<speed>`` is written in m/s — the unit
+    ``parse_gpx`` reads it back as (``_speed_ms * 1.94384`` → knots) — so a
+    round trip through both functions recovers the same knots value.
+    ``course`` isn't written: ``parse_gpx`` never reads it from XML, it
+    recomputes bearing from consecutive points itself."""
+    gpx = ET.Element("gpx", {"version": "1.1", "creator": "SailFrames One", "xmlns": _GPX_NS})
+    trkseg = ET.SubElement(ET.SubElement(gpx, "trk"), "trkseg")
+    for p in points:
+        trkpt = ET.SubElement(trkseg, "trkpt", {"lat": str(p["lat"]), "lon": str(p["lon"])})
+        if p.get("t"):
+            ET.SubElement(trkpt, "time").text = str(p["t"])
+        if p.get("speed_kn") is not None:
+            ET.SubElement(trkpt, "speed").text = str(p["speed_kn"] * _KN_TO_MS)
+    return ET.tostring(gpx, encoding="utf-8", xml_declaration=True)

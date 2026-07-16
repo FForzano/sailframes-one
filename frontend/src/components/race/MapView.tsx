@@ -39,15 +39,22 @@ export interface MapMark {
   lng: number;
   /** preview marks (suggest/auto-start-line before apply) render dashed */
   preview?: boolean;
-  /** "leg" marks render as a numbered circle (see `seq`); "maneuver" marks
-   * render as a small plain dot in a distinct color. "maneuver-pending" is a
+  /** "leg" marks render as a numbered circle (see `seq`), colored by
+   * `legType`; "maneuver" marks render as a colored pin (colored by
+   * `maneuverType`) with `mark_role`'s first letter. "maneuver-pending" is a
    * manually-added maneuver awaiting the worker's stat computation (see
    * SessionDetailPage's maneuver-edit mode); "maneuver-draft" is the
-   * in-progress start/end pick before it's even submitted. Omit for the
-   * default diamond (race marks: start/windward/gate/finish…). */
+   * in-progress start/end pick before it's even submitted (no type yet, so no
+   * color). Omit for the default diamond (race marks: start/windward/gate/
+   * finish…). */
   kind?: "leg" | "maneuver" | "maneuver-pending" | "maneuver-draft";
   /** Progressive number shown on "leg" marks (matches the LegsTable `#` column). */
   seq?: number;
+  /** Which bordata this "leg" mark is — drives its color (see .sf-markicon--leg-*). */
+  legType?: "upwind" | "downwind" | "reach";
+  /** Which maneuver this "maneuver"/"maneuver-pending" mark is — drives its
+   * color (see .sf-markicon--tack/--gybe/--course_change). */
+  maneuverType?: "tack" | "gybe" | "course_change";
 }
 
 // Imperative Leaflet (not react-leaflet): tracks + marks are drawn once, and
@@ -295,20 +302,46 @@ export function MapView({
     if (!map) return;
     const layer = L.layerGroup().addTo(map);
     for (const mk of marks) {
-      const icon =
-        mk.kind === "leg"
-          ? L.divIcon({ className: "sf-markicon sf-markicon--leg", html: `${mk.seq ?? ""}`, iconSize: [18, 18] })
-          : mk.kind === "maneuver"
-            ? L.divIcon({ className: "sf-markicon sf-markicon--maneuver", html: "", iconSize: [10, 10] })
-            : mk.kind === "maneuver-pending"
-              ? L.divIcon({ className: "sf-markicon sf-markicon--maneuver sf-markicon--pending", html: "", iconSize: [10, 10] })
-              : mk.kind === "maneuver-draft"
-                ? L.divIcon({ className: "sf-markicon sf-markicon--preview", html: "◆", iconSize: [12, 12] })
-                : L.divIcon({
-                    className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
-                    html: "◆",
-                    iconSize: [16, 16],
-                  });
+      let icon: L.DivIcon;
+      if (mk.kind === "leg") {
+        // Colored by point-of-sail (bordata) — see .sf-markicon--leg-* below;
+        // falls back to the base rule's color if legType is somehow absent.
+        const typeClass = mk.legType ? ` sf-markicon--leg-${mk.legType}` : "";
+        icon = L.divIcon({
+          className: `sf-markicon sf-markicon--leg${typeClass}`,
+          html: `${mk.seq ?? ""}`,
+          iconSize: [18, 18],
+        });
+      } else if (mk.kind === "maneuver" || mk.kind === "maneuver-pending") {
+        // A colored pin (circle + pointing tail) instead of a plain dot, so
+        // maneuver type reads at a glance — color (see .sf-markicon--tack/
+        // --gybe/--course_change) plus the type's first letter (from the
+        // already-translated mark_role, so it's correctly localized).
+        // iconSize/iconAnchor both use the FULL 26×33 box (26px circle + 7px
+        // tail, see .sf-markicon--maneuver-circle/-tail) — anchor at its
+        // bottom-center, the standard Leaflet pin convention. The earlier
+        // version anchored past its own (circle-only) iconSize, which is
+        // what put the tip in the wrong place.
+        const typeClass = mk.maneuverType ? ` sf-markicon--${mk.maneuverType}` : "";
+        const pendingClass = mk.kind === "maneuver-pending" ? " sf-markicon--pending" : "";
+        icon = L.divIcon({
+          className: `sf-markicon sf-markicon--maneuver${typeClass}${pendingClass}`,
+          html:
+            `<span class="sf-markicon--maneuver-circle">` +
+            `<span>${mk.mark_role.charAt(0).toUpperCase()}</span></span>` +
+            `<span class="sf-markicon--maneuver-tail"></span>`,
+          iconSize: [26, 33],
+          iconAnchor: [13, 33],
+        });
+      } else if (mk.kind === "maneuver-draft") {
+        icon = L.divIcon({ className: "sf-markicon sf-markicon--preview", html: "◆", iconSize: [12, 12] });
+      } else {
+        icon = L.divIcon({
+          className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
+          html: "◆",
+          iconSize: [16, 16],
+        });
+      }
       L.marker([mk.lat, mk.lng], { icon }).bindTooltip(mk.mark_role).addTo(layer);
     }
     marksLayerRef.current = layer;

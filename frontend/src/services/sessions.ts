@@ -1,4 +1,4 @@
-import { api } from "@/api/client";
+import { api, BASE } from "@/api/client";
 import type {
   FileRef,
   FileUploadTicket,
@@ -38,6 +38,11 @@ export const sessionsService = {
     api.post<{ ok: boolean; session_upload_id: UUID; status: "running" }>(`/sessions/${id}/wind/refresh`),
   reanalysisStatus: (id: UUID) =>
     api.get<{ status: "running" | "failed" | null; error: string | null }>(`/sessions/${id}/reanalysis-status`),
+  setTrim: (id: UUID, body: { trim_start_time: number | null; trim_end_time: number | null }) =>
+    api.patch<{ ok: boolean; session_upload_id: UUID; status: "running" }>(`/sessions/${id}/trim`, body),
+  // Plain browser navigation (not `request()`) so the download prompt fires —
+  // same-origin httpOnly auth cookies are sent automatically either way.
+  gpxDownloadUrl: (id: UUID) => `${BASE}/sessions/${id}/gpx`,
 
   streams: (id: UUID) => api.get<SessionStream[]>(`/sessions/${id}/streams`),
   stats: (id: UUID) => api.get<SessionStats>(`/sessions/${id}/stats`),

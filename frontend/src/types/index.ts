@@ -260,6 +260,10 @@ export interface Session {
   ended_at: string | null;
   status: SessionStatus;
   thumbnail: ImageRef | null;
+  // Reversible track-trim bounds (unix-epoch seconds) — null means no trim,
+  // the full track is analyzed. See sessionsService.setTrim.
+  trim_start_time: number | null;
+  trim_end_time: number | null;
 }
 
 export interface SessionStream {

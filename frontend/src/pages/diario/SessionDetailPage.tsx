@@ -12,10 +12,9 @@ import { MapView, type MapMark } from "@/components/race/MapView";
 import { Timeline } from "@/components/race/Timeline";
 import { SpeedChart } from "@/components/race/SpeedChart";
 import { PlaybackIndicators } from "@/components/session/PlaybackIndicators";
-import { MapLegsOptions } from "@/components/session/MapLegsOptions";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { OptionsMenu } from "@/components/ui/OptionsMenu";
+import { Menu, type MenuSection } from "@/components/ui/Menu";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
@@ -32,6 +31,10 @@ import { sessionStatusBadge } from "@/utils/badges";
 import { SAILING_ROLES } from "@/utils/sailingRoles";
 import type { GpsPoint, SailingRole, UUID } from "@/types";
 import { useRef } from "react";
+
+// Keys of SessionLeg["leg_type"] and SessionManeuver["maneuver_type"] — one
+// map toggle each (see the marks useMemo and the "Mostra su mappa" submenu).
+type MapShowState = Record<"upwind" | "downwind" | "reach" | "tack" | "gybe" | "course_change", boolean>;
 
 function VideoUploader({ sessionId, onDone }: { sessionId: UUID; onDone: () => Promise<void> }) {
   const { t } = useTranslation();
@@ -77,9 +80,25 @@ export function SessionDetailPage() {
   const [crewRole, setCrewRole] = useState<SailingRole>("crew");
   const [deleting, setDeleting] = useState(false);
   const [gps, setGps] = useState<GpsPoint[] | null>(null);
-  const [showLegs, setShowLegs] = useState(true);
-  const [showManeuvers, setShowManeuvers] = useState(true);
+  // Per-type map display toggles — replaces the old flat showLegs/
+  // showManeuvers pair so bolina/lasco/poppa and virate/abbattute/cambi
+  // rotta can each be shown/hidden independently. Hidden by default —
+  // opt-in via the "Mostra su mappa" submenu.
+  const [mapShow, setMapShow] = useState<MapShowState>({
+    upwind: false, downwind: false, reach: false,
+    tack: false, gybe: false, course_change: false,
+  });
   const [maneuverEditMode, setManeuverEditMode] = useState(false);
+  // Track-trim mode: dragging the two handles on the SpeedChart picks the
+  // kept window (ms, matching Track.pts[].ms) before "Applica taglio" sends
+  // it to the backend (seconds) — see enterTrimMode/applyTrim below.
+  const [trimMode, setTrimMode] = useState(false);
+  const [trimDraftStartMs, setTrimDraftStartMs] = useState<number | null>(null);
+  const [trimDraftEndMs, setTrimDraftEndMs] = useState<number | null>(null);
+  // mapShow as it was right before entering trim mode — legs/maneuvers are
+  // forced off while trimming (they clutter a view that's only about the
+  // track itself) and restored once trim mode ends, applied or cancelled.
+  const [mapShowBeforeTrim, setMapShowBeforeTrim] = useState<MapShowState | null>(null);
   // First of the two track clicks that bracket a manually-added maneuver
   // (see MapView's placementMode) — the second click opens the confirm modal.
   const [maneuverDraftStart, setManeuverDraftStart] =
@@ -192,30 +211,39 @@ export function SessionDetailPage() {
 
   const marks = useMemo<MapMark[]>(() => {
     const out: MapMark[] = [];
-    if (showLegs && analysis.data?.legs.length) {
+    if (analysis.data?.legs.length) {
       const seq = legSequence(analysis.data.legs);
       for (const l of analysis.data.legs) {
+        if (!mapShow[l.leg_type]) continue;
         if (l.start_lat == null || l.start_lon == null) continue;
+        // Midpoint of the leg, not its start — the number reads as "this leg",
+        // not "the tack that started it". Falls back to the start point if
+        // the end position is missing.
+        const lat = l.end_lat != null ? (l.start_lat + l.end_lat) / 2 : l.start_lat;
+        const lng = l.end_lon != null ? (l.start_lon + l.end_lon) / 2 : l.start_lon;
         out.push({
           id: l.id,
           kind: "leg",
           seq: seq.get(l.id),
+          legType: l.leg_type,
           mark_role: t(`sessions.${l.leg_type}`),
-          lat: l.start_lat,
-          lng: l.start_lon,
+          lat,
+          lng,
         });
       }
     }
-    if (showManeuvers && analysis.data?.maneuvers.length) {
+    if (analysis.data?.maneuvers.length) {
       // Rejected maneuvers are hidden outside edit mode (same as the table,
       // see ManeuversTable) — in edit mode they stay visible so a "restore"
       // action is reachable.
       for (const m of analysis.data.maneuvers) {
+        if (!mapShow[m.maneuver_type]) continue;
         if (m.start_lat == null || m.start_lon == null) continue;
         if (m.rejected && !maneuverEditMode) continue;
         out.push({
           id: m.id,
           kind: m.pending ? "maneuver-pending" : "maneuver",
+          maneuverType: m.maneuver_type,
           mark_role: t(`sessions.${m.maneuver_type}`),
           lat: m.start_lat,
           lng: m.start_lon,
@@ -232,7 +260,22 @@ export function SessionDetailPage() {
       });
     }
     return out;
-  }, [analysis.data, showLegs, showManeuvers, maneuverEditMode, maneuverDraftStart, t]);
+  }, [analysis.data, mapShow, maneuverEditMode, maneuverDraftStart, t]);
+
+  // Small always-visible key for the pin colors (see .sf-map-legend) — only
+  // the types actually present (and currently toggled on) in `marks`, in a
+  // stable order (legs, then maneuvers).
+  const mapLegend = useMemo(() => {
+    const order = ["leg-upwind", "leg-reach", "leg-downwind", "tack", "gybe", "course_change"];
+    const seen = new Map<string, string>();
+    for (const mk of marks) {
+      if (mk.kind === "leg" && mk.legType) seen.set(`leg-${mk.legType}`, mk.mark_role);
+      else if ((mk.kind === "maneuver" || mk.kind === "maneuver-pending") && mk.maneuverType) {
+        seen.set(mk.maneuverType, mk.mark_role);
+      }
+    }
+    return order.filter((key) => seen.has(key)).map((key) => [key, seen.get(key)!] as const);
+  }, [marks]);
 
   const addCrew = useMutation({
     mutationFn: (userId: UUID) =>
@@ -271,6 +314,44 @@ export function SessionDetailPage() {
     onSuccess: startReanalysisPolling,
     onError: () => notify(t("errors.generic"), "error"),
   });
+  // Restores whatever map-display toggles were active before trim mode
+  // forced them all off (see enterTrimMode) — runs whether trim was applied
+  // or cancelled, since both paths call this.
+  const exitTrimMode = () => {
+    setTrimMode(false);
+    setTrimDraftStartMs(null);
+    setTrimDraftEndMs(null);
+    setMapShow((prev) => mapShowBeforeTrim ?? prev);
+    setMapShowBeforeTrim(null);
+  };
+  // Seeds the draft handles from the session's persisted trim (adjustable —
+  // reversible, see the plan's "Taglio traccia" section) or, if unset, the
+  // full track bounds. Also hides every leg/maneuver pin for the duration —
+  // trimming is about the track itself, and they'd only clutter the chart/map.
+  const enterTrimMode = () => {
+    const [tMin, tMax] = tracks.length ? timeBounds(tracks) : [0, 0];
+    const start = session.data?.trim_start_time;
+    const end = session.data?.trim_end_time;
+    setTrimDraftStartMs(start != null ? start * 1000 : tMin);
+    setTrimDraftEndMs(end != null ? end * 1000 : tMax);
+    setMapShowBeforeTrim(mapShow);
+    setMapShow({ upwind: false, downwind: false, reach: false, tack: false, gybe: false, course_change: false });
+    setTrimMode(true);
+  };
+  const setTrim = useMutation({
+    mutationFn: (body: { trim_start_time: number | null; trim_end_time: number | null }) =>
+      sessionsService.setTrim(sessionId!, body),
+    onSuccess: () => {
+      exitTrimMode();
+      startReanalysisPolling();
+    },
+    onError: () => notify(t("errors.generic"), "error"),
+  });
+  const applyTrim = () => {
+    if (trimDraftStartMs == null || trimDraftEndMs == null) return;
+    setTrim.mutate({ trim_start_time: trimDraftStartMs / 1000, trim_end_time: trimDraftEndMs / 1000 });
+  };
+  const removeTrim = () => setTrim.mutate({ trim_start_time: null, trim_end_time: null });
   const addManeuver = useMutation({
     mutationFn: () =>
       sessionsService.addManeuver(sessionId!, {
@@ -305,6 +386,99 @@ export function SessionDetailPage() {
   const s = session.data;
   const boat = boats.data?.find((b) => b.id === s.boat_id);
   const manager = isBoatManager(s.boat_id);
+  const hasTrim = s.trim_start_time != null || s.trim_end_time != null;
+
+  // Single consolidated ⋮ menu (title-level) — replaces the old separate
+  // OptionsMenu (session actions) + MapLegsOptions (⚙ on the map). Sections
+  // absent for a non-manager viewer: only "Mostra su mappa" (always visible
+  // to anyone who can see the analysis) and GPX download (visible to any
+  // viewer — matches the backend's _require_visible permission, not the
+  // edit-only _can_edit the other actions use).
+  const menuSections: MenuSection[] = [];
+  if (manager) {
+    menuSections.push({
+      heading: t("sessions.menuSectionSession"),
+      items: [
+        {
+          label: t("sessions.reanalyze"),
+          onClick: () => reanalyze.mutate(),
+          disabled: reanalyze.isPending || reanalysisPolling,
+        },
+        {
+          label: t("sessions.refreshWind"),
+          onClick: () => refreshWind.mutate(),
+          disabled: refreshWind.isPending || reanalysisPolling,
+        },
+        {
+          label: maneuverEditMode ? t("sessions.editManeuversDone") : t("sessions.editManeuvers"),
+          onClick: () => {
+            setManeuverEditMode((v) => !v);
+            setManeuverDraftStart(null);
+            setManeuverDraftEnd(null);
+          },
+        },
+      ],
+    });
+  }
+  menuSections.push({
+    heading: t("sessions.menuSectionTrack"),
+    items: [
+      {
+        label: t("sessions.downloadGpx"),
+        onClick: () => window.open(sessionsService.gpxDownloadUrl(sessionId!), "_blank"),
+      },
+      // Flat items, no submenu — applying/cancelling happens via the visible
+      // button row shown under the map while trimMode is active (clearer
+      // than a menu item for a save/cancel action); this just starts/stops it.
+      ...(manager
+        ? [
+            {
+              label: trimMode ? t("sessions.editTrimDone") : t("sessions.trimTrack"),
+              onClick: () => (trimMode ? exitTrimMode() : enterTrimMode()),
+            },
+            ...(hasTrim
+              ? [{ label: t("sessions.removeTrim"), onClick: removeTrim, disabled: setTrim.isPending }]
+              : []),
+          ]
+        : []),
+    ],
+  });
+  if (analysis.data?.legs.length || analysis.data?.maneuvers.length) {
+    menuSections.push({
+      items: [
+        {
+          label: t("sessions.menuSectionMap"),
+          children: [
+            {
+              label: t("sessions.pointsOfSail"),
+              children: [
+                { label: t("sessions.upwind"), checked: mapShow.upwind,
+                  onCheckedChange: (v: boolean) => setMapShow((m) => ({ ...m, upwind: v })) },
+                { label: t("sessions.reach"), checked: mapShow.reach,
+                  onCheckedChange: (v: boolean) => setMapShow((m) => ({ ...m, reach: v })) },
+                { label: t("sessions.downwind"), checked: mapShow.downwind,
+                  onCheckedChange: (v: boolean) => setMapShow((m) => ({ ...m, downwind: v })) },
+              ],
+            },
+            {
+              label: t("sessions.maneuvers"),
+              children: [
+                { label: t("sessions.tacks"), checked: mapShow.tack,
+                  onCheckedChange: (v: boolean) => setMapShow((m) => ({ ...m, tack: v })) },
+                { label: t("sessions.gybes"), checked: mapShow.gybe,
+                  onCheckedChange: (v: boolean) => setMapShow((m) => ({ ...m, gybe: v })) },
+                { label: t("sessions.course_changes"), checked: mapShow.course_change,
+                  onCheckedChange: (v: boolean) => setMapShow((m) => ({ ...m, course_change: v })) },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }
+  if (manager) {
+    menuSections.push({ items: [{ label: t("common.delete"), danger: true, onClick: () => setDeleting(true) }] });
+  }
 
   return (
     <div className="sf-section__body">
@@ -326,37 +500,7 @@ export function SessionDetailPage() {
             )}
           </>
         }
-        actions={
-          manager && (
-            <OptionsMenu
-              items={[
-                {
-                  label: t("sessions.reanalyze"),
-                  onClick: () => reanalyze.mutate(),
-                  disabled: reanalyze.isPending || reanalysisPolling,
-                },
-                {
-                  label: t("sessions.refreshWind"),
-                  onClick: () => refreshWind.mutate(),
-                  disabled: refreshWind.isPending || reanalysisPolling,
-                },
-                {
-                  label: maneuverEditMode ? t("sessions.editManeuversDone") : t("sessions.editManeuvers"),
-                  onClick: () => {
-                    setManeuverEditMode((v) => !v);
-                    setManeuverDraftStart(null);
-                    setManeuverDraftEnd(null);
-                  },
-                },
-                {
-                  label: t("common.delete"),
-                  danger: true,
-                  onClick: () => setDeleting(true),
-                },
-              ]}
-            />
-          )
-        }
+        actions={menuSections.length > 0 && <Menu sections={menuSections} />}
       >
         {null}
       </Card>
@@ -381,16 +525,6 @@ export function SessionDetailPage() {
                   ? { lat: tracks[0].pts[0].lat, lng: tracks[0].pts[0].lon, at: s.started_at }
                   : undefined
               }
-              mapOptions={
-                !!(analysis.data?.legs.length || analysis.data?.maneuvers.length) && (
-                  <MapLegsOptions
-                    showLegs={showLegs}
-                    onShowLegsChange={setShowLegs}
-                    showManeuvers={showManeuvers}
-                    onShowManeuversChange={setShowManeuvers}
-                  />
-                )
-              }
               controls={
                 <Timeline className="sf-timeline--overlay" stepMs={medianIntervalMs(tracks[0]) * 5} />
               }
@@ -402,8 +536,42 @@ export function SessionDetailPage() {
                 {maneuverDraftStart ? t("sessions.maneuverPickEnd") : t("sessions.maneuverPickStart")}
               </p>
             )}
+            {trimMode && (
+              <div className="sf-trim-bar sf-card__pad">
+                <p className="sf-muted">{t("sessions.trimHint")}</p>
+                <div className="sf-trim-bar__actions">
+                  <Button
+                    onClick={applyTrim}
+                    disabled={setTrim.isPending || trimDraftStartMs == null || trimDraftEndMs == null}
+                  >
+                    {t("sessions.applyTrim")}
+                  </Button>
+                  <Button variant="ghost" onClick={exitTrimMode} disabled={setTrim.isPending}>
+                    {t("common.cancel")}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {mapLegend.length > 0 && (
+              <div className="sf-map-legend sf-card__pad">
+                {mapLegend.map(([key, label]) => (
+                  <span key={key} className="sf-map-legend__item">
+                    <span className={`sf-legend__dot sf-legend__dot--${key}`} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="sf-section__body sf-card__pad">
-              <SpeedChart tracks={tracks} vmg={analysis.data?.vmg_series} />
+              <SpeedChart
+                tracks={tracks}
+                vmg={analysis.data?.vmg_series}
+                trimMode={trimMode}
+                trimStartMs={trimDraftStartMs}
+                trimEndMs={trimDraftEndMs}
+                onTrimStartChange={setTrimDraftStartMs}
+                onTrimEndChange={setTrimDraftEndMs}
+              />
               <PlaybackIndicators track={tracks[0]} vmg={analysis.data?.vmg_series} />
             </div>
           </div>

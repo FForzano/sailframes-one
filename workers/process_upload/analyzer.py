@@ -43,6 +43,24 @@ from processing.wind_estimation import estimate as estimate_wind
 from processing.wind_estimation import refinements_from
 
 
+def _slice_by_time(records: list, trim_start: Optional[float], trim_end: Optional[float]) -> list:
+    """Filter a list of ``GpsPoint``/``ImuReading``/``WindReading`` instances
+    (attribute ``.timestamp``) OR plain ``{"timestamp": ...}`` dicts (the
+    ``estimated_position``/``estimated_motion`` shape from ``track.py``) down
+    to ``[trim_start, trim_end]`` (either bound ``None`` = open on that side).
+    A no-op when both are ``None`` — the common case, no trim set — so an
+    untrimmed session's analysis is unchanged."""
+    if trim_start is None and trim_end is None:
+        return records
+
+    def _ts(r):
+        return r.timestamp if hasattr(r, "timestamp") else r["timestamp"]
+
+    return [r for r in records
+            if (trim_start is None or _ts(r) >= trim_start)
+            and (trim_end is None or _ts(r) <= trim_end)]
+
+
 def load_sensor_json(path: Path) -> list[dict]:
     """Load sensor JSON file."""
     if not path.exists():
@@ -98,15 +116,31 @@ class SessionContext:
     wind_refinements: list
 
 
-def load_session_context(data_dir: Path) -> Optional[SessionContext]:
+def load_session_context(
+    data_dir: Path, trim_start: Optional[float] = None, trim_end: Optional[float] = None,
+) -> Optional[SessionContext]:
     """Parse ``gps.json``/``imu.json``/``wind.json``/``wind_cache.json`` from
     a processed-upload prefix and resolve true wind. Returns ``None`` when
     there's no GPS data — the caller decides how to report that
     (``analyze_session`` returns an ``{"error": ...}`` dict; the manual
-    maneuver path raises)."""
+    maneuver path raises).
+
+    ``trim_start``/``trim_end`` (unix-epoch seconds — a session's reversible
+    track-trim bounds, see ``backend/routers/sessions.py::set_session_trim``)
+    slice every parsed series to that window via ``_slice_by_time`` BEFORE
+    wind estimation, so the true-wind estimate only considers the kept
+    portion too. Raw ``gps.json`` itself is never modified — this only
+    affects what one analysis run considers. Both ``None`` (no trim) is a
+    no-op, so an untrimmed session's analysis is unchanged."""
     gps, estimated_position, estimated_motion = parse_gps(load_sensor_json(data_dir / "gps.json"))
     imu = parse_imu(load_sensor_json(data_dir / "imu.json"))
     wind = parse_wind(load_sensor_json(data_dir / "wind.json"))
+
+    gps = _slice_by_time(gps, trim_start, trim_end)
+    imu = _slice_by_time(imu, trim_start, trim_end)
+    wind = _slice_by_time(wind, trim_start, trim_end)
+    estimated_position = _slice_by_time(estimated_position, trim_start, trim_end)
+    estimated_motion = _slice_by_time(estimated_motion, trim_start, trim_end)
 
     if not gps:
         return None
@@ -136,7 +170,9 @@ def load_session_context(data_dir: Path) -> Optional[SessionContext]:
     )
 
 
-def analyze_session(data_dir: Path) -> dict:
+def analyze_session(
+    data_dir: Path, trim_start: Optional[float] = None, trim_end: Optional[float] = None,
+) -> dict:
     """Run full analysis pipeline on a session directory.
 
     Expects directory structure:
@@ -146,8 +182,10 @@ def analyze_session(data_dir: Path) -> dict:
             wind.json
             pressure.json
             manifest.json
-    """
-    ctx = load_session_context(data_dir)
+
+    ``trim_start``/``trim_end`` — see ``load_session_context``; ``None``/
+    ``None`` (the default) analyzes the full track."""
+    ctx = load_session_context(data_dir, trim_start=trim_start, trim_end=trim_end)
     if ctx is None:
         return {"error": "No GPS data found"}
     gps, imu, wind = ctx.gps, ctx.imu, ctx.wind

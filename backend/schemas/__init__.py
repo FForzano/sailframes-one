@@ -30,8 +30,9 @@ from .session import (
     ManeuverCorrectionModel,
     ManeuverCreateModel,
     ManeuverRejectionModel,
-    SessionWriteModel,
     SessionCrewModel,
+    SessionTrimModel,
+    SessionWriteModel,
 )
 from .regatta import RegattaWriteModel
 from .raceday import RaceDayWriteModel
@@ -67,6 +68,7 @@ __all__ = [
     "MarkWriteModel",
     "SessionWriteModel",
     "SessionCrewModel",
+    "SessionTrimModel",
     "ManeuverCorrectionModel",
     "ManeuverRejectionModel",
     "ManeuverCreateModel",

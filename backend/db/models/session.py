@@ -53,6 +53,13 @@ class SessionORM(UUIDPKMixin, Base):
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     # Derived/aggregated from the statuses of the linked session_uploads.
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    # Reversible track trim (unix-epoch seconds, same convention as
+    # session_maneuvers.start_time). Null = no trim, analyze the full track.
+    # Raw gps.json is never touched — a reanalysis just slices the parsed
+    # points to this window before running the pipeline (see
+    # workers/process_upload/analyzer.py::_slice_by_time). Adjustable any time.
+    trim_start_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    trim_end_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
 
 class SessionCrewORM(UUIDPKMixin, CreatedAtMixin, Base):
