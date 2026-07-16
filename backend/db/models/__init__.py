@@ -4,6 +4,7 @@ One module per aggregate. Importing this package registers every table on
 ``Base.metadata`` so Alembic autogenerate (and ``init_db()``) sees them.
 """
 
+from .app_config import AppConfigORM
 from .media import ImageORM, FileORM
 from .user import UserORM, AuthRefreshTokenORM
 from .rbac import RoleORM, PermissionORM, RolePermissionORM, UserRoleORM
@@ -28,6 +29,7 @@ from .ingest import ImportORM, SessionUploadORM, SessionStreamORM
 from .wind import WindStationORM, WindObservationORM, WindEstimateORM
 
 __all__ = [
+    "AppConfigORM",
     "ImageORM",
     "FileORM",
     "UserORM",

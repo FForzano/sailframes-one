@@ -99,6 +99,19 @@ def seed_device_types(session_factory) -> None:
         s.commit()
 
 
+def seed_app_config(session_factory) -> None:
+    """Ensure the singleton app_config row exists. Idempotent — creates it
+    only if missing, never touches an existing row (so a superadmin's
+    min_native_version_* settings survive every restart)."""
+    from ..db.models import AppConfigORM
+
+    with session_factory() as s:
+        existing = s.scalars(select(AppConfigORM)).first()
+        if existing is None:
+            s.add(AppConfigORM(min_native_version_android=None, min_native_version_ios=None))
+        s.commit()
+
+
 def seed_superadmin(repos) -> None:
     """Bootstrap the superadmin from env, via the user repo. Idempotent: no-op
     if the user already exists or no email is configured."""

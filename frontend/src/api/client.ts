@@ -39,9 +39,16 @@ export function setRefreshTokenProvider(fn: (() => string | null) | null): void 
 
 // Refresh rotates the opaque refresh token every time — native must
 // re-persist the new one or the next refresh will fail (reuse detection).
-let onNativeRefreshRotated: ((refreshToken: string) => void) | null = null;
+// Returns a Promise the caller awaits — the persisted write must land
+// before doRefresh() resolves (see the comment there): the server has
+// already rotated+revoked the previous refresh token by this point, so an
+// app kill before the write completes strands the device with a stale,
+// now-revoked token on the next launch.
+let onNativeRefreshRotated: ((refreshToken: string) => void | Promise<void>) | null = null;
 
-export function setNativeRefreshSink(fn: ((refreshToken: string) => void) | null): void {
+export function setNativeRefreshSink(
+  fn: ((refreshToken: string) => void | Promise<void>) | null,
+): void {
   onNativeRefreshRotated = fn;
 }
 
@@ -94,7 +101,10 @@ async function doRefresh(): Promise<boolean> {
     if (!res.ok) return false;
     const body = (await res.json()) as RefreshResponse;
     setAccessToken(body.access_token);
-    if (nativeRefreshToken) onNativeRefreshRotated?.(body.refresh_token);
+    // Must be awaited: the server has already revoked the old refresh
+    // token, so this write persisting the new one has to land before we
+    // consider the refresh "done" — see setNativeRefreshSink's comment.
+    if (nativeRefreshToken) await onNativeRefreshRotated?.(body.refresh_token);
     return true;
   } catch {
     return false;

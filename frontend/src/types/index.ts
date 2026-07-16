@@ -565,3 +565,13 @@ export interface UserRole {
   role?: string;
   scope_club_id: UUID | null;
 }
+
+// --- app config --------------------------------------------------------------------------
+
+/** Singleton settings row — see backend/db/models/app_config.py.
+ * `min_native_version_*` gates the native app per platform
+ * (NativeVersionGate); null means no gate enforced for that platform. */
+export interface AppConfig {
+  min_native_version_android: string | null;
+  min_native_version_ios: string | null;
+}

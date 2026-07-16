@@ -417,6 +417,15 @@
     "spinnaker_none": "Nessuno",
     "spinnaker_asymmetric": "Asimmetrico",
     "spinnaker_symmetric": "Simmetrico",
-    "ryaClassId": "ID classe RYA"
+    "ryaClassId": "ID classe RYA",
+    "appSettings": "Impostazioni app",
+    "minNativeVersionAndroid": "Versione minima app nativa (Android)",
+    "minNativeVersionIos": "Versione minima app nativa (iOS)",
+    "minNativeVersionHint": "Blocca l'app sotto questa versione (es. 1.4.0) con una schermata di aggiornamento obbligatorio. Lascia vuoto per disattivare — impostato separatamente per Android e iOS."
+  },
+  "updateRequired": {
+    "title": "Aggiornamento richiesto",
+    "body": "È disponibile una nuova versione di XGSail. Aggiorna l'app per continuare.",
+    "cta": "Apri il Play Store"
   }
 }

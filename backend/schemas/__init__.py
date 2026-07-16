@@ -7,6 +7,7 @@ layer to keep in sync. All ids are UUIDs; timestamps are ``AwareDatetime``
 """
 
 from .auth import RegisterModel, LoginModel, ChangePasswordModel, RefreshModel
+from .app_config import AppConfigUpdateModel
 from .user import UserUpdateModel
 from .boat import (
     BoatWriteModel,
@@ -43,6 +44,7 @@ from .wind import WindStationWriteModel, WindFetchModel
 from .polar import PolarPointModel, PolarUpsertModel
 
 __all__ = [
+    "AppConfigUpdateModel",
     "RegisterModel",
     "LoginModel",
     "ChangePasswordModel",

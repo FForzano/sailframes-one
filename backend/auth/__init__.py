@@ -25,7 +25,7 @@ from .permissions import (
 )
 from .device import current_device, require_system
 from .passwords import hash_password, verify_password
-from .seed import seed_defaults, seed_superadmin, seed_device_types
+from .seed import seed_defaults, seed_superadmin, seed_device_types, seed_app_config
 
 __all__ = [
     "require_permission",
@@ -45,4 +45,5 @@ __all__ = [
     "seed_defaults",
     "seed_superadmin",
     "seed_device_types",
+    "seed_app_config",
 ]

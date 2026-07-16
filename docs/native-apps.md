@@ -99,3 +99,35 @@ Android has no such gate — build and run on an emulator or device, share a
 `.gpx` file from any app, and confirm it lands in the import wizard. Do
 this first; it exercises the whole pipeline (share → hook → import →
 backend) except the iOS Share Extension itself.
+
+## Forcing a native update
+
+OTA (`docs/ota-updates.md`) can only ship JS/HTML/CSS/asset changes — never
+native code, plugins, or `capacitor.config.ts`. When a fix *does* need one of
+those (e.g. the `minSdkVersion`/`AndroidManifest.xml`/`server.hostname`
+changes made when this app was first set up), OTA can't reach installs still
+on the old native build, so there needs to be a way to force them onto a real
+store update instead.
+
+- `AppConfigORM` (`backend/db/models/app_config.py`) is a singleton settings
+  row seeded on startup (`auth.seed.seed_app_config`) with
+  `min_native_version_android`/`min_native_version_ios` both `None` — i.e. no
+  gate, by default. The two platforms are separate fields, not one shared
+  value, since Android and iOS release cadences are independent (App Store
+  review can lag a same-day Play Store rollout by days) — never compare an
+  Android install against the iOS minimum or vice versa.
+- `GET /api/app-config` is intentionally **public** (no auth): the native app
+  calls it via `NativeVersionGate` (`frontend/src/components/native/
+  NativeVersionGate.tsx`), wrapping the whole tree in `main.tsx` *before*
+  `AuthProvider`, so a logged-out user on a blocked version never even
+  reaches the login screen. It picks the field matching
+  `Capacitor.getPlatform()` and compares it against `@capacitor/app`'s
+  `App.getInfo().version` (the native versionName/CFBundleShortVersionString)
+  and renders a full-screen "update required" block instead of the app if
+  the installed version is lower. A backend-unreachable check fails open
+  (never locks out a working app over a transient network error).
+- `PATCH /api/app-config` (superadmin-only, `AdminPage`'s "App settings"
+  card) is how you actually flip the switch — takes effect immediately, no
+  redeploy needed, since every native launch re-checks it.
+- Web is entirely unaffected — `NativeVersionGate` is a no-op off
+  `Capacitor.isNativePlatform()`.
