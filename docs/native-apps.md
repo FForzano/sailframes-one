@@ -49,7 +49,10 @@ dedicated Cloudflare Tunnel route straight to `backend:8000` (see
 `deploy/README.md`), not `https://xgsail.com/api` (that goes through the
 frontend's nginx and its 10 MB upload cap). The backend also needs the
 WebView's origin in `SAILFRAMES_CORS_ORIGINS` (`capacitor://localhost` on
-iOS, `https://localhost` on Android) — already the default in
+iOS, `https://app.xgsail.com` on Android — see `server.hostname` in
+`capacitor.config.ts`, a dedicated purely-virtual hostname that doesn't need
+to exist in DNS, set so password managers recognize the native app via
+base-domain matching instead of "localhost") — already the default in
 `deploy/docker-compose.prod.yml`'s `backend` service, but required if
 you're pointing at a different backend (e.g. local dev over a LAN IP).
 

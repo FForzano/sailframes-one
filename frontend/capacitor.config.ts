@@ -12,6 +12,20 @@ const config: CapacitorConfig = {
   appName: "XGSail",
   webDir: "dist",
   android: { minWebViewVersion: 60 },
+  // Without this, Capacitor serves the app from https://localhost, which
+  // password managers (Bitwarden, etc.) show as the site. app.xgsail.com is
+  // a dedicated, purely virtual hostname — it doesn't need to exist in DNS,
+  // and doesn't need to match the real xgsail.com exactly: password
+  // managers match by base domain by default, so credentials saved for
+  // xgsail.com still autofill here. This only changes the WebView's own
+  // virtual origin (cookies/autofill/CORS identity); it does NOT redirect
+  // network requests — VITE_API_BASE still points at api.xgsail.com
+  // regardless. Requires SAILFRAMES_CORS_ORIGINS on the backend to include
+  // https://app.xgsail.com (see deploy/docker-compose.prod.yml).
+  server: {
+    hostname: "app.xgsail.com",
+    androidScheme: "https",
+  },
   plugins: {
     CapacitorUpdater: {
       // Points at the standalone ota-service (see ota-service/), never the

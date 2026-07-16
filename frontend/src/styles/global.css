@@ -160,6 +160,14 @@ h1, h2, h3 {
   .sf-mobile-only {
     display: flex;
   }
+  /* With no top navbar on mobile, .sf-main sits flush against the top edge.
+     Android 15+ (targetSdkVersion 36) enforces edge-to-edge regardless of
+     the StatusBar plugin config (see services/nativeStatusBar.ts), so this
+     is the fallback that keeps content clear of a notch/punch-hole camera —
+     a no-op on browsers/devices without a status bar inset. */
+  .sf-main {
+    padding-top: calc(1.25rem + env(safe-area-inset-top, 0px));
+  }
   .sf-actionbar {
     position: fixed;
     bottom: 0;

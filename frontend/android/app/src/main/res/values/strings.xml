@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">XGSail</string>
+    <string name="title_activity_main">XGSail</string>
+    <string name="package_name">com.xgsail.app</string>
+    <string name="custom_url_scheme">com.xgsail.app</string>
+</resources>
