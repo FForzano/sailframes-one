@@ -318,6 +318,7 @@
       "recording": "Recording",
       "paused": "Paused",
       "stopped": "Ready to upload",
+      "waitingNetwork": "Waiting for network",
       "uploading": "Uploading…",
       "uploaded": "Uploaded",
       "failed": "Upload failed"

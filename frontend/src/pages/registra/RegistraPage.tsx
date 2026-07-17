@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { Capacitor } from "@capacitor/core";
+import { Network } from "@capacitor/network";
 import { Disc, Pause, Play, Square } from "lucide-react";
 import { boatsService, boatKeys } from "@/services/boats";
 import { activitiesService, activityKeys } from "@/services/activities";
@@ -89,7 +91,15 @@ async function uploadRecording(
   }
 }
 
-function RecordingRow({ recording, onChanged }: { recording: RecordingMeta; onChanged: () => void }) {
+function RecordingRow({
+  recording,
+  online,
+  onChanged,
+}: {
+  recording: RecordingMeta;
+  online: boolean;
+  onChanged: () => void;
+}) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const [activityId, setActivityId] = useState(recording.activityId ?? STANDALONE);
@@ -138,7 +148,10 @@ function RecordingRow({ recording, onChanged }: { recording: RecordingMeta; onCh
         {new Date(recording.startedAt).toLocaleString()} — {boatName}
       </p>
       <p className="sf-muted">
-        {t(`registra.status.${recording.status}`)} · {fmtDuration(durationSeconds(recording))}
+        {!online && (recording.status === "stopped" || recording.status === "failed")
+          ? t("registra.status.waitingNetwork")
+          : t(`registra.status.${recording.status}`)}{" "}
+        · {fmtDuration(durationSeconds(recording))}
       </p>
       <ActivityPicker id={`activity-${recording.id}`} value={activityId} onChange={setActivityId} />
       <div className="sf-form__actions">
@@ -172,6 +185,7 @@ export function RegistraPage() {
   const [activeId, setActiveId] = useState<UUID | null>(nativeRecording.activeRecordingId());
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
+  const [online, setOnline] = useState(true);
   const upload = useImportUpload();
 
   const boats = useQuery({ queryKey: boatKeys.mine, queryFn: () => boatsService.list(true) });
@@ -179,6 +193,59 @@ export function RegistraPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Refs so attemptUpload/retryPending below stay referentially stable
+  // (upload/user are fresh objects every render) — otherwise the retry
+  // effect further down would tear down and re-subscribe its network
+  // listener/interval on every render instead of once.
+  const uploadRef = useRef(upload);
+  uploadRef.current = upload;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const recordingsRef = useRef(recordings);
+  recordingsRef.current = recordings;
+  const uploadingIds = useRef<Set<UUID>>(new Set());
+
+  const attemptUpload = useCallback(
+    async (recording: RecordingMeta) => {
+      const currentUser = userRef.current;
+      if (!currentUser || uploadingIds.current.has(recording.id)) return;
+      uploadingIds.current.add(recording.id);
+      try {
+        await uploadRecording(recording, uploadRef.current, currentUser.id);
+      } finally {
+        uploadingIds.current.delete(recording.id);
+        refresh();
+      }
+    },
+    [refresh],
+  );
+
+  const retryPending = useCallback(() => {
+    recordingsRef.current
+      .filter((r) => r.status === "stopped" || r.status === "failed")
+      .forEach((r) => void attemptUpload(r));
+  }, [attemptUpload]);
+
+  // A recording made offline (e.g. airplane mode) sits as "stopped"/"failed"
+  // until upload succeeds — retry as soon as connectivity returns, plus a
+  // periodic fallback while this page is open (covers "connected but no
+  // internet" cases the network-status event can miss). This only retries
+  // while the app is in the foreground; a recording left pending with the
+  // app fully closed needs the app reopened to finish uploading.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    Network.getStatus().then((status) => setOnline(status.connected));
+    const networkSub = Network.addListener("networkStatusChange", (status) => {
+      setOnline(status.connected);
+      if (status.connected) retryPending();
+    });
+    const interval = window.setInterval(retryPending, 30_000);
+    return () => {
+      void networkSub.then((h) => h.remove());
+      window.clearInterval(interval);
+    };
+  }, [retryPending]);
 
   // Live-updating elapsed-time display while a recording is running.
   useEffect(() => {
@@ -215,11 +282,10 @@ export function RegistraPage() {
     await nativeRecording.stop();
     setActiveId(null);
     refresh();
-    // Upload happens automatically, no confirmation step — failures still
-    // land in the list below as "Caricamento fallito" with a retry button.
-    if (stopped && user) {
-      void uploadRecording(stopped, upload, user.id).then(() => refresh());
-    }
+    // Upload happens automatically, no confirmation step — a failure (e.g.
+    // no connectivity) still lands as "Caricamento fallito" and gets picked
+    // up again by the retry effect above once the connection returns.
+    if (stopped) void attemptUpload(stopped);
   };
 
   return (
@@ -293,7 +359,7 @@ export function RegistraPage() {
       {recordings
         .filter((r) => r.id !== activeId)
         .map((r) => (
-          <RecordingRow key={r.id} recording={r} onChanged={refresh} />
+          <RecordingRow key={r.id} recording={r} online={online} onChanged={refresh} />
         ))}
       {recordings.length === 0 && !active && <p className="sf-muted">{t("registra.empty")}</p>}
     </>

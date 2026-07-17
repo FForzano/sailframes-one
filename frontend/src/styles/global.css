@@ -131,6 +131,23 @@ h1, h2, h3 {
   color: var(--sf-text);
   background: var(--sf-surface-2);
 }
+/* Pending-upload indicator on the Registra nav item (desktop: inline next
+   to the label; mobile: floating over the icon, see .sf-nav-dot--floating). */
+.sf-nav-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--sf-danger);
+}
+.sf-nav-dot--floating {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+}
 .sf-navlink--admin {
   color: var(--sf-warning);
 }
@@ -227,6 +244,7 @@ h1, h2, h3 {
     color: var(--sf-primary);
   }
   .sf-actionbar__icon {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;

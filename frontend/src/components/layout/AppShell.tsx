@@ -7,6 +7,7 @@ import { Disc, NotebookText, Settings, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useShareTarget } from "@/hooks/useShareTarget";
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation";
+import * as nativeRecording from "@/services/nativeRecording";
 import { ToastViewport } from "@/components/ui/ToastViewport";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProfileMenu } from "@/components/layout/ProfileMenu";
@@ -25,6 +26,17 @@ export function AppShell() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { pendingFile } = useShareTarget();
+
+  // Local GPS recordings still waiting to upload (or retrying) — surfaced
+  // as a badge on the Registra nav item so it's visible from anywhere in
+  // the app, not just while on that page.
+  const { recordings: localRecordings, refresh: refreshRecordings } = nativeRecording.useRecordings();
+  useEffect(() => {
+    refreshRecordings();
+  }, [refreshRecordings]);
+  const pendingRecordings = localRecordings.filter(
+    (r) => r.status === "stopped" || r.status === "failed" || r.status === "uploading",
+  ).length;
 
   // A GPX shared from another app (e.g. Waterspeed) can arrive while the
   // user is anywhere in the app — jump to the import wizard so ImportPage
@@ -91,6 +103,7 @@ export function AppShell() {
               className={`sf-navlink ${s.to === "/admin" ? "sf-navlink--admin" : ""}`}
             >
               {s.label}
+              {s.to === "/registra" && pendingRecordings > 0 && <span className="sf-nav-dot" aria-hidden />}
             </NavLink>
           ))}
         </nav>
@@ -119,6 +132,9 @@ export function AppShell() {
             ) : (
               <span className="sf-actionbar__icon" aria-hidden>
                 <s.Icon size={22} strokeWidth={1.75} />
+                {s.to === "/registra" && pendingRecordings > 0 && (
+                  <span className="sf-nav-dot sf-nav-dot--floating" aria-hidden />
+                )}
               </span>
             )}
             <span className="sf-actionbar__label">{s.label}</span>

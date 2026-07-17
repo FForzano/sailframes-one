@@ -318,6 +318,7 @@
       "recording": "In registrazione",
       "paused": "In pausa",
       "stopped": "Da caricare",
+      "waitingNetwork": "In attesa di rete",
       "uploading": "Caricamento…",
       "uploaded": "Caricata",
       "failed": "Caricamento fallito"
