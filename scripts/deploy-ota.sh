@@ -53,8 +53,26 @@ EOF
 
 echo "==> uploading bundle + manifest to MinIO (local/$BUCKET/$OTA_PREFIX)"
 mc alias set ota-deploy "$SAILFRAMES_S3_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
-mc cp "$WORKDIR/bundle.zip" "ota-deploy/$BUCKET/$OTA_PREFIX/bundles/$VERSION.zip"
-mc cp "$WORKDIR/manifest.json" "ota-deploy/$BUCKET/$OTA_PREFIX/manifest.json"
+
+# `mc cp` intermittently fails against the public (Cloudflare-tunneled) MinIO
+# endpoint with "You must provide the Content-Length HTTP header" — seen on
+# both a multi-MB bundle and a tiny manifest.json, so it's a transient
+# tunnel/proxy hiccup rather than anything about the payload. Retry a few
+# times with backoff instead of failing the whole deploy on a blip.
+mc_cp_retry() {
+  local src="$1" dst="$2" attempt
+  for attempt in 1 2 3 4 5; do
+    if mc cp "$src" "$dst"; then
+      return 0
+    fi
+    echo "  mc cp failed (attempt $attempt/5), retrying in $((attempt * 3))s..." >&2
+    sleep "$((attempt * 3))"
+  done
+  return 1
+}
+
+mc_cp_retry "$WORKDIR/bundle.zip" "ota-deploy/$BUCKET/$OTA_PREFIX/bundles/$VERSION.zip"
+mc_cp_retry "$WORKDIR/manifest.json" "ota-deploy/$BUCKET/$OTA_PREFIX/manifest.json"
 
 echo "==> pruning old bundles (keeping newest $KEEP_VERSIONS)"
 mc ls --json "ota-deploy/$BUCKET/$OTA_PREFIX/bundles/" \
