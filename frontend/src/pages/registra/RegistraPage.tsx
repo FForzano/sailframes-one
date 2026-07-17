@@ -10,6 +10,7 @@ import { sessionsService } from "@/services/sessions";
 import { useImportUpload } from "@/hooks/useImportUpload";
 import { useAuth } from "@/hooks/useAuth";
 import * as nativeRecording from "@/services/nativeRecording";
+import { ERROR_LOCATION_SERVICES_DISABLED, ERROR_PERMISSION_DENIED } from "@/services/nativeRecording";
 import type { RecordingMeta } from "@/services/nativeRecording";
 import { activityDisplayName } from "@/utils/activityName";
 import { fmtDuration } from "@/utils/format";
@@ -51,6 +52,16 @@ function elapsedLabel(startedAt: string): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/** Maps the sentinel error values nativeRecording.ts sets for a
+ * permission/GPS failure to a translated message — everything else (upload
+ * failures) is a raw, already-human-readable Error message and is shown as-is. */
+function recordingErrorMessage(t: (key: string) => string, error: string | null | undefined): string | null {
+  if (!error) return null;
+  if (error === ERROR_PERMISSION_DENIED) return t("registra.error.permissionDenied");
+  if (error === ERROR_LOCATION_SERVICES_DISABLED) return t("registra.error.locationServicesDisabled");
+  return error;
 }
 
 function durationSeconds(recording: RecordingMeta): number {
@@ -170,8 +181,15 @@ function RecordingRow({
             {t("common.delete")}
           </Button>
         )}
+        {recording.error === ERROR_PERMISSION_DENIED && (
+          <Button variant="ghost" onClick={() => void nativeRecording.openSettings()}>
+            {t("registra.openSettings")}
+          </Button>
+        )}
       </div>
-      {(error ?? recording.error) && <p className="sf-form__error">{error ?? recording.error}</p>}
+      {(error ?? recordingErrorMessage(t, recording.error)) && (
+        <p className="sf-form__error">{error ?? recordingErrorMessage(t, recording.error)}</p>
+      )}
     </Card>
   );
 }
@@ -254,7 +272,20 @@ export function RegistraPage() {
     return () => window.clearInterval(id);
   }, [activeId]);
 
-  const active = recordings.find((r) => r.id === activeId);
+  const activeEntry = recordings.find((r) => r.id === activeId);
+  // A permission/GPS failure (see nativeRecording.ts's addWatcherFor) flips
+  // the active recording's status to "failed" asynchronously, well after
+  // onStart already resolved successfully — this effect is what notices it
+  // and falls back to the start form with the error shown, instead of
+  // leaving the recording controls displayed for a track that stopped
+  // receiving any GPS fixes.
+  useEffect(() => {
+    if (activeEntry?.status === "permission_error" && activeId) {
+      setError(activeEntry.error ?? null);
+      setActiveId(null);
+    }
+  }, [activeEntry?.status, activeEntry?.error, activeId]);
+  const active = activeEntry?.status === "recording" || activeEntry?.status === "paused" ? activeEntry : undefined;
 
   const onStart = async () => {
     setError(null);
@@ -352,7 +383,12 @@ export function RegistraPage() {
               </Button>
             </div>
             <p className="sf-muted">{t("registra.batteryHint")}</p>
-            {error && <p className="sf-form__error">{error}</p>}
+            {error && <p className="sf-form__error">{recordingErrorMessage(t, error)}</p>}
+            {error === ERROR_PERMISSION_DENIED && (
+              <Button variant="ghost" onClick={() => void nativeRecording.openSettings()}>
+                {t("registra.openSettings")}
+              </Button>
+            )}
           </>
         )}
       </Card>

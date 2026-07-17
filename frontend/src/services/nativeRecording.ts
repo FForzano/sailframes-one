@@ -28,16 +28,43 @@ interface BackgroundGeolocationPlugin {
       stale: boolean;
       distanceFilter: number;
     },
-    callback: (location: { latitude: number; longitude: number; time: number } | null, error?: Error) => void,
+    callback: (
+      location: { latitude: number; longitude: number; time: number } | null,
+      error?: { message: string; code?: string },
+    ) => void,
   ): Promise<string>;
   removeWatcher(options: { id: string }): Promise<void>;
+  openSettings(): Promise<void>;
 }
 
 const BackgroundGeolocation = Capacitor.isNativePlatform()
   ? registerPlugin<BackgroundGeolocationPlugin>("BackgroundGeolocation")
   : null;
 
-export type RecordingStatus = "recording" | "paused" | "stopped" | "uploading" | "uploaded" | "failed";
+// Sentinel `error` values set on a recording when the plugin's watcher
+// rejects with its "NOT_AUTHORIZED" code — RegistraPage maps these to a
+// translated message (+ an "open settings" action for the permission case),
+// rather than showing the plugin's raw (English-only) error text. Android
+// distinguishes the two cases in the rejection message; iOS reports both as
+// "Permission denied." (CoreLocation collapses "services off" into the same
+// `.denied` authorization status), so on iOS a disabled Location Services
+// toggle also surfaces as ERROR_PERMISSION_DENIED.
+export const ERROR_PERMISSION_DENIED = "LOCATION_PERMISSION_DENIED";
+export const ERROR_LOCATION_SERVICES_DISABLED = "LOCATION_SERVICES_DISABLED";
+
+export async function openSettings(): Promise<void> {
+  if (!BackgroundGeolocation) return;
+  await BackgroundGeolocation.openSettings();
+}
+
+export type RecordingStatus =
+  | "recording"
+  | "paused"
+  | "stopped"
+  | "uploading"
+  | "uploaded"
+  | "failed"
+  | "permission_error";
 
 export interface RecordingMeta {
   id: UUID;
@@ -172,7 +199,30 @@ async function addWatcherFor(id: UUID): Promise<string> {
       distanceFilter: 0,
     },
     (location, error) => {
-      if (error || !location || !active || active.id !== id) return;
+      if (error) {
+        // The plugin never grants a watcher a second chance after this —
+        // it stops delivering updates for it, so the recording can't
+        // continue. Surface it as a failure instead of leaving the UI
+        // stuck showing "recording" with no points ever arriving.
+        if (error.code === "NOT_AUTHORIZED" && active && active.id === id) {
+          const entry = index.find((r) => r.id === id);
+          if (entry) {
+            // Not "failed": that status is reused by the upload-retry loop
+            // in RegistraPage, which would silently overwrite this message
+            // with a "file not found" error the next time it runs (finalize()
+            // — which writes the .gpx — was never reached, since stop() was
+            // never called).
+            entry.status = "permission_error";
+            entry.error = error.message.toLowerCase().includes("disabled")
+              ? ERROR_LOCATION_SERVICES_DISABLED
+              : ERROR_PERMISSION_DENIED;
+          }
+          active = null;
+          void saveIndex();
+        }
+        return;
+      }
+      if (!location || !active || active.id !== id) return;
       const now = Date.now();
       if (now - active.lastSampleAt < SAMPLE_INTERVAL_MS) return;
       active.lastSampleAt = now;
