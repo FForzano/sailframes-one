@@ -51,7 +51,10 @@ def _can_manage(owner_type: str, owner_id: uuid.UUID, request: Request) -> None:
 def _post_payload(post) -> dict:
     d = post.to_dict()
     d["author"] = user_summary(post.author_id) if post.author_id else None
-    d["image"] = media.image_payload(post.image_id)
+    d["images"] = [
+        img for pi in repos.posts.list_images(post.id)
+        if (img := media.image_payload(pi.image_id)) is not None
+    ]
     return d
 
 
@@ -77,8 +80,9 @@ def create_post(body: PostCreateModel, request: Request):
         "owner_id": body.owner_id,
         "author_id": user.id,
         "body": body.body,
-        "image_id": body.image_id,
     })
+    for image_id in body.image_ids:
+        repos.posts.add_image(post.id, image_id)
     return _post_payload(post)
 
 

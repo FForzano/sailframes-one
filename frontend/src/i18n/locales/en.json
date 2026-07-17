@@ -203,6 +203,7 @@
     "backToGroups": "All groups",
     "news": "News",
     "newsBody": "Write a news post…",
+    "newPost": "New post",
     "publish": "Publish",
     "emptyNews": "No news posted yet.",
     "memberCount_one": "{{count}} member",

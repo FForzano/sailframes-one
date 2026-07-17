@@ -8,12 +8,17 @@ across a user's clubs/groups without another migration. ``owner_id`` has no
 FK (it points at either ``clubs`` or ``groups`` depending on ``owner_type``)
 — validated in the router, not the DB. Create/delete only: no edit, so no
 ``updated_at``.
+
+``post_images`` is a many-to-many join to ``images`` (a post may carry
+several photos, e.g. a flyer plus additional pages) mirroring
+``boat_photos`` — unlike ``boat_photos`` it CASCADEs on the image side too
+since a post's images have no other purpose once the post is gone.
 """
 
 import uuid
 from typing import Optional
 
-from sqlalchemy import ForeignKey, String, Text, Uuid
+from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base, CreatedAtMixin, UUIDPKMixin, enum_check
@@ -31,6 +36,11 @@ class PostORM(UUIDPKMixin, CreatedAtMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    image_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("images.id", ondelete="SET NULL"), nullable=True
-    )
+
+
+class PostImageORM(UUIDPKMixin, Base):
+    __tablename__ = "post_images"
+    __table_args__ = (UniqueConstraint("post_id", "image_id"),)
+
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"))
+    image_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("images.id", ondelete="CASCADE"))

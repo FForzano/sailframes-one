@@ -8,7 +8,7 @@ export const postKeys = {
 export const postsService = {
   list: (ownerType: PostOwnerType, ownerId: UUID) =>
     api.get<Post[]>(`/posts?owner_type=${ownerType}&owner_id=${ownerId}`),
-  create: (body: { owner_type: PostOwnerType; owner_id: UUID; body: string; image_id?: UUID | null }) =>
+  create: (body: { owner_type: PostOwnerType; owner_id: UUID; body: string; image_ids?: UUID[] }) =>
     api.post<Post>("/posts", body),
   remove: (id: UUID) => api.del(`/posts/${id}`),
 

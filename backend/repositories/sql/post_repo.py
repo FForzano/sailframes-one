@@ -7,7 +7,7 @@ from typing import Optional
 
 from sqlalchemy import delete, select
 
-from ...db.models import PostORM
+from ...db.models import PostImageORM, PostORM
 
 
 class SqlPostRepo:
@@ -39,3 +39,20 @@ class SqlPostRepo:
             res = s.execute(delete(PostORM).where(PostORM.id == post_id))
             s.commit()
             return res.rowcount > 0
+
+    # --- post_images links ---
+
+    def list_images(self, post_id: uuid.UUID) -> "list[PostImageORM]":
+        with self.Session() as s:
+            return list(s.scalars(
+                select(PostImageORM).where(PostImageORM.post_id == post_id)
+            ).all())
+
+    def add_image(self, post_id: uuid.UUID, image_id: uuid.UUID) -> PostImageORM:
+        with self.Session() as s:
+            orm = PostImageORM(post_id=post_id, image_id=image_id)
+            s.add(orm)
+            s.commit()
+            s.refresh(orm)
+            s.expunge(orm)
+            return orm

@@ -1279,6 +1279,11 @@ h1, h2, h3 {
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--sf-border);
 }
+.sf-feed-form .sf-form__actions {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0.6rem;
+}
 .sf-feed {
   display: flex;
   flex-direction: column;

@@ -181,7 +181,7 @@ export interface Post {
   author_id: UUID | null;
   author: UserSummary | null;
   body: string;
-  image: ImageRef | null;
+  images: ImageRef[];
   created_at: string;
 }
 
