@@ -464,6 +464,8 @@ h1, h2, h3 {
   font-weight: 600;
 }
 .sf-field__input {
+  width: 100%;
+  box-sizing: border-box;
   padding: 0.5rem 0.7rem;
   background: var(--sf-bg-2);
   border: 1px solid var(--sf-border);
@@ -1283,6 +1285,14 @@ h1, h2, h3 {
   border-top: none;
   padding-top: 0;
   margin-top: 0.6rem;
+}
+/* Inside the "new post" modal there's no post list below it to separate from
+   (unlike the desktop inline form, sitting above the feed in the same
+   card) — the modal's own border/padding already closes it off. */
+.sf-modal__body .sf-feed-form {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 .sf-feed {
   display: flex;
