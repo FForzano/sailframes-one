@@ -17,7 +17,9 @@ import { GruppiLayout } from "@/pages/gruppi/GruppiLayout";
 import { GroupsPage } from "@/pages/gruppi/GroupsPage";
 import { GroupDetailPage } from "@/pages/gruppi/GroupDetailPage";
 import { ClubsPage } from "@/pages/gruppi/ClubsPage";
-import { ClubDetailPage } from "@/pages/gruppi/ClubDetailPage";
+import { ClubDetailLayout, ClubDevicesRoute, ClubRegattasRoute } from "@/pages/gruppi/ClubDetailLayout";
+import { ClubOverview } from "@/pages/gruppi/ClubOverview";
+import { ClubMembers } from "@/pages/gruppi/ClubMembers";
 import { ProfiloLayout } from "@/pages/profilo/ProfiloLayout";
 import { AnagraficaPage } from "@/pages/profilo/AnagraficaPage";
 import { ChangePasswordPage } from "@/pages/profilo/ChangePasswordPage";
@@ -62,7 +64,12 @@ export default function App() {
             <Route path="gruppi" element={<GroupsPage />} />
             <Route path="gruppi/:groupId" element={<GroupDetailPage />} />
             <Route path="clubs" element={<ClubsPage />} />
-            <Route path="clubs/:clubId" element={<ClubDetailPage />} />
+            <Route path="clubs/:clubId" element={<ClubDetailLayout />}>
+              <Route index element={<ClubOverview />} />
+              <Route path="membri" element={<ClubMembers />} />
+              <Route path="regate" element={<ClubRegattasRoute />} />
+              <Route path="flotta" element={<ClubDevicesRoute />} />
+            </Route>
           </Route>
 
           <Route path="/profilo" element={<ProfiloLayout />}>

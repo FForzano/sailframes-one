@@ -217,6 +217,16 @@ h1, h2, h3 {
     padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
     background: var(--sf-bg);
   }
+  /* Nested tab bar (e.g. club sub-pages inside the already-sticky
+     Gruppi/Circoli tabs) — sticky `top: 0` doesn't stack between siblings,
+     so a second sticky bar would overlap the outer one instead of sitting
+     below it. Opt out of sticky for the inner level. */
+  .sf-tabs--static {
+    position: static;
+    margin-top: 0;
+    padding-top: 0.5rem;
+    z-index: auto;
+  }
   .sf-actionbar {
     position: fixed;
     bottom: 0;
@@ -354,6 +364,15 @@ h1, h2, h3 {
   padding: 0;
   border-radius: 50%;
 }
+/* Small icon-only control for header/card actions (edit, upload, grant
+   role, invite) — same idea as .sf-btn--icon but sized for a toolbar
+   row instead of a primary tap target. */
+.sf-btn--icon-sm {
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border-radius: 50%;
+}
 
 /* ---------- Cards / forms / fields ---------- */
 .sf-card {
@@ -451,6 +470,15 @@ h1, h2, h3 {
   background-repeat: no-repeat;
   background-position: right 0.8rem center;
   background-size: 14px;
+}
+/* Compact select for inline use inside a table cell (e.g. per-member role
+   picker) — same look, smaller footprint than a labeled form field. */
+.sf-select--sm {
+  padding: 0.3rem 1.75rem 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--sf-border);
+  background-color: var(--sf-surface);
+  color: var(--sf-text);
 }
 
 .sf-combobox {
@@ -1203,6 +1231,76 @@ h1, h2, h3 {
 .sf-toast--warning {
   background: var(--sf-warning);
   color: #33270a;
+}
+
+/* ---------- Back link (detail page → its list) ---------- */
+.sf-backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  color: var(--sf-muted);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+.sf-backlink:hover {
+  color: var(--sf-text);
+}
+
+/* ---------- Entity search (clubs + groups combined) ---------- */
+.sf-entity-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sf-entity-search__bar,
+.sf-entity-search {
+  position: relative;
+}
+.sf-entity-search__icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--sf-muted);
+  pointer-events: none;
+}
+.sf-entity-search__input {
+  width: 100%;
+  padding: 0.55rem 0.75rem 0.55rem 2.25rem;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  background: var(--sf-surface);
+  color: var(--sf-text);
+  font: inherit;
+}
+.sf-entity-search__results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* ---------- Entity header (club/group detail) ---------- */
+/* Avatar + name + badge on their own row, actions on a separate row below —
+   avoids the old layout where all four were packed into one <h2> and wrapped
+   messily on narrow screens. */
+.sf-entity-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.sf-entity-header__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.sf-entity-header__name {
+  font-size: 1.3rem;
+  margin: 0 0 0.3rem;
+}
+.sf-entity-header__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 /* ---------- Media / avatars ---------- */

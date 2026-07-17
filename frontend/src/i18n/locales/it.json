@@ -180,6 +180,7 @@
     "myClubs": "I miei circoli",
     "discoverClubs": "Scopri i circoli",
     "createClub": "Crea circolo",
+    "overview": "Panoramica",
     "clubMembers": "Membri",
     "stationedBoats": "Barche stazionate",
     "regattas": "Regate",
@@ -195,7 +196,11 @@
     "deleteGroupConfirm": "Eliminare questo gruppo?",
     "deactivateClubConfirm": "Disattivare questo circolo? Lo storico è preservato.",
     "emptyGroups": "Non fai ancora parte di nessun gruppo.",
-    "emptyClubs": "Non fai ancora parte di nessun circolo."
+    "emptyClubs": "Non fai ancora parte di nessun circolo.",
+    "searchPlaceholder": "Cerca circoli e gruppi…",
+    "noSearchResults": "Nessun circolo o gruppo trovato.",
+    "backToClubs": "Tutti i circoli",
+    "backToGroups": "Tutti i gruppi"
   },
   "sessions": {
     "title": "Le mie sessioni",

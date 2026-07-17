@@ -180,6 +180,7 @@
     "myClubs": "My clubs",
     "discoverClubs": "Discover clubs",
     "createClub": "Create club",
+    "overview": "Overview",
     "clubMembers": "Members",
     "stationedBoats": "Stationed boats",
     "regattas": "Regattas",
@@ -195,7 +196,11 @@
     "deleteGroupConfirm": "Delete this group?",
     "deactivateClubConfirm": "Deactivate this club? History is preserved.",
     "emptyGroups": "You are not in any group yet.",
-    "emptyClubs": "You are not in any club yet."
+    "emptyClubs": "You are not in any club yet.",
+    "searchPlaceholder": "Search clubs and groups…",
+    "noSearchResults": "No club or group found.",
+    "backToClubs": "All clubs",
+    "backToGroups": "All groups"
   },
   "sessions": {
     "title": "My sessions",

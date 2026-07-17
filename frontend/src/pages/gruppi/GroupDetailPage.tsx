@@ -13,6 +13,7 @@ import { InputField } from "@/components/ui/InputField";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { BackLink } from "@/components/ui/BackLink";
 import { ImageUploader } from "@/components/common/ImageUploader";
 import { UserPicker } from "@/components/common/UserPicker";
 import { userLabel, fmtDateTime } from "@/utils/format";
@@ -105,6 +106,7 @@ export function GroupDetailPage() {
 
   return (
     <div className="sf-section__body">
+      <BackLink to="/gruppi/gruppi" label={t("gruppi.backToGroups")} />
       <Card
         title={
           <>

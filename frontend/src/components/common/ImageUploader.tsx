@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useMediaUpload } from "@/hooks/useMediaUpload";
 import { Button } from "@/components/ui/Button";
@@ -7,7 +7,9 @@ import type { UUID } from "@/types";
 
 /** File picker + presign/PUT/confirm state, for any parent-mediated image.
  * Pass `crop` to have the user reposition/zoom a square crop before it's
- * uploaded (e.g. profile pictures). */
+ * uploaded (e.g. profile pictures). Pass `icon` to render an icon-only
+ * button (with `label` as its `aria-label`) instead of the default text
+ * button. */
 export function ImageUploader({
   create,
   confirm,
@@ -15,6 +17,7 @@ export function ImageUploader({
   label,
   accept = "image/*",
   crop = false,
+  icon,
 }: {
   create: () => Promise<{ image_id: UUID; upload_url: string }>;
   confirm: (id: UUID) => Promise<unknown>;
@@ -22,6 +25,7 @@ export function ImageUploader({
   label?: string;
   accept?: string;
   crop?: boolean;
+  icon?: ReactNode;
 }) {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,15 +56,28 @@ export function ImageUploader({
           e.target.value = "";
         }}
       />
-      <Button
-        type="button"
-        variant="ghost"
-        className="sf-btn--sm"
-        disabled={busy}
-        onClick={() => inputRef.current?.click()}
-      >
-        {busy ? "…" : (label ?? t("common.upload"))}
-      </Button>
+      {icon ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="sf-btn--icon-sm"
+          disabled={busy}
+          aria-label={label ?? t("common.upload")}
+          onClick={() => inputRef.current?.click()}
+        >
+          {icon}
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          className="sf-btn--sm"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+        >
+          {busy ? "…" : (label ?? t("common.upload"))}
+        </Button>
+      )}
       {error && <span className="sf-form__error"> {error}</span>}
       {cropSrc && (
         <ImageCropModal
