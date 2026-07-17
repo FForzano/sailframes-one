@@ -217,6 +217,16 @@ h1, h2, h3 {
     padding-top: calc(0.5rem + env(safe-area-inset-top, 0px));
     background: var(--sf-bg);
   }
+  /* Nested tab bar (e.g. club sub-pages inside the already-sticky
+     Gruppi/Circoli tabs) — sticky `top: 0` doesn't stack between siblings,
+     so a second sticky bar would overlap the outer one instead of sitting
+     below it. Opt out of sticky for the inner level. */
+  .sf-tabs--static {
+    position: static;
+    margin-top: 0;
+    padding-top: 0.5rem;
+    z-index: auto;
+  }
   .sf-actionbar {
     position: fixed;
     bottom: 0;
@@ -295,6 +305,21 @@ h1, h2, h3 {
   color: var(--sf-text);
   border-bottom-color: var(--sf-primary);
 }
+.sf-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.3rem;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  background: var(--sf-warning, #e0a72c);
+  color: #1a1a1a;
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
 .sf-section__body {
   display: flex;
   flex-direction: column;
@@ -351,6 +376,15 @@ h1, h2, h3 {
 .sf-btn--icon {
   width: 3.25rem;
   height: 3.25rem;
+  padding: 0;
+  border-radius: 50%;
+}
+/* Small icon-only control for header/card actions (edit, upload, grant
+   role, invite) — same idea as .sf-btn--icon but sized for a toolbar
+   row instead of a primary tap target. */
+.sf-btn--icon-sm {
+  width: 2.1rem;
+  height: 2.1rem;
   padding: 0;
   border-radius: 50%;
 }
@@ -451,6 +485,15 @@ h1, h2, h3 {
   background-repeat: no-repeat;
   background-position: right 0.8rem center;
   background-size: 14px;
+}
+/* Compact select for inline use inside a table cell (e.g. per-member role
+   picker) — same look, smaller footprint than a labeled form field. */
+.sf-select--sm {
+  padding: 0.3rem 1.75rem 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--sf-border);
+  background-color: var(--sf-surface);
+  color: var(--sf-text);
 }
 
 .sf-combobox {
@@ -743,6 +786,15 @@ h1, h2, h3 {
 .sf-tablewrap {
   overflow-x: auto;
 }
+/* Roster action cell (approve/remove) — icon buttons only, so it stays
+   narrow enough to fit next to name/role on a phone instead of overflowing
+   the card the way text buttons ("Approva"/"Rimuovi" side by side) did. */
+.sf-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
 .sf-table {
   width: 100%;
   border-collapse: collapse;
@@ -766,6 +818,16 @@ h1, h2, h3 {
 }
 .sf-row--muted td {
   opacity: 0.55;
+}
+/* Membership row awaiting confirmation (invited/requested) — a light tint
+   makes it stand out in the roster without needing a dedicated status
+   column (see the small warning badge next to the name for the exact
+   state). */
+.sf-row--pending td {
+  background: color-mix(in srgb, var(--sf-warning) 10%, transparent);
+}
+.sf-row--pending:hover td {
+  background: color-mix(in srgb, var(--sf-warning) 16%, transparent);
 }
 .sf-table__row--clickable {
   cursor: pointer;
@@ -890,6 +952,12 @@ h1, h2, h3 {
 .sf-badge--danger {
   background: color-mix(in srgb, var(--sf-danger) 25%, transparent);
   color: var(--sf-danger);
+}
+/* Smaller variant for tight contexts (under a name in a roster row) —
+   avoids forcing the row to wrap/overflow the way a full-size badge does. */
+.sf-badge--sm {
+  padding: 0.05rem 0.4rem;
+  font-size: 0.68rem;
 }
 .sf-badge--pending {
   display: inline-flex;
@@ -1203,6 +1271,114 @@ h1, h2, h3 {
 .sf-toast--warning {
   background: var(--sf-warning);
   color: #33270a;
+}
+
+/* ---------- Feed (club/group news) ---------- */
+.sf-feed-form {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--sf-border);
+}
+.sf-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.sf-feed__post {
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--sf-border);
+}
+.sf-feed__post:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.sf-feed__post-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+.sf-feed__post-head .sf-btn--icon-sm {
+  margin-left: auto;
+}
+.sf-feed__post-image {
+  max-width: 100%;
+  border-radius: var(--sf-radius);
+  margin-top: 0.5rem;
+}
+
+/* ---------- Back link (detail page → its list) ---------- */
+.sf-backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  color: var(--sf-muted);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+.sf-backlink:hover {
+  color: var(--sf-text);
+}
+
+/* ---------- Entity search (clubs + groups combined) ---------- */
+.sf-entity-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sf-entity-search__bar,
+.sf-entity-search {
+  position: relative;
+}
+.sf-entity-search__icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--sf-muted);
+  pointer-events: none;
+}
+.sf-entity-search__input {
+  width: 100%;
+  padding: 0.55rem 0.75rem 0.55rem 2.25rem;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  background: var(--sf-surface);
+  color: var(--sf-text);
+  font: inherit;
+}
+.sf-entity-search__results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* ---------- Entity header (club/group detail) ---------- */
+/* Avatar + name + badge on their own row, actions on a separate row below —
+   avoids the old layout where all four were packed into one <h2> and wrapped
+   messily on narrow screens. */
+.sf-entity-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.sf-entity-header__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.sf-entity-header__name {
+  font-size: 1.3rem;
+  margin: 0 0 0.2rem;
+}
+.sf-entity-header__meta {
+  font-size: 0.85rem;
+  margin: 0 0 0.3rem;
+}
+.sf-entity-header__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 /* ---------- Media / avatars ---------- */

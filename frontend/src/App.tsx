@@ -15,9 +15,14 @@ import { RacePage } from "@/pages/diario/RacePage";
 import { RegistraPage } from "@/pages/registra/RegistraPage";
 import { GruppiLayout } from "@/pages/gruppi/GruppiLayout";
 import { GroupsPage } from "@/pages/gruppi/GroupsPage";
-import { GroupDetailPage } from "@/pages/gruppi/GroupDetailPage";
+import { GroupDetailLayout, GroupFeedRoute } from "@/pages/gruppi/GroupDetailLayout";
+import { GroupOverview } from "@/pages/gruppi/GroupOverview";
+import { GroupActivities } from "@/pages/gruppi/GroupActivities";
+import { GroupMembers } from "@/pages/gruppi/GroupMembers";
 import { ClubsPage } from "@/pages/gruppi/ClubsPage";
-import { ClubDetailPage } from "@/pages/gruppi/ClubDetailPage";
+import { ClubDetailLayout, ClubDevicesRoute, ClubFeedRoute, ClubRegattasRoute } from "@/pages/gruppi/ClubDetailLayout";
+import { ClubOverview } from "@/pages/gruppi/ClubOverview";
+import { ClubMembers } from "@/pages/gruppi/ClubMembers";
 import { ProfiloLayout } from "@/pages/profilo/ProfiloLayout";
 import { AnagraficaPage } from "@/pages/profilo/AnagraficaPage";
 import { ChangePasswordPage } from "@/pages/profilo/ChangePasswordPage";
@@ -60,9 +65,20 @@ export default function App() {
           <Route path="/gruppi" element={<GruppiLayout />}>
             <Route index element={<Navigate to="gruppi" replace />} />
             <Route path="gruppi" element={<GroupsPage />} />
-            <Route path="gruppi/:groupId" element={<GroupDetailPage />} />
+            <Route path="gruppi/:groupId" element={<GroupDetailLayout />}>
+              <Route index element={<GroupFeedRoute />} />
+              <Route path="informazioni" element={<GroupOverview />} />
+              <Route path="attivita" element={<GroupActivities />} />
+              <Route path="membri" element={<GroupMembers />} />
+            </Route>
             <Route path="clubs" element={<ClubsPage />} />
-            <Route path="clubs/:clubId" element={<ClubDetailPage />} />
+            <Route path="clubs/:clubId" element={<ClubDetailLayout />}>
+              <Route index element={<ClubFeedRoute />} />
+              <Route path="informazioni" element={<ClubOverview />} />
+              <Route path="membri" element={<ClubMembers />} />
+              <Route path="regate" element={<ClubRegattasRoute />} />
+              <Route path="flotta" element={<ClubDevicesRoute />} />
+            </Route>
           </Route>
 
           <Route path="/profilo" element={<ProfiloLayout />}>
