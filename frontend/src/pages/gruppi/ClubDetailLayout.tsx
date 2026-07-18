@@ -17,7 +17,7 @@ import { ImageUploader } from "@/components/common/ImageUploader";
 import { BackLink } from "@/components/ui/BackLink";
 import { EntityFeed } from "@/components/gruppi/EntityFeed";
 import { ClubDevices } from "./ClubDevices";
-import { ClubRegattas } from "./ClubRegattas";
+import { ClubEvents } from "./ClubEvents";
 import type { Boat, Club, UUID } from "@/types";
 
 export interface ClubContext {
@@ -27,6 +27,7 @@ export interface ClubContext {
   manages: boolean;
   managesMembers: boolean;
   managesRegattas: boolean;
+  managesActivities: boolean;
   managesRoles: boolean;
   managesPosts: boolean;
   stationedBoats: Boat[];
@@ -95,6 +96,7 @@ export function ClubDetailLayout() {
   const manages = can("club.manage", clubId);
   const managesMembers = can("user_club.manage", clubId);
   const managesRegattas = can("regatta.manage", clubId);
+  const managesActivities = can("activity.manage", clubId);
   const managesRoles = can("user_role.manage_scoped", clubId);
   const managesPosts = can("club_post.manage", clubId);
   const stationedBoats = boats.data?.filter((b) => b.club_id === clubId) ?? [];
@@ -106,6 +108,7 @@ export function ClubDetailLayout() {
     manages,
     managesMembers,
     managesRegattas,
+    managesActivities,
     managesRoles,
     managesPosts,
     stationedBoats,
@@ -153,7 +156,7 @@ export function ClubDetailLayout() {
         tabs={[
           ...(isMember ? [{ to: `/gruppi/clubs/${clubId}`, label: t("gruppi.news"), end: true }] : []),
           { to: `/gruppi/clubs/${clubId}/informazioni`, label: t("gruppi.overview") },
-          { to: `/gruppi/clubs/${clubId}/regate`, label: t("gruppi.regattas") },
+          { to: `/gruppi/clubs/${clubId}/eventi`, label: t("gruppi.events") },
           ...(isMember
             ? [{
                 to: `/gruppi/clubs/${clubId}/membri`,
@@ -214,12 +217,14 @@ export function ClubDetailLayout() {
   );
 }
 
-/** Route wrappers: ClubRegattas/ClubDevices take `clubId`/`manage` as plain
+/** Route wrappers: ClubEvents/ClubDevices take `clubId`/`manage` as plain
  * props (used nowhere else), so they don't need to know about the outlet
  * context themselves — these just bridge the two. */
-export function ClubRegattasRoute() {
-  const { clubId, managesRegattas } = useClubContext();
-  return <ClubRegattas clubId={clubId} manage={managesRegattas} />;
+export function ClubEventsRoute() {
+  const { clubId, managesRegattas, managesActivities } = useClubContext();
+  return (
+    <ClubEvents clubId={clubId} manageRegattas={managesRegattas} manageActivities={managesActivities} />
+  );
 }
 
 export function ClubDevicesRoute() {

@@ -1,5 +1,5 @@
 import { api } from "@/api/client";
-import type { Activity, ActivityData, Mark, Session, UUID } from "@/types";
+import type { Activity, ActivityData, ActivityStatus, Mark, Session, UUID } from "@/types";
 
 export const activityKeys = {
   all: ["activities"] as const,
@@ -8,6 +8,7 @@ export const activityKeys = {
   sessions: (id: UUID) => ["activities", id, "sessions"] as const,
   marks: (id: UUID) => ["activities", id, "marks"] as const,
   data: (id: UUID) => ["activities", id, "data"] as const,
+  upcoming: () => ["activities", "upcoming"] as const,
 };
 
 function qs(params: Record<string, string | undefined>): string {
@@ -18,11 +19,21 @@ function qs(params: Record<string, string | undefined>): string {
 }
 
 export const activitiesService = {
-  list: (filters: { type?: string; club_id?: UUID; group_id?: UUID; mine?: boolean } = {}) =>
+  list: (
+    filters: {
+      type?: string;
+      club_id?: UUID;
+      group_id?: UUID;
+      status?: ActivityStatus;
+      mine?: boolean;
+    } = {},
+  ) =>
     api.get<Activity[]>(
       `/activities${qs({ ...filters, mine: filters.mine ? "true" : undefined })}`,
     ),
   get: (id: UUID) => api.get<Activity>(`/activities/${id}`),
+  upcoming: (limit?: number) =>
+    api.get<Activity[]>(`/activities/upcoming${qs({ limit: limit ? String(limit) : undefined })}`),
   create: (body: Partial<Activity>) => api.post<Activity>("/activities", body),
   update: (id: UUID, body: Partial<Activity>) => api.patch<Activity>(`/activities/${id}`, body),
   remove: (id: UUID) => api.del(`/activities/${id}`),

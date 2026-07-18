@@ -122,7 +122,11 @@ def attach_to_activity(session_id: uuid.UUID, body: SessionAttachModel, request:
     exactly that reason — see ``update_session`` above): only allowed while
     the session's current activity is still a lone standalone wrapper, so a
     session that's already part of a real multi-session activity or race
-    can't be silently moved elsewhere."""
+    can't be silently moved elsewhere. Attaching to a ``planned`` announcement
+    no longer flips its status: several boats may attach recordings to the
+    same club/group event over time (including late imports), so upcoming vs.
+    past is decided purely by ``started_at``, not by whether a recording has
+    landed yet."""
     verify_csrf(request)
     user = require_user(request)
     session = _require_session(session_id)
