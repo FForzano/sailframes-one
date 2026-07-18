@@ -27,6 +27,7 @@ export interface ClubContext {
   manages: boolean;
   managesMembers: boolean;
   managesRegattas: boolean;
+  managesActivities: boolean;
   managesRoles: boolean;
   managesPosts: boolean;
   stationedBoats: Boat[];
@@ -95,6 +96,7 @@ export function ClubDetailLayout() {
   const manages = can("club.manage", clubId);
   const managesMembers = can("user_club.manage", clubId);
   const managesRegattas = can("regatta.manage", clubId);
+  const managesActivities = can("activity.manage", clubId);
   const managesRoles = can("user_role.manage_scoped", clubId);
   const managesPosts = can("club_post.manage", clubId);
   const stationedBoats = boats.data?.filter((b) => b.club_id === clubId) ?? [];
@@ -106,6 +108,7 @@ export function ClubDetailLayout() {
     manages,
     managesMembers,
     managesRegattas,
+    managesActivities,
     managesRoles,
     managesPosts,
     stationedBoats,
@@ -218,8 +221,10 @@ export function ClubDetailLayout() {
  * props (used nowhere else), so they don't need to know about the outlet
  * context themselves — these just bridge the two. */
 export function ClubEventsRoute() {
-  const { clubId, managesRegattas } = useClubContext();
-  return <ClubEvents clubId={clubId} manage={managesRegattas} />;
+  const { clubId, managesRegattas, managesActivities } = useClubContext();
+  return (
+    <ClubEvents clubId={clubId} manageRegattas={managesRegattas} manageActivities={managesActivities} />
+  );
 }
 
 export function ClubDevicesRoute() {

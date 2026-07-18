@@ -397,7 +397,11 @@
     "planned": "In programma",
     "upcoming": "In programma",
     "past": "Passate",
-    "when": "Quando si svolge"
+    "when": "Quando si svolge",
+    "today": "Oggi",
+    "tomorrow": "Domani",
+    "organizedBy": "Organizzato da {{name}}",
+    "viewDetails": "Vedi dettagli"
   },
   "regate": {
     "title": "Regate",

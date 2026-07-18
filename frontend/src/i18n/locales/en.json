@@ -397,7 +397,11 @@
     "planned": "Upcoming",
     "upcoming": "Upcoming",
     "past": "Past",
-    "when": "When it happens"
+    "when": "When it happens",
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "organizedBy": "Organized by {{name}}",
+    "viewDetails": "View details"
   },
   "regate": {
     "title": "Regattas",

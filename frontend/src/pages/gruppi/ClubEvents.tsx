@@ -174,7 +174,15 @@ function EventRow({
   );
 }
 
-export function ClubEvents({ clubId, manage }: { clubId: UUID; manage: boolean }) {
+export function ClubEvents({
+  clubId,
+  manageRegattas,
+  manageActivities,
+}: {
+  clubId: UUID;
+  manageRegattas: boolean;
+  manageActivities: boolean;
+}) {
   const { t } = useTranslation();
   const { notify } = useToast();
   const queryClient = useQueryClient();
@@ -259,14 +267,18 @@ export function ClubEvents({ clubId, manage }: { clubId: UUID; manage: boolean }
     <Card
       title={t("gruppi.events")}
       actions={
-        manage && (
+        (manageRegattas || manageActivities) && (
           <span className="sf-strip__actions">
-            <Button className="sf-btn--sm" onClick={() => setCreatingRegatta(true)}>
-              {t("regate.newRegatta")}
-            </Button>
-            <Button className="sf-btn--sm" onClick={() => setCreatingActivity(true)}>
-              {t("gruppi.newEvent")}
-            </Button>
+            {manageRegattas && (
+              <Button className="sf-btn--sm" onClick={() => setCreatingRegatta(true)}>
+                {t("regate.newRegatta")}
+              </Button>
+            )}
+            {manageActivities && (
+              <Button className="sf-btn--sm" onClick={() => setCreatingActivity(true)}>
+                {t("gruppi.newEvent")}
+              </Button>
+            )}
           </span>
         )
       }
@@ -278,7 +290,7 @@ export function ClubEvents({ clubId, manage }: { clubId: UUID; manage: boolean }
             <EventRow
               key={`${i.kind}-${i.id}`}
               item={i}
-              manage={manage}
+              manage={manageRegattas}
               open={openRegattaId === i.id}
               onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
             />
@@ -295,7 +307,7 @@ export function ClubEvents({ clubId, manage }: { clubId: UUID; manage: boolean }
             <EventRow
               key={`${i.kind}-${i.id}`}
               item={i}
-              manage={manage}
+              manage={manageRegattas}
               open={openRegattaId === i.id}
               onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
             />

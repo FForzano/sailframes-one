@@ -3,7 +3,9 @@
 Visibility follows ``activities.visibility`` (public|club|group|private) via
 ``activity_visible_to``; edits by the creator, club-scoped ``activity.manage``
 holders, or superadmin. Marks: activity creator, or ``mark.manage`` scoped to
-the club for race activities.
+the club for race activities. Creating a club-linked activity requires
+``activity.manage`` on that club; a group-linked one requires an
+owner/admin role in that group.
 """
 
 import uuid
@@ -73,6 +75,16 @@ def list_activities(request: Request, type: Optional[str] = None,
     return [_with_thumbnail(a) for a in activities if activity_visible_to(a, user)]
 
 
+@router.get("/upcoming")
+def list_upcoming_activities(request: Request, limit: int = 5):
+    """Announced events from the caller's own clubs/groups, soonest first —
+    powers the "in arrivo" banner in the personal diary. Registered before
+    ``/{activity_id}`` so FastAPI doesn't try to parse "upcoming" as a UUID."""
+    user = require_user(request)
+    activities = repos.activities.list_upcoming_for_user(user.id, limit=limit)
+    return [_with_thumbnail(a) for a in activities if activity_visible_to(a, user)]
+
+
 @router.get("/{activity_id}")
 def get_activity(activity_id: uuid.UUID, request: Request):
     return _with_thumbnail(_require_visible(activity_id, current_user(request)))
@@ -84,6 +96,16 @@ def create_activity(body: ActivityWriteModel, request: Request):
     user = require_user(request)
     if not body.type:
         raise HTTPException(422, "type is required")
+    if body.club_id is not None and not user.is_superadmin:
+        if repos.clubs.get(body.club_id) is None:
+            raise HTTPException(404, "Club not found")
+        if not user_has_permission(user, "activity.manage", club_id=body.club_id):
+            raise HTTPException(403, "Not allowed to create activities for this club")
+    if body.group_id is not None and not user.is_superadmin:
+        if repos.groups.get(body.group_id) is None:
+            raise HTTPException(404, "Group not found")
+        if not repos.groups.is_member(body.group_id, user.id, roles=["owner", "admin"]):
+            raise HTTPException(403, "Not allowed to create activities for this group")
     data = body.model_dump(exclude_unset=True)
     data["created_by"] = user.id
     return repos.activities.create(data).to_dict()

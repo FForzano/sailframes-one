@@ -6,12 +6,12 @@ trainings get buoys too (see docs/er-project.md).
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from ...db.models import ActivityORM, MarkORM
+from ...db.models import ActivityORM, MarkORM, UserClubORM, UserGroupORM
 
 _FIELDS = ("name", "type", "club_id", "race_id", "created_by", "group_id",
            "visibility", "status", "description", "started_at", "ended_at",
@@ -43,6 +43,34 @@ class SqlActivityRepo:
                 q = q.where(ActivityORM.status == status)
             if created_by is not None:
                 q = q.where(ActivityORM.created_by == created_by)
+            return list(s.scalars(q).all())
+
+    def list_upcoming_for_user(self, user_id: uuid.UUID, *, limit: int = 5) -> "list[ActivityORM]":
+        """Announced (``planned``) events with a future date, belonging to a
+        club/group the user actively belongs to — the "in arrivo" feed."""
+        with self.Session() as s:
+            club_ids = select(UserClubORM.club_id).where(
+                UserClubORM.user_id == user_id,
+                UserClubORM.status == "active",
+                UserClubORM.deleted_at.is_(None),
+            )
+            group_ids = select(UserGroupORM.group_id).where(
+                UserGroupORM.user_id == user_id,
+                UserGroupORM.status == "active",
+                UserGroupORM.deleted_at.is_(None),
+            )
+            q = (
+                select(ActivityORM)
+                .where(ActivityORM.status == "planned")
+                .where(ActivityORM.started_at.isnot(None))
+                .where(ActivityORM.started_at >= datetime.now(timezone.utc))
+                .where(or_(
+                    ActivityORM.club_id.in_(club_ids),
+                    ActivityORM.group_id.in_(group_ids),
+                ))
+                .order_by(ActivityORM.started_at.asc())
+                .limit(limit)
+            )
             return list(s.scalars(q).all())
 
     def get(self, activity_id: uuid.UUID) -> Optional[ActivityORM]:
