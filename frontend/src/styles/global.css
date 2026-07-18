@@ -892,6 +892,11 @@ h1, h2, h3 {
   gap: 1rem;
   margin-top: 1rem;
 }
+.sf-activity-grid__sentinel {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 0;
+}
 .sf-activity-card {
   display: block;
   background: var(--sf-surface);

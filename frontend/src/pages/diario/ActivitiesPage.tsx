@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { activitiesService, activityKeys } from "@/services/activities";
+import { useInfiniteScrollSentinel } from "@/hooks/useInfiniteScrollSentinel";
 import { UpcomingEventsBanner } from "@/components/diario/UpcomingEventsBanner";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -12,15 +13,29 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { activityDisplayName } from "@/utils/activityName";
 import { fmtDate } from "@/utils/format";
 
+const PAGE_SIZE = 20;
+
 export function ActivitiesPage() {
   const { t } = useTranslation();
   const [type, setType] = useState("");
   const [mine, setMine] = useState(true);
 
-  const activities = useQuery({
+  const activities = useInfiniteQuery({
     queryKey: activityKeys.list({ type, mine: String(mine) }),
-    queryFn: () => activitiesService.list({ type: type || undefined, mine }),
+    queryFn: ({ pageParam }) =>
+      activitiesService.list({ type: type || undefined, mine, limit: PAGE_SIZE, offset: pageParam }),
+    initialPageParam: 0,
+    // The API doesn't return a total count — a page shorter than PAGE_SIZE
+    // means we've reached the end.
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length < PAGE_SIZE ? undefined : allPages.length * PAGE_SIZE,
   });
+  const list = useMemo(() => activities.data?.pages.flat() ?? [], [activities.data]);
+
+  const sentinelRef = useInfiniteScrollSentinel<HTMLDivElement>(
+    () => activities.fetchNextPage(),
+    activities.hasNextPage === true && !activities.isFetchingNextPage,
+  );
 
   return (
     <>
@@ -53,27 +68,34 @@ export function ActivitiesPage() {
 
         {activities.isLoading ? (
           <Spinner />
-        ) : activities.data?.length === 0 ? (
+        ) : list.length === 0 ? (
           <EmptyState>{t("activities.empty")}</EmptyState>
         ) : (
-          <div className="sf-activity-grid">
-            {activities.data?.map((a) => (
-              <Link key={a.id} to={`/diario/activities/${a.id}`} className="sf-activity-card">
-                {a.thumbnail ? (
-                  <img src={a.thumbnail.url} alt="" className="sf-activity-card__thumb" />
-                ) : (
-                  <span className="sf-activity-card__thumb sf-activity-card__thumb--empty" aria-hidden />
-                )}
-                <div className="sf-activity-card__body">
-                  <strong>{activityDisplayName(a, t)}</strong>
-                  <div className="sf-strip">
-                    <span className="sf-badge">{t(`activities.types.${a.type}`)}</span>
-                    <span className="sf-muted">{fmtDate(a.started_at)}</span>
+          <>
+            <div className="sf-activity-grid">
+              {list.map((a) => (
+                <Link key={a.id} to={`/diario/activities/${a.id}`} className="sf-activity-card">
+                  {a.thumbnail ? (
+                    <img src={a.thumbnail.url} alt="" className="sf-activity-card__thumb" />
+                  ) : (
+                    <span className="sf-activity-card__thumb sf-activity-card__thumb--empty" aria-hidden />
+                  )}
+                  <div className="sf-activity-card__body">
+                    <strong>{activityDisplayName(a, t)}</strong>
+                    <div className="sf-strip">
+                      <span className="sf-badge">{t(`activities.types.${a.type}`)}</span>
+                      <span className="sf-muted">{fmtDate(a.started_at)}</span>
+                    </div>
                   </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                </Link>
+              ))}
+            </div>
+            {activities.hasNextPage && (
+              <div ref={sentinelRef} className="sf-activity-grid__sentinel">
+                <Spinner />
+              </div>
+            )}
+          </>
         )}
       </Card>
     </>

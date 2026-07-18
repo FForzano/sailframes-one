@@ -26,10 +26,17 @@ export const activitiesService = {
       group_id?: UUID;
       status?: ActivityStatus;
       mine?: boolean;
+      limit?: number;
+      offset?: number;
     } = {},
   ) =>
     api.get<Activity[]>(
-      `/activities${qs({ ...filters, mine: filters.mine ? "true" : undefined })}`,
+      `/activities${qs({
+        ...filters,
+        mine: filters.mine ? "true" : undefined,
+        limit: filters.limit ? String(filters.limit) : undefined,
+        offset: filters.offset ? String(filters.offset) : undefined,
+      })}`,
     ),
   get: (id: UUID) => api.get<Activity>(`/activities/${id}`),
   upcoming: (limit?: number) =>

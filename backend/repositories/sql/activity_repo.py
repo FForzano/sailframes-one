@@ -9,9 +9,19 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
-from ...db.models import ActivityORM, MarkORM, UserClubORM, UserGroupORM
+from ...db.models import (
+    ActivityORM,
+    MarkORM,
+    PermissionORM,
+    RolePermissionORM,
+    SessionCrewORM,
+    SessionORM,
+    UserClubORM,
+    UserGroupORM,
+    UserRoleORM,
+)
 
 _FIELDS = ("name", "type", "club_id", "race_id", "created_by", "group_id",
            "visibility", "status", "description", "started_at", "ended_at",
@@ -23,12 +33,79 @@ class SqlActivityRepo:
     def __init__(self, session_factory):
         self.Session = session_factory
 
+    def _visibility_clause(self, viewer_id: Optional[uuid.UUID]):
+        """SQL equivalent of ``auth.permissions.activity_visible_to``, so
+        visibility can be applied *before* LIMIT/OFFSET — filtering it in
+        Python after the DB page comes back (the old approach) would make
+        pages come back short/empty whenever some rows in that page are
+        invisible to the viewer."""
+        conditions = [ActivityORM.visibility == "public"]
+        if viewer_id is None:
+            return or_(*conditions)
+        conditions.append(ActivityORM.created_by == viewer_id)
+        crew_activity_ids = (
+            select(SessionORM.activity_id)
+            .join(SessionCrewORM, SessionCrewORM.session_id == SessionORM.id)
+            .where(SessionCrewORM.user_id == viewer_id)
+        )
+        conditions.append(ActivityORM.id.in_(crew_activity_ids))
+        member_club_ids = select(UserClubORM.club_id).where(
+            UserClubORM.user_id == viewer_id,
+            UserClubORM.status == "active",
+        )
+        club_manage_ids = (
+            select(UserRoleORM.scope_club_id)
+            .join(RolePermissionORM, RolePermissionORM.role_id == UserRoleORM.role_id)
+            .join(PermissionORM, PermissionORM.id == RolePermissionORM.permission_id)
+            .where(
+                UserRoleORM.user_id == viewer_id,
+                PermissionORM.key == "club.manage",
+                UserRoleORM.scope_club_id.isnot(None),
+            )
+        )
+        # A global (unscoped) club.manage grant applies to every club, so it
+        # can't be folded into the club_manage_ids IN-list above (NULL never
+        # matches an IN against non-null ids) — checked as its own EXISTS.
+        has_global_club_manage = (
+            select(UserRoleORM.id)
+            .join(RolePermissionORM, RolePermissionORM.role_id == UserRoleORM.role_id)
+            .join(PermissionORM, PermissionORM.id == RolePermissionORM.permission_id)
+            .where(
+                UserRoleORM.user_id == viewer_id,
+                UserRoleORM.scope_club_id.is_(None),
+                PermissionORM.key == "club.manage",
+            )
+            .exists()
+        )
+        conditions.append(and_(
+            ActivityORM.visibility == "club",
+            or_(
+                ActivityORM.club_id.in_(member_club_ids),
+                ActivityORM.club_id.in_(club_manage_ids),
+                has_global_club_manage,
+            ),
+        ))
+        member_group_ids = select(UserGroupORM.group_id).where(
+            UserGroupORM.user_id == viewer_id,
+            UserGroupORM.status == "active",
+            UserGroupORM.deleted_at.is_(None),
+        )
+        conditions.append(and_(
+            ActivityORM.visibility == "group",
+            ActivityORM.group_id.in_(member_group_ids),
+        ))
+        return or_(*conditions)
+
     def list(self, *, club_id: Optional[uuid.UUID] = None,
              group_id: Optional[uuid.UUID] = None,
              race_id: Optional[uuid.UUID] = None,
              type: Optional[str] = None,
              status: Optional[str] = None,
-             created_by: Optional[uuid.UUID] = None) -> "list[ActivityORM]":
+             created_by: Optional[uuid.UUID] = None,
+             viewer_id: Optional[uuid.UUID] = None,
+             viewer_is_superadmin: bool = False,
+             limit: Optional[int] = None,
+             offset: int = 0) -> "list[ActivityORM]":
         with self.Session() as s:
             q = select(ActivityORM).order_by(ActivityORM.started_at.desc())
             if club_id is not None:
@@ -43,6 +120,11 @@ class SqlActivityRepo:
                 q = q.where(ActivityORM.status == status)
             if created_by is not None:
                 q = q.where(ActivityORM.created_by == created_by)
+            if not viewer_is_superadmin:
+                q = q.where(self._visibility_clause(viewer_id))
+            q = q.offset(offset)
+            if limit is not None:
+                q = q.limit(limit)
             return list(s.scalars(q).all())
 
     def list_upcoming_for_user(self, user_id: uuid.UUID, *, limit: int = 5) -> "list[ActivityORM]":

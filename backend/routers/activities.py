@@ -12,7 +12,7 @@ import uuid
 from datetime import timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..auth import (
     activity_visible_to,
@@ -64,15 +64,20 @@ def list_activities(request: Request, type: Optional[str] = None,
                     club_id: Optional[uuid.UUID] = None,
                     group_id: Optional[uuid.UUID] = None,
                     status: Optional[str] = None,
-                    mine: bool = False):
+                    mine: bool = False,
+                    limit: Optional[int] = Query(None, le=100, gt=0),
+                    offset: int = Query(0, ge=0)):
     user = current_user(request)
     if mine and user is None:
         raise HTTPException(401, "Authentication required")
     activities = repos.activities.list(
         club_id=club_id, group_id=group_id, type=type, status=status,
         created_by=user.id if mine else None,
+        viewer_id=user.id if user else None,
+        viewer_is_superadmin=bool(user and user.is_superadmin),
+        limit=limit, offset=offset,
     )
-    return [_with_thumbnail(a) for a in activities if activity_visible_to(a, user)]
+    return [_with_thumbnail(a) for a in activities]
 
 
 @router.get("/upcoming")
