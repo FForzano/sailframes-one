@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { boatsService, boatKeys } from "@/services/boats";
@@ -18,6 +18,8 @@ import type { UUID } from "@/types";
 export function ImportPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const activityId = searchParams.get("activityId") as UUID | null;
   const fileRef = useRef<HTMLInputElement>(null);
   const { pendingFile, clearPendingShare } = useShareTarget();
   const [boatId, setBoatId] = useState("");
@@ -37,7 +39,7 @@ export function ImportPage() {
     if (!file || !boatId) return;
     clearPendingShare();
     try {
-      await start(file, { boatId: boatId as UUID });
+      await start(file, { boatId: boatId as UUID, activityId: activityId ?? undefined });
     } catch {
       // surfaced via `error` below
     }

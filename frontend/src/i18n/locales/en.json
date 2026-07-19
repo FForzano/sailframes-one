@@ -284,6 +284,7 @@
     "showManeuvers": "Show maneuvers",
     "editManeuvers": "Edit maneuvers",
     "editManeuversDone": "Done editing maneuvers",
+    "moveToActivity": "Move to activity",
     "maneuverPickStart": "Click the track to set the maneuver's start",
     "maneuverPickEnd": "Click the track again to set the maneuver's end",
     "maneuverDraftStart": "Maneuver start",

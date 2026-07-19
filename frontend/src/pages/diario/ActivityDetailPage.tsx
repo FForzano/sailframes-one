@@ -250,7 +250,7 @@ export function ActivityDetailPage() {
             items={[
               {
                 label: t("sessions.import"),
-                onClick: () => navigate("/diario/activities/import"),
+                onClick: () => navigate(`/diario/activities/import?activityId=${a.id}`),
               },
               ...(canEdit
                 ? [

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { resolveApiUrl } from "@/api/client";
 import { sessionsService, sessionKeys } from "@/services/sessions";
+import { activitiesService, activityKeys } from "@/services/activities";
 import { boatsService, boatKeys } from "@/services/boats";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useToast } from "@/hooks/useToast";
@@ -110,12 +111,27 @@ export function SessionDetailPage() {
   // Sticky toast id for the reanalyze/wind-refresh job — created "pending"
   // when triggered, resolved to success/error once the poll below lands.
   const [reanalysisToastId, setReanalysisToastId] = useState<number | null>(null);
+  const [movingActivity, setMovingActivity] = useState(false);
+  const [moveTargetId, setMoveTargetId] = useState("");
   const reanalysisPolling = reanalysisToastId !== null;
 
   const session = useQuery({
     queryKey: sessionKeys.detail(sessionId!),
     queryFn: () => sessionsService.get(sessionId!),
     enabled: !!sessionId,
+  });
+  // Only a standalone ("solo") recording can be moved into a real activity
+  // (backend/routers/sessions.py::attach_to_activity) — fetched to gate the
+  // "move to activity" menu item, not shown anywhere in the page itself.
+  const currentActivity = useQuery({
+    queryKey: activityKeys.detail(session.data?.activity_id ?? ""),
+    queryFn: () => activitiesService.get(session.data!.activity_id!),
+    enabled: !!session.data?.activity_id,
+  });
+  const activityOptions = useQuery({
+    queryKey: activityKeys.list({ mine: "true" }),
+    queryFn: () => activitiesService.list({ mine: true }),
+    enabled: movingActivity,
   });
   // Reanalyze/wind-refresh run in the background (backend/routers/sessions.py)
   // — poll the job status every 3s while one is running, same pattern as
@@ -330,6 +346,16 @@ export function SessionDetailPage() {
     onSuccess: () => navigate(session.data ? `/diario/activities/${session.data.activity_id}` : "/diario/activities"),
     onError: () => notify(t("errors.generic"), "error"),
   });
+  const moveToActivity = useMutation({
+    mutationFn: () => sessionsService.attachToActivity(sessionId!, moveTargetId as UUID),
+    onSuccess: async (updated) => {
+      setMovingActivity(false);
+      setMoveTargetId("");
+      await queryClient.invalidateQueries({ queryKey: sessionKeys.detail(sessionId!) });
+      navigate(`/diario/activities/${updated.activity_id}/barche/${sessionId}`);
+    },
+    onError: () => notify(t("errors.generic"), "error"),
+  });
   // Seed the status query with "running" the instant the job is accepted:
   // without this, starting a second job right after the first one finished
   // would briefly poll with the previous (already-resolved) cached result
@@ -449,6 +475,9 @@ export function SessionDetailPage() {
             setManeuverDraftEnd(null);
           },
         },
+        ...(currentActivity.data?.type === "solo"
+          ? [{ label: t("sessions.moveToActivity"), onClick: () => setMovingActivity(true) }]
+          : []),
       ],
     });
   }
@@ -788,6 +817,37 @@ export function SessionDetailPage() {
           </Select>
           <Button disabled={addManeuver.isPending} onClick={() => addManeuver.mutate()}>
             {t("common.add")}
+          </Button>
+        </Modal>
+      )}
+      {movingActivity && (
+        <Modal
+          title={t("sessions.moveToActivity")}
+          onClose={() => {
+            setMovingActivity(false);
+            setMoveTargetId("");
+          }}
+        >
+          <Select
+            label={t("activities.title")}
+            id="move-target-activity"
+            value={moveTargetId}
+            onChange={(e) => setMoveTargetId(e.target.value)}
+            required
+          >
+            <option value="" disabled>
+              …
+            </option>
+            {activityOptions.data
+              ?.filter((a) => a.type !== "solo" && a.id !== s.activity_id)
+              .map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name ?? fmtDateTime(a.started_at)}
+                </option>
+              ))}
+          </Select>
+          <Button disabled={!moveTargetId || moveToActivity.isPending} onClick={() => moveToActivity.mutate()}>
+            {t("common.confirm")}
           </Button>
         </Modal>
       )}
