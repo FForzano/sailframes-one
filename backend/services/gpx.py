@@ -36,6 +36,9 @@ def parse_gpx(content: bytes) -> list[dict]:
                         pass
                     break
 
+            if raw and raw[-1]["t"] == t and raw[-1]["lat"] == lat and raw[-1]["lon"] == lon:
+                continue  # some exporters (e.g. Waterspeed) repeat a fix verbatim
+
             raw.append({"lat": lat, "lon": lon, "t": t, "_speed_ms": speed_ms})
 
     result = []
