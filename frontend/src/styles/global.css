@@ -1762,6 +1762,21 @@ h1, h2, h3 {
   height: 3px;
   border-radius: 2px;
 }
+.sf-polar__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+}
+.sf-polar__swatch {
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  margin: 0 0.3rem 0 0.1rem;
+  background: var(--sf-muted);
+}
+.sf-polar__swatch--light {
+  opacity: 0.5;
+}
 .sf-polar__pick {
   display: flex;
   gap: 0.75rem;

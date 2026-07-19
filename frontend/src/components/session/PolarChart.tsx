@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { PolarPoint } from "@/types";
 
 // Hand-rolled SVG polar diagram: boat speed (radius) vs true wind angle
@@ -109,6 +110,7 @@ export function PolarChart({
   points: PolarPoint[];
   targetPoints?: PolarPoint[] | null;
 }) {
+  const { t } = useTranslation();
   const svgRef = useRef<SVGSVGElement>(null);
   const [selected, setSelected] = useState<{
     twa: number;
@@ -262,20 +264,19 @@ export function PolarChart({
             {g.tws.toFixed(0)} kn TWS
           </span>
         ))}
-        {!!targetPoints?.length && (
-          <>
-            <span className="sf-muted">
-              <i style={{ background: TWS_COLORS[0] }} />
-              avg
-            </span>
-            <span className="sf-muted">
-              <i style={{ background: lighten(TWS_COLORS[0], 0.5) }} />
-              max
-            </span>
-          </>
-        )}
         <span className="sf-muted">0–{maxSpeed.toFixed(1)} kn</span>
       </div>
+      {!!targetPoints?.length && (
+        <p className="sf-muted sf-polar__hint">
+          <i className="sf-polar__swatch sf-polar__swatch--solid" />
+          {t("sessions.polarAvg")}
+          {" · "}
+          <i className="sf-polar__swatch sf-polar__swatch--light" />
+          {t("sessions.polarMax")}
+          {" — "}
+          {t("sessions.polarLegendHint")}
+        </p>
+      )}
     </div>
   );
 }
