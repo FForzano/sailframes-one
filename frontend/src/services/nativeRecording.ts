@@ -79,10 +79,9 @@ export interface RecordingMeta {
 }
 
 // A fix is only persisted at most once per this interval — the plugin can
-// deliver updates faster than this (foreground-service GPS chips typically
-// can't be told "only wake up once a minute"), so the once-a-minute sampling
+// deliver updates faster than this, so the once-a-second sampling
 // requirement is enforced here rather than relying on plugin-level timing.
-const SAMPLE_INTERVAL_MS = 60_000;
+const SAMPLE_INTERVAL_MS = 1_000;
 
 const INDEX_PATH = "recordings/index.json";
 const rawPath = (id: string) => `recordings/${id}.ndjson`;
