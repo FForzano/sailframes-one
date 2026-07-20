@@ -3,10 +3,13 @@ import { useTranslation } from "react-i18next";
 import type { PolarPoint } from "@/types";
 
 // Hand-rolled SVG polar diagram: boat speed (radius) vs true wind angle
-// (0° = head to wind, at top), one curve per TWS bucket — plus, when
-// available, a second solid "target" (max-speed) curve from `targetPoints`,
-// in a lighter tint of the same bucket color. Recharts has no true
-// radius-by-value polar, so this stays bespoke — the analysis signature chart.
+// (0° = head to wind, at top). Only one TWS bucket is drawn at a time —
+// a slider picks which one — as an average curve plus, when available, a
+// "target" (max-speed) curve from `targetPoints` in a lighter tint.
+// Overlaying every bucket at once was tried and proved unreadable (too many
+// overlapping lobes/legend entries), hence the single-bucket + selector
+// design. Recharts has no true radius-by-value polar, so this stays
+// bespoke — the analysis signature chart.
 const R = 140;
 // Room around the ring for the angle labels so they never sit on the ring
 // itself or clip against the SVG edge.
@@ -21,8 +24,9 @@ const SPOKES = [0, 45, 90, 135, 180];
 // chord — otherwise the no-go zone near 0° looks like smooth coverage.
 const GAP_THRESHOLD_DEG = 9;
 
-// Blue→red by TWS bucket order (cool = light air, warm = breeze).
-const TWS_COLORS = ["#2f9be0", "#3fbf7f", "#e0b24a", "#e0654f", "#9b6fe0"];
+// Matches --sf-primary; kept as a literal hex (not the CSS var) because
+// `lighten()` below needs to parse it to build the "target" curve's tint.
+const CURVE_COLOR = "#2f9be0";
 
 /** Lightens a `#rrggbb` color by blending it toward white — used for the
  * "target" (max-speed) curve so it reads as a distinct color per bucket
@@ -118,6 +122,7 @@ export function PolarChart({
     avg: PolarPoint | null;
     max: PolarPoint | null;
   } | null>(null);
+  const [twsIndex, setTwsIndex] = useState(0);
 
   const { groups, maxSpeed } = useMemo(() => {
     // Average-curve buckets come only from `points` — mixing in `targetPoints`
@@ -153,6 +158,12 @@ export function PolarChart({
 
   if (!points.length) return null;
 
+  // Clamp in case a re-fetch shrinks the bucket count while a later index
+  // was still selected (e.g. switching to a shorter session).
+  const activeIndex = Math.min(twsIndex, groups.length - 1);
+  const active = groups[activeIndex];
+  const activeTarget = targetByTws.get(active.tws)?.slice().sort((a, b) => a.twa_deg - b.twa_deg) ?? [];
+
   const handlePick = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -161,8 +172,8 @@ export function PolarChart({
     const y = ((clientY - rect.top) / rect.height) * SIZE - C;
     const twa = Math.min(180, Math.max(0, (Math.atan2(Math.abs(x), -y) * 180) / Math.PI));
     const side: 1 | -1 = x >= 0 ? 1 : -1;
-    const avg = nearestPoint(points, twa);
-    const max = nearestPoint(targetPoints ?? [], twa);
+    const avg = nearestPoint(active.pts, twa);
+    const max = nearestPoint(activeTarget, twa);
     setSelected({ twa: avg?.twa_deg ?? twa, side, avg, max });
   };
 
@@ -196,40 +207,40 @@ export function PolarChart({
             </g>
           );
         })}
-        {groups.map((g, i) => {
-          const color = TWS_COLORS[i % TWS_COLORS.length];
-          const target = targetByTws.get(g.tws)?.slice().sort((a, b) => a.twa_deg - b.twa_deg) ?? [];
-          return (
-            <g key={g.tws}>
-              <path d={fillPath(g.pts, maxSpeed)} fill={color} fillOpacity={0.15} stroke="none" />
-              <path d={segmentedPath(g.pts, maxSpeed, 1)} fill="none" stroke={color} strokeWidth={2} />
-              <path d={segmentedPath(g.pts, maxSpeed, -1)} fill="none" stroke={color} strokeWidth={2} opacity={0.5} />
-              {target.length > 1 && (
-                <>
-                  <path
-                    d={fillPath(target, maxSpeed)}
-                    fill={lighten(color, 0.5)}
-                    fillOpacity={0.15}
-                    stroke="none"
-                  />
-                  <path
-                    d={segmentedPath(target, maxSpeed, 1)}
-                    fill="none"
-                    stroke={lighten(color, 0.5)}
-                    strokeWidth={2}
-                  />
-                  <path
-                    d={segmentedPath(target, maxSpeed, -1)}
-                    fill="none"
-                    stroke={lighten(color, 0.5)}
-                    strokeWidth={2}
-                    opacity={0.5}
-                  />
-                </>
-              )}
-            </g>
-          );
-        })}
+        <g>
+          <path d={fillPath(active.pts, maxSpeed)} fill={CURVE_COLOR} fillOpacity={0.15} stroke="none" />
+          <path d={segmentedPath(active.pts, maxSpeed, 1)} fill="none" stroke={CURVE_COLOR} strokeWidth={2} />
+          <path
+            d={segmentedPath(active.pts, maxSpeed, -1)}
+            fill="none"
+            stroke={CURVE_COLOR}
+            strokeWidth={2}
+            opacity={0.5}
+          />
+          {activeTarget.length > 1 && (
+            <>
+              <path
+                d={fillPath(activeTarget, maxSpeed)}
+                fill={lighten(CURVE_COLOR, 0.5)}
+                fillOpacity={0.15}
+                stroke="none"
+              />
+              <path
+                d={segmentedPath(activeTarget, maxSpeed, 1)}
+                fill="none"
+                stroke={lighten(CURVE_COLOR, 0.5)}
+                strokeWidth={2}
+              />
+              <path
+                d={segmentedPath(activeTarget, maxSpeed, -1)}
+                fill="none"
+                stroke={lighten(CURVE_COLOR, 0.5)}
+                strokeWidth={2}
+                opacity={0.5}
+              />
+            </>
+          )}
+        </g>
         {selected &&
           (() => {
             const [ex, ey] = polar(selected.twa, R, selected.side);
@@ -257,13 +268,29 @@ export function PolarChart({
           <span>max {selected.max ? `${selected.max.speed_kts.toFixed(1)} kn` : "—"}</span>
         </div>
       )}
+      {groups.length > 1 && (
+        <div className="sf-polar__tws-picker">
+          <span className="sf-polar__tws-value">{active.tws.toFixed(0)} kn TWS</span>
+          <input
+            type="range"
+            min={0}
+            max={groups.length - 1}
+            step={1}
+            value={activeIndex}
+            onChange={(e) => {
+              setTwsIndex(Number(e.target.value));
+              setSelected(null);
+            }}
+            aria-label={t("sessions.polarTwsPicker")}
+          />
+          <div className="sf-polar__tws-ticks">
+            <span>{groups[0].tws.toFixed(0)} kn</span>
+            <span>{groups[groups.length - 1].tws.toFixed(0)} kn</span>
+          </div>
+        </div>
+      )}
       <div className="sf-polar__legend">
-        {groups.map((g, i) => (
-          <span key={g.tws}>
-            <i style={{ background: TWS_COLORS[i % TWS_COLORS.length] }} />
-            {g.tws.toFixed(0)} kn TWS
-          </span>
-        ))}
+        {groups.length <= 1 && <span>{active.tws.toFixed(0)} kn TWS</span>}
         <span className="sf-muted">0–{maxSpeed.toFixed(1)} kn</span>
       </div>
       {!!targetPoints?.length && (

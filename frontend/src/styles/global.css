@@ -1872,6 +1872,29 @@ img.sf-feed__post-image {
   fill: var(--sf-muted);
   font-size: 10px;
 }
+.sf-polar__tws-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: 100%;
+  max-width: 260px;
+}
+.sf-polar__tws-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.sf-polar__tws-picker input[type="range"] {
+  width: 100%;
+  accent-color: var(--sf-primary);
+}
+.sf-polar__tws-ticks {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 0.75rem;
+  color: var(--sf-muted);
+}
 .sf-polar__legend {
   display: flex;
   flex-wrap: wrap;
