@@ -6,7 +6,6 @@ import { putToUploadUrl } from "@/api/media";
 import { postsService, postKeys } from "@/services/posts";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
@@ -238,20 +237,19 @@ export function EntityFeed({
   });
 
   return (
-    <Card
-      actions={
-        canManage && (
+    <>
+      {canManage && (
+        <div className="sf-feed__new-mobile sf-mobile-only">
           <Button
             variant="ghost"
-            className="sf-btn--icon-sm sf-mobile-only"
+            className="sf-btn--icon-sm"
             aria-label={t("gruppi.newPost")}
             onClick={() => setComposerOpen(true)}
           >
             <Plus size={16} />
           </Button>
-        )
-      }
-    >
+        </div>
+      )}
       {canManage && (
         <div className="sf-desktop-only">
           <PostComposer ownerType={ownerType} ownerId={ownerId} />
@@ -327,6 +325,6 @@ export function EntityFeed({
       ) : (
         <EmptyState>{t("gruppi.emptyNews")}</EmptyState>
       )}
-    </Card>
+    </>
   );
 }

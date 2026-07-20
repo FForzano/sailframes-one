@@ -1355,23 +1355,33 @@ h1, h2, h3 {
 }
 
 /* ---------- Feed (club/group news) ---------- */
+/* No enclosing card around the feed (each post is already its own boxed
+   panel below) — the desktop inline composer gets the same boxed look so
+   it doesn't look like a bare, unstyled orphan on the page. */
 .sf-feed-form {
-  margin-bottom: 1rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--sf-border);
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.9rem;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
 }
 .sf-feed-form .sf-form__actions {
   border-top: none;
   padding-top: 0;
   margin-top: 0.6rem;
 }
-/* Inside the "new post" modal there's no post list below it to separate from
-   (unlike the desktop inline form, sitting above the feed in the same
-   card) — the modal's own border/padding already closes it off. */
+/* Inside the "new post" modal, the modal's own box already provides the
+   panel — the form itself should sit flush, not double-boxed. */
 .sf-modal__body .sf-feed-form {
   margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom: none;
+  padding: 0;
+  background: none;
+  border: none;
+}
+.sf-feed__new-mobile {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
 }
 .sf-feed {
   display: flex;
