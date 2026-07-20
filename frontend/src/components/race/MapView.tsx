@@ -79,6 +79,11 @@ export interface MapMark {
   /** Which maneuver this "maneuver"/"maneuver-pending" mark is — drives its
    * color (see MANEUVER_TYPE_CLASS above). */
   maneuverType?: "tack" | "gybe" | "course_change";
+  /** Lets the user fine-tune this mark's position by dragging it, after an
+   * initial placement (e.g. the "add mark on map" flow) — reports the new
+   * position via `onDragEnd` rather than mutating `lat`/`lng` in place. */
+  draggable?: boolean;
+  onDragEnd?: (lat: number, lng: number) => void;
 }
 
 // Imperative Leaflet (not react-leaflet): tracks + marks are drawn once, and
@@ -96,6 +101,8 @@ export function MapView({
   controls,
   placementMode = false,
   onManeuverPlacement,
+  pickMode = false,
+  onMapClick,
   onOpenSession,
   showBoatInfo,
 }: {
@@ -130,6 +137,14 @@ export function MapView({
    * a manual maneuver's start/end by clicking the track twice. */
   placementMode?: boolean;
   onManeuverPlacement?: (point: { lat: number; lon: number; timestamp: number }) => void;
+  /** When true, clicking anywhere on the map (not snapped to a track, unlike
+   * `placementMode`) calls `onMapClick` with the raw lat/lng — used to let a
+   * user place a free-standing point (e.g. a race mark/buoy) by clicking the
+   * map while seeing the activity's tracks for reference. Also suppresses
+   * the track's own click-to-seek/popup behavior so a click on a track
+   * places the point instead. */
+  pickMode?: boolean;
+  onMapClick?: (lat: number, lng: number) => void;
   /** Click handler for the popup's "more info" button (shown whenever there's
    * more than one track, e.g. the activity map) — called with that track's
    * session id (`tr.id`, see buildTrack/buildTracks) so the caller can
@@ -162,6 +177,10 @@ export function MapView({
   placementModeRef.current = placementMode;
   const onManeuverPlacementRef = useRef(onManeuverPlacement);
   onManeuverPlacementRef.current = onManeuverPlacement;
+  const pickModeRef = useRef(pickMode);
+  pickModeRef.current = pickMode;
+  const onMapClickRef = useRef(onMapClick);
+  onMapClickRef.current = onMapClick;
   const onOpenSessionRef = useRef(onOpenSession);
   onOpenSessionRef.current = onOpenSession;
   const { data: windAt } = useWindAt(wind?.lat, wind?.lng, wind?.at);
@@ -235,6 +254,14 @@ export function MapView({
       if (sessionId) onOpenSessionRef.current?.(sessionId);
     };
     container.addEventListener("click", onContainerClick);
+
+    // Free-placement clicks (pickMode): fires for clicks anywhere, including
+    // on a track — Leaflet's canvas-rendered vector layers don't stop this
+    // from also reaching the map, so a click on the track lands here too
+    // with its own (unsnapped) latlng, which is what we want for a mark.
+    map.on("click", (e: L.LeafletMouseEvent) => {
+      if (pickModeRef.current) onMapClickRef.current?.(e.latlng.lat, e.latlng.lng);
+    });
 
     const bounds: L.LatLngExpression[] = [];
     for (const tr of tracks) {
@@ -335,6 +362,9 @@ export function MapView({
             onManeuverPlacementRef.current?.({ lat: p.lat, lon: p.lon, timestamp: p.ms / 1000 });
             return;
           }
+          // The map's own click handler (registered once above) already
+          // places the point at the exact (unsnapped) click location.
+          if (pickModeRef.current) return;
           timeController.seek(p.ms);
           L.popup({ closeButton: false, className: styles.popup })
             .setLatLng([p.lat, p.lon])
@@ -437,19 +467,45 @@ export function MapView({
       } else if (mk.kind === "maneuver-draft") {
         icon = L.divIcon({ className: `${styles.markicon} ${styles.markiconPreview}`, html: "◆", iconSize: [12, 12] });
       } else {
+        // Race marks (start pin/windward/gate/finish — the "boe" placed via
+        // the activity map/form): same pin shape as the maneuver markers
+        // above (so it reads at a glance, from as far as the maneuver pins
+        // do) but in its own standout color (--sf-danger, unused by any
+        // other mark kind) and the role's first letter, same convention as
+        // maneuver pins.
+        const previewClass = mk.preview ? ` ${styles.markiconRacePreview}` : ` ${styles.markiconRace}`;
         icon = L.divIcon({
-          className: mk.preview ? `${styles.markicon} ${styles.markiconPreview}` : styles.markicon,
-          html: "◆",
-          iconSize: [16, 16],
+          className: `${styles.markicon} ${styles.markiconManeuver}${previewClass}`,
+          html:
+            `<span class="${styles.markiconManeuverCircle}">` +
+            `<span>${mk.mark_role.charAt(0).toUpperCase()}</span></span>` +
+            `<span class="${styles.markiconManeuverTail}"></span>`,
+          iconSize: [26, 33],
+          iconAnchor: [13, 33],
         });
       }
-      L.marker([mk.lat, mk.lng], { icon }).bindTooltip(mk.mark_role).addTo(layer);
+      const marker = L.marker([mk.lat, mk.lng], {
+        icon,
+        draggable: mk.draggable ?? false,
+      }).bindTooltip(mk.mark_role).addTo(layer);
+      if (mk.draggable && mk.onDragEnd) {
+        marker.on("dragend", () => {
+          const { lat, lng } = marker.getLatLng();
+          mk.onDragEnd?.(lat, lng);
+        });
+      }
     }
     marksLayerRef.current = layer;
     return () => {
       layer.remove();
     };
   }, [marks, tracks]);
+
+  // Crosshair cursor while pick mode is active, so it's visually obvious
+  // clicking the map does something other than seek playback.
+  useEffect(() => {
+    mapRef.current?.getContainer().classList.toggle(styles.pickMode, pickMode);
+  }, [pickMode]);
 
   // Move position markers to the cursor time (skipping any mid-drag).
   useEffect(() => {

@@ -393,6 +393,9 @@
     "marks": "Marks",
     "addMark": "Add mark",
     "markRole": "Mark role",
+    "pickOnMap": "Place on map",
+    "pickingOnMap": "Click the map…",
+    "pickOnMapHint": "Click the map to place the mark",
     "markRoles": {
       "pin": "Pin (start line)",
       "rc": "Race committee",

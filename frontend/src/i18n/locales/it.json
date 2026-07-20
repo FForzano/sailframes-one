@@ -393,6 +393,9 @@
     "marks": "Boe",
     "addMark": "Aggiungi boa",
     "markRole": "Ruolo boa",
+    "pickOnMap": "Posiziona sulla mappa",
+    "pickingOnMap": "Clicca sulla mappa…",
+    "pickOnMapHint": "Clicca sulla mappa per posizionare la boa",
     "markRoles": {
       "pin": "Pin (boa di partenza)",
       "rc": "Comitato di regata",

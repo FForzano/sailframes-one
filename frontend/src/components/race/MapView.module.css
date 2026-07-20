@@ -22,6 +22,13 @@
   inset: 0;
 }
 
+/* Free-placement mode (see MapView's `pickMode` prop) — crosshair cursor so
+   it reads as "click to place a point" instead of the usual seek-on-click. */
+.pickMode,
+.pickMode :global(.leaflet-container) {
+  cursor: crosshair;
+}
+
 /* Zoom control: bottom-right, small, horizontal (instead of Leaflet's
    default stacked top-left). */
 .map :global(.leaflet-control-zoom) {
@@ -284,6 +291,17 @@
 }
 .markiconCourseChange {
   --pin-color: var(--sf-success);
+}
+/* Race marks (start pin/windward/gate/finish — the "boe" placed via the
+ * activity map/form) — same pin shape as .markiconManeuver, in a color
+ * (--sf-danger) not used by any other mark kind so it stands out clearly
+ * against tracks/legs/maneuvers already on the map. */
+.markiconRace {
+  --pin-color: var(--sf-danger);
+}
+.markiconRacePreview {
+  --pin-color: var(--sf-danger);
+  opacity: 0.6;
 }
 .markiconPending {
   opacity: 0.6;

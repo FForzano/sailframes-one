@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -45,6 +45,8 @@ export function ActivityDetailPage() {
     lat: "",
     lng: "",
   });
+  const [pickingMarkOnMap, setPickingMarkOnMap] = useState(false);
+  const mapCardRef = useRef<HTMLDivElement>(null);
 
   const activity = useQuery({
     queryKey: activityKeys.detail(activityId!),
@@ -131,6 +133,29 @@ export function ActivityDetailPage() {
   const mapMarks = useMemo<MapMark[]>(
     () => (marks.data ?? []).map((m) => ({ id: m.id, mark_role: m.mark_role, lat: m.lat, lng: m.lng })),
     [marks.data],
+  );
+  // Live preview of the "add mark" form's current lat/lng (however it was
+  // filled — typed or picked on the map) as a dashed marker, so the user can
+  // see/adjust its position before submitting.
+  const markPreview = useMemo<MapMark | null>(() => {
+    const lat = Number(markForm.lat);
+    const lng = Number(markForm.lng);
+    if (markForm.lat === "" || markForm.lng === "" || Number.isNaN(lat) || Number.isNaN(lng)) return null;
+    return {
+      mark_role: markForm.mark_role,
+      lat,
+      lng,
+      preview: true,
+      // Draggable so the user can fine-tune the position picked on the map
+      // before actually submitting the "add mark" form.
+      draggable: true,
+      onDragEnd: (newLat, newLng) =>
+        setMarkForm((f) => ({ ...f, lat: newLat.toFixed(6), lng: newLng.toFixed(6) })),
+    };
+  }, [markForm]);
+  const mapMarksWithPreview = useMemo(
+    () => (markPreview ? [...mapMarks, markPreview] : mapMarks),
+    [mapMarks, markPreview],
   );
 
   const addMark = useMutation({
@@ -276,6 +301,7 @@ export function ActivityDetailPage() {
         )}
       </Card>
 
+      <div ref={mapCardRef}>
       <Card className="sf-card--flush" title={t("activities.map")}>
         {activityData.isLoading ? (
           <div className="sf-card__pad">
@@ -287,9 +313,10 @@ export function ActivityDetailPage() {
           <p className="sf-muted sf-card__pad">{t("activities.noGps")}</p>
         ) : (
           <div className="sf-section__body">
+            {pickingMarkOnMap && <p className="sf-muted sf-card__pad">{t("activities.pickOnMapHint")}</p>}
             <MapView
               tracks={tracks}
-              marks={mapMarks}
+              marks={mapMarksWithPreview}
               wind={
                 tracks[0]?.pts[0]
                   ? { lat: tracks[0].pts[0].lat, lng: tracks[0].pts[0].lon, at: a.started_at }
@@ -300,6 +327,11 @@ export function ActivityDetailPage() {
               }
               onOpenSession={(sessionId) => navigate(`/diario/activities/${activityId}/barche/${sessionId}`)}
               showBoatInfo
+              pickMode={pickingMarkOnMap}
+              onMapClick={(lat, lng) => {
+                setMarkForm((f) => ({ ...f, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
+                setPickingMarkOnMap(false);
+              }}
             />
             <div className="sf-section__body sf-card__pad">
               <SpeedChart tracks={tracks} />
@@ -307,6 +339,7 @@ export function ActivityDetailPage() {
           </div>
         )}
       </Card>
+      </div>
 
       <Card title={t("activities.boats")}>
         {sessions.data?.length ? (
@@ -439,6 +472,20 @@ export function ActivityDetailPage() {
               onChange={(e) => setMarkForm((f) => ({ ...f, lng: e.target.value }))}
               required
             />
+            {tracks.length > 0 && (
+              <div className="sf-field">
+                <Button
+                  type="button"
+                  variant={pickingMarkOnMap ? "primary" : "ghost"}
+                  onClick={() => {
+                    setPickingMarkOnMap((v) => !v);
+                    mapCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >
+                  {t(pickingMarkOnMap ? "activities.pickingOnMap" : "activities.pickOnMap")}
+                </Button>
+              </div>
+            )}
             <div className="sf-field">
               <Button type="submit" disabled={addMark.isPending}>
                 {t("activities.addMark")}

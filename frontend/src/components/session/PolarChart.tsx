@@ -183,10 +183,13 @@ export function PolarChart({
   const activeIndex = Math.min(twsIndex, groups.length - 1);
   const active = groups[activeIndex];
   const activeTarget = targetByTws.get(active.tws)?.slice().sort((a, b) => a.twa_deg - b.twa_deg) ?? [];
+  // Curve color is fixed (not tied to the selected wind bin) — only the TWS
+  // slider's track/thumb use the light→dark ramp, purely as a visual cue for
+  // where the current bucket sits in the range.
   const rampT = groups.length > 1 ? activeIndex / (groups.length - 1) : 0.5;
-  const activeRgb = rampRgb(rampT);
-  const activeColor = rgbCss(activeRgb);
-  const activeTargetColor = rgbCss(lightenRgb(activeRgb, 0.5));
+  const activeColor = rgbCss(BASE_RGB);
+  const activeTargetColor = rgbCss(lightenRgb(BASE_RGB, 0.5));
+  const thumbColor = rgbCss(rampRgb(rampT));
 
   const handlePick = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -309,7 +312,7 @@ export function PolarChart({
             style={
               {
                 "--sf-polar-track": TWS_TRACK_GRADIENT,
-                "--sf-polar-thumb": activeColor,
+                "--sf-polar-thumb": thumbColor,
               } as CSSProperties
             }
             aria-label={t("sessions.polarTwsPicker")}
