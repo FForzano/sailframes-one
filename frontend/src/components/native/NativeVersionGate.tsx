@@ -4,6 +4,7 @@ import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { appConfigService } from "@/services/appConfig";
 import { Spinner } from "@/components/ui/Spinner";
+import styles from "./NativeVersionGate.module.css";
 
 // Must match capacitor.config.ts's appId.
 const ANDROID_PACKAGE_ID = "com.xgsail.app";
@@ -68,7 +69,7 @@ export function NativeVersionGate({ children }: { children: ReactNode }) {
 
   if (blocked) {
     return (
-      <div className="sf-update-required">
+      <div className={styles.updateRequired}>
         <h1>{t("updateRequired.title")}</h1>
         <p>{t("updateRequired.body")}</p>
         {Capacitor.getPlatform() === "android" && (

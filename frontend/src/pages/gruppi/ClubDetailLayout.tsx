@@ -19,6 +19,7 @@ import { EntityFeed } from "@/components/gruppi/EntityFeed";
 import { ClubDevices } from "./ClubDevices";
 import { ClubEvents } from "./ClubEvents";
 import type { Boat, Club, UUID } from "@/types";
+import entityHeaderStyles from "@/components/gruppi/entityHeader.module.css";
 
 export interface ClubContext {
   clubId: UUID;
@@ -118,19 +119,19 @@ export function ClubDetailLayout() {
     <div className="sf-section__body">
       <BackLink to="/gruppi/clubs" label={t("gruppi.backToClubs")} />
       <Card>
-        <div className="sf-entity-header">
-          <div className="sf-entity-header__identity">
+        <div className={entityHeaderStyles.header}>
+          <div className={entityHeaderStyles.identity}>
             {c.logo && <img className="sf-avatar sf-avatar--lg" src={c.logo.url} alt="" />}
             <div>
-              <h1 className="sf-entity-header__name">{c.name}</h1>
-              <p className="sf-muted sf-entity-header__meta">
+              <h1 className={entityHeaderStyles.name}>{c.name}</h1>
+              <p className={`sf-muted ${entityHeaderStyles.meta}`}>
                 {t("gruppi.memberCount", { count: memberCount })}
               </p>
               {manages && <span className="sf-badge sf-badge--success">{t("gruppi.manageMode")}</span>}
             </div>
           </div>
           {manages && (
-            <div className="sf-entity-header__actions">
+            <div className={entityHeaderStyles.actions}>
               <ImageUploader
                 create={() => clubsService.uploadLogo(clubId)}
                 confirm={(id) => clubsService.confirmLogo(clubId, id)}

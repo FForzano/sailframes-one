@@ -14,6 +14,7 @@ import { userLabel } from "@/utils/format";
 import { smartSearch } from "@/utils/smartSearch";
 import { useGroupContext } from "./GroupDetailLayout";
 import type { GroupMember, GroupRole, UUID } from "@/types";
+import entitySearchStyles from "@/components/gruppi/entitySearch.module.css";
 
 export function GroupMembers() {
   const { groupId, group, isOwner, manages } = useGroupContext();
@@ -93,10 +94,10 @@ export function GroupMembers() {
       }
     >
       {showSearch && (
-        <div className="sf-entity-search" style={{ marginBottom: "0.75rem" }}>
-          <Search size={16} className="sf-entity-search__icon" />
+        <div className={entitySearchStyles.search} style={{ marginBottom: "0.75rem" }}>
+          <Search size={16} className={entitySearchStyles.icon} />
           <input
-            className="sf-entity-search__input"
+            className={entitySearchStyles.input}
             type="search"
             placeholder={t("common.search")}
             value={query}

@@ -5,6 +5,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { isNativeApp } from "@/config/platform";
 import { SelfHostedArt } from "@/components/landing/FeatureArt";
+import styles from "@/components/landing/landing.module.css";
 
 const GITHUB_URL = "https://github.com/FForzano/xgsail";
 const LICENSE_URL = `${GITHUB_URL}/blob/main/LICENSE`;
@@ -37,16 +38,16 @@ export function LandingPage() {
   if (isNativeApp) return <Navigate to="/login" replace />;
 
   return (
-    <div className="sf-landing">
-      <header className="sf-landing__nav">
+    <div className={styles.landing}>
+      <header className={styles.nav}>
         <Link to="/" className="sf-navbar__brand">
           <img src="/logo.svg" alt="" className="sf-navbar__logo" />
-          <span className="sf-landing__brand-text">
+          <span className={styles.brandText}>
             <span>XGSail</span>
-            <span className="sf-landing__brand-tagline">{t("common.tagline")}</span>
+            <span className={styles.brandTagline}>{t("common.tagline")}</span>
           </span>
         </Link>
-        <div className="sf-landing__nav-actions">
+        <div className={styles.navActions}>
           <Link to="/login" className="sf-navlink">
             {t("auth.login")}
           </Link>
@@ -58,11 +59,11 @@ export function LandingPage() {
         </div>
       </header>
 
-      <main className="sf-landing__hero">
-        <p className="sf-landing__eyebrow">{t("common.tagline")}</p>
-        <h1 className="sf-landing__title">{t("landing.heroTitle")}</h1>
-        <p className="sf-landing__tagline">{t("landing.heroSubtitle")}</p>
-        <div className="sf-landing__cta">
+      <main className={styles.hero}>
+        <p className={styles.eyebrow}>{t("common.tagline")}</p>
+        <h1 className={styles.title}>{t("landing.heroTitle")}</h1>
+        <p className={styles.tagline}>{t("landing.heroSubtitle")}</p>
+        <div className={styles.cta}>
           <Link to="/register">
             <Button>{t("landing.getStarted")}</Button>
           </Link>
@@ -72,13 +73,13 @@ export function LandingPage() {
         </div>
       </main>
 
-      <section className="sf-landing__section">
-        <h2 className="sf-landing__section-title">{t("landing.insightsTitle")}</h2>
-        <div className="sf-landing__features">
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>{t("landing.insightsTitle")}</h2>
+        <div className={styles.features}>
           {FEATURE_KEYS.map((n) => (
             <div className="sf-card" key={n}>
               {FEATURE_SHOTS[n] ? (
-                <img src={FEATURE_SHOTS[n]} alt="" className="sf-landing__shot" />
+                <img src={FEATURE_SHOTS[n]} alt="" className={styles.shot} />
               ) : (
                 <SelfHostedArt />
               )}
@@ -89,9 +90,9 @@ export function LandingPage() {
         </div>
       </section>
 
-      <footer className="sf-landing__footer">
-        <p className="sf-muted sf-landing__footer-about">{t("landing.footerAbout")}</p>
-        <div className="sf-landing__footer-links">
+      <footer className={styles.footer}>
+        <p className={`sf-muted ${styles.footerAbout}`}>{t("landing.footerAbout")}</p>
+        <div className={styles.footerLinks}>
           <a href={GITHUB_URL} target="_blank" rel="noreferrer">
             {t("landing.github")}
           </a>
@@ -103,7 +104,7 @@ export function LandingPage() {
           </a>
           <a href={`mailto:${CONTACT_EMAIL}`}>{t("landing.contact")}</a>
         </div>
-        <p className="sf-muted sf-landing__copyright">
+        <p className={`sf-muted ${styles.copyright}`}>
           {t("landing.footer", { year: new Date().getFullYear() })}
         </p>
       </footer>

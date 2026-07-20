@@ -1,0 +1,138 @@
+/* No enclosing card around the feed (each post is already its own boxed
+   panel below) — the desktop inline composer gets the same boxed look so
+   it doesn't look like a bare, unstyled orphan on the page. */
+.feedForm {
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.9rem;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+}
+.feedForm :global(.sf-form__actions) {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0.6rem;
+}
+/* Inside the "new post" modal, the modal's own box already provides the
+   panel — the form itself should sit flush, not double-boxed. */
+.feedFormFlush {
+  margin-bottom: 0;
+  padding: 0;
+  background: none;
+  border: none;
+}
+.newMobile {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+/* Each post as its own boxed panel — reads as a list of distinct posts
+   rather than one continuous scrolling document. */
+.post {
+  padding: 0.9rem 1rem;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+}
+.postHead {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+.postMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.postActions {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+@media (max-width: 700px) {
+  .postHead {
+    align-items: flex-start;
+  }
+  .postMeta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+  }
+}
+.postBody {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.postImage {
+  max-width: 100%;
+  border-radius: var(--sf-radius);
+  margin-top: 0.5rem;
+}
+/* Only the single-image case (an <img> itself carries this class — the
+   multi-image case puts it on the photo-grid wrapper `<div>` instead,
+   which is already size-constrained per-tile) needs a height cap: a raw
+   source photo has no size limit of its own and was rendering at the full
+   card width on desktop. */
+img.postImage {
+  display: block;
+  width: auto;
+  max-height: 480px;
+  object-fit: contain;
+}
+
+.formToolbar {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.4rem;
+}
+.formField {
+  position: relative;
+}
+.formMentions {
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 80;
+}
+.formMentionOption {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.formMentionOption:hover,
+.formMentionOptionActive {
+  background: color-mix(in srgb, var(--sf-primary) 15%, transparent);
+}
+.formMentionType {
+  color: var(--sf-muted);
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
+.mention {
+  font-weight: 600;
+  color: var(--sf-primary);
+}
+a.mentionLink {
+  text-decoration: none;
+}
+a.mentionLink:hover {
+  text-decoration: underline;
+}

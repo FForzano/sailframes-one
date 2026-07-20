@@ -1,0 +1,47 @@
+.analysisBlock {
+  margin-top: 0.5rem;
+}
+.analysisTitle {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+  color: var(--sf-muted);
+  opacity: 0.75;
+}
+.tackblock {
+  margin-top: 0.75rem;
+}
+.tackblockTitle {
+  font-size: 0.9rem;
+  margin: 0 0 0.35rem;
+}
+.optimalAngles {
+  margin-top: 0.5rem;
+}
+.optimalAnglesNote {
+  font-size: 0.8rem;
+  font-style: italic;
+  margin: 0 0 0.5rem;
+}
+.optimalAnglesRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+.optimalAnglesTile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.9rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  min-width: 8rem;
+}
+.optimalAnglesLabel {
+  font-size: 0.8rem;
+  color: var(--sf-muted);
+}
+.optimalAnglesAngle {
+  font-size: 1.3rem;
+}

@@ -14,6 +14,8 @@ import { PostBodyField } from "@/components/gruppi/PostBodyField";
 import { userLabel, fmtDateTime } from "@/utils/format";
 import { renderPostBody } from "@/utils/postFormat";
 import type { Post, PostOwnerType, UUID } from "@/types";
+import styles from "./EntityFeed.module.css";
+import photoGridStyles from "@/components/common/photoGrid.module.css";
 
 interface PendingImage {
   imageId: UUID;
@@ -29,10 +31,12 @@ function PostComposer({
   ownerType,
   ownerId,
   onDone,
+  flush,
 }: {
   ownerType: PostOwnerType;
   ownerId: UUID;
   onDone?: () => void;
+  flush?: boolean;
 }) {
   const { t } = useTranslation();
   const { notify } = useToast();
@@ -91,7 +95,7 @@ function PostComposer({
   };
 
   return (
-    <form onSubmit={submit} className="sf-feed-form">
+    <form onSubmit={submit} className={`${styles.feedForm} ${flush ? styles.feedFormFlush : ""}`}>
       <PostBodyField
         ownerType={ownerType}
         ownerId={ownerId}
@@ -101,14 +105,14 @@ function PostComposer({
         placeholder={t("gruppi.newsBody")}
       />
       {images.length > 0 && (
-        <div className="sf-photo-grid">
+        <div className={photoGridStyles.grid}>
           {images.map((img) => (
             <figure key={img.imageId}>
               <img src={img.previewUrl} alt="" />
               <Button
                 type="button"
                 variant="danger"
-                className="sf-btn--sm sf-photo__del"
+                className={`sf-btn--sm ${photoGridStyles.del}`}
                 onClick={() => removeImage(img.imageId)}
               >
                 ×
@@ -178,7 +182,7 @@ function PostEditForm({
 
   return (
     <form
-      className="sf-feed-form"
+      className={styles.feedForm}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         if (body.trim()) update.mutate();
@@ -239,7 +243,7 @@ export function EntityFeed({
   return (
     <>
       {canManage && (
-        <div className="sf-feed__new-mobile sf-mobile-only">
+        <div className={`${styles.newMobile} sf-mobile-only`}>
           <Button
             variant="ghost"
             className="sf-btn--icon-sm"
@@ -257,25 +261,25 @@ export function EntityFeed({
       )}
       {canManage && composerOpen && (
         <Modal title={t("gruppi.newPost")} onClose={() => setComposerOpen(false)}>
-          <PostComposer ownerType={ownerType} ownerId={ownerId} onDone={() => setComposerOpen(false)} />
+          <PostComposer ownerType={ownerType} ownerId={ownerId} onDone={() => setComposerOpen(false)} flush />
         </Modal>
       )}
 
       {posts.isLoading ? (
         <Spinner />
       ) : posts.data && posts.data.length > 0 ? (
-        <div className="sf-feed">
+        <div className={styles.feed}>
           {posts.data.map((p) => (
-            <div key={p.id} className="sf-feed__post">
-              <div className="sf-feed__post-head">
-                <div className="sf-feed__post-meta">
+            <div key={p.id} className={styles.post}>
+              <div className={styles.postHead}>
+                <div className={styles.postMeta}>
                   <strong>{userLabel(p.author)}</strong>
                   <span className="sf-muted">
                     {fmtDateTime(p.created_at)}
                     {p.updated_at && ` · ${t("gruppi.postEdited")}`}
                   </span>
                 </div>
-                <span className="sf-feed__post-actions">
+                <span className={styles.postActions}>
                   {p.author_id === user?.id && (
                     <Button
                       variant="ghost"
@@ -306,12 +310,12 @@ export function EntityFeed({
                   onDone={() => setEditingId(null)}
                 />
               ) : (
-                <p className="sf-feed__post-body">{renderPostBody(p.body)}</p>
+                <p className={styles.postBody}>{renderPostBody(p.body)}</p>
               )}
               {p.images.length === 1 ? (
-                <img className="sf-feed__post-image" src={p.images[0].url} alt="" />
+                <img className={styles.postImage} src={p.images[0].url} alt="" />
               ) : p.images.length > 1 ? (
-                <div className="sf-photo-grid sf-feed__post-image">
+                <div className={`${photoGridStyles.grid} ${styles.postImage}`}>
                   {p.images.map((img) => (
                     <figure key={img.image_id}>
                       <img src={img.url} alt="" />

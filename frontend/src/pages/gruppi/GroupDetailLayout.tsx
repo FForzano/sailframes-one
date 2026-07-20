@@ -14,6 +14,7 @@ import { BackLink } from "@/components/ui/BackLink";
 import { ImageUploader } from "@/components/common/ImageUploader";
 import { EntityFeed } from "@/components/gruppi/EntityFeed";
 import type { Group, UUID } from "@/types";
+import entityHeaderStyles from "@/components/gruppi/entityHeader.module.css";
 
 export interface GroupContext {
   groupId: UUID;
@@ -71,13 +72,13 @@ export function GroupDetailLayout() {
     <div className="sf-section__body">
       <BackLink to="/gruppi/gruppi" label={t("gruppi.backToGroups")} />
       <Card>
-        <div className="sf-entity-header">
-          <div className="sf-entity-header__identity">
+        <div className={entityHeaderStyles.header}>
+          <div className={entityHeaderStyles.identity}>
             {g.profile_image && <img className="sf-avatar sf-avatar--lg" src={g.profile_image.url} alt="" />}
             <div>
-              <h1 className="sf-entity-header__name">{g.name}</h1>
+              <h1 className={entityHeaderStyles.name}>{g.name}</h1>
               {memberCount != null && (
-                <p className="sf-muted sf-entity-header__meta">
+                <p className={`sf-muted ${entityHeaderStyles.meta}`}>
                   {t("gruppi.memberCount", { count: memberCount })}
                 </p>
               )}
@@ -85,7 +86,7 @@ export function GroupDetailLayout() {
             </div>
           </div>
           {isOwner && (
-            <div className="sf-entity-header__actions">
+            <div className={entityHeaderStyles.actions}>
               <ImageUploader
                 create={() => groupsService.uploadImage(groupId)}
                 confirm={(id) => groupsService.confirmImage(groupId, id)}

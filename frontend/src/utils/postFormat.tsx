@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import styles from "@/components/gruppi/EntityFeed.module.css";
 
 /** Post-body-lite syntax: **bold**, *italic*, __underline__, [label](url),
  * and @[label](user|club|group:id) mentions, plus bare "https://…" URLs
@@ -8,7 +9,7 @@ import { Link } from "react-router-dom";
  * produce, kept as plain text end to end (no HTML/sanitizer needed) so
  * `body` stays a simple string both in the DB and over the wire. Newline
  * preservation is handled by the `white-space: pre-wrap` on
- * `.sf-feed__post-body`, not here. */
+ * `.postBody` in EntityFeed.module.css, not here. */
 const INLINE_RE =
   /@\[([^\]]+)\]\((user|club|group):([^)]+)\)|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|(https?:\/\/\S+)/g;
 
@@ -28,14 +29,14 @@ export function renderPostBody(body: string): ReactNode {
     if (mentionLabel !== undefined) {
       if (mentionType === "user") {
         nodes.push(
-          <span key={key++} className="sf-mention">
+          <span key={key++} className={styles.mention}>
             @{mentionLabel}
           </span>,
         );
       } else {
         const to = mentionType === "club" ? `/gruppi/clubs/${mentionId}` : `/gruppi/${mentionId}`;
         nodes.push(
-          <Link key={key++} to={to} className="sf-mention sf-mention--link">
+          <Link key={key++} to={to} className={`${styles.mention} ${styles.mentionLink}`}>
             @{mentionLabel}
           </Link>,
         );

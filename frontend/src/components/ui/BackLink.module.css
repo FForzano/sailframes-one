@@ -1,0 +1,11 @@
+.backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  color: var(--sf-muted);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+.backlink:hover {
+  color: var(--sf-text);
+}

@@ -6,6 +6,7 @@ import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
 import { AuthCardHeader } from "@/components/auth/AuthCardHeader";
+import styles from "@/components/auth/auth.module.css";
 
 export function RegisterPage() {
   const { t } = useTranslation();
@@ -45,8 +46,8 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="sf-authpage">
-      <form className="sf-authcard" onSubmit={onSubmit}>
+    <div className={styles.authpage}>
+      <form className={styles.authcard} onSubmit={onSubmit}>
         <AuthCardHeader />
         <h2>{t("auth.registerTitle")}</h2>
         <InputField

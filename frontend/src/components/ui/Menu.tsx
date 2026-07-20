@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { useClickOutside } from "@/hooks/useClickOutside";
+import { useState } from "react";
+import { Popover } from "@/components/ui/Popover";
+import styles from "./Menu.module.css";
 
 export interface MenuItem {
   label: string;
@@ -36,12 +37,12 @@ function MenuRow({ item, depth }: { item: MenuItem; depth: number }) {
           role="menuitem"
           aria-expanded={expanded}
           disabled={item.disabled}
-          className="sf-menu__item sf-menu__item--accordion"
+          className={styles.item}
           style={indentStyle}
           onClick={() => setExpanded((v) => !v)}
         >
           <span>{item.label}</span>
-          <span className="sf-menu__chevron">{expanded ? "▾" : "▸"}</span>
+          <span className={styles.chevron}>{expanded ? "▾" : "▸"}</span>
         </button>
         {expanded &&
           item.children.map((child, i) => (
@@ -53,7 +54,7 @@ function MenuRow({ item, depth }: { item: MenuItem; depth: number }) {
 
   if (item.onCheckedChange) {
     return (
-      <label className="sf-check sf-menu__item" style={indentStyle}>
+      <label className={`sf-check ${styles.item}`} style={indentStyle}>
         <input
           type="checkbox"
           checked={!!item.checked}
@@ -70,7 +71,7 @@ function MenuRow({ item, depth }: { item: MenuItem; depth: number }) {
       type="button"
       role="menuitem"
       disabled={item.disabled}
-      className={`sf-menu__item ${item.danger ? "sf-menu__item--danger" : ""}`}
+      className={`${styles.item} ${item.danger ? styles.itemDanger : ""}`}
       style={indentStyle}
       onClick={item.onClick}
     >
@@ -85,43 +86,41 @@ function MenuRow({ item, depth }: { item: MenuItem; depth: number }) {
  * (session detail: session actions, track actions incl. trim, per-type map
  * display toggles, delete). */
 export function Menu({ sections }: { sections: MenuSection[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useClickOutside(ref, open, () => setOpen(false));
-
   return (
-    <div className="sf-options" ref={ref}>
-      <button
-        className="sf-btn sf-btn--ghost sf-btn--sm"
-        aria-label="Options"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        ⋮
-      </button>
-      {open && (
-        <div className="sf-options__panel sf-menu__panel" role="menu">
-          {sections.map((section, i) => (
-            <div key={i} className="sf-menu__section">
-              {section.heading && <div className="sf-menu__heading">{section.heading}</div>}
-              {section.items.map((item, j) => (
-                <MenuRow
-                  key={j}
-                  depth={0}
-                  item={{
-                    ...item,
-                    onClick: item.onClick && (() => {
-                      setOpen(false);
-                      item.onClick?.();
-                    }),
-                  }}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
+    <Popover
+      panelClassName={styles.panel}
+      trigger={({ open, toggle }) => (
+        <button
+          className="sf-btn sf-btn--ghost sf-btn--sm"
+          aria-label="Options"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={toggle}
+        >
+          ⋮
+        </button>
       )}
-    </div>
+    >
+      {({ close }) =>
+        sections.map((section, i) => (
+          <div key={i} className={styles.section}>
+            {section.heading && <div className={styles.heading}>{section.heading}</div>}
+            {section.items.map((item, j) => (
+              <MenuRow
+                key={j}
+                depth={0}
+                item={{
+                  ...item,
+                  onClick: item.onClick && (() => {
+                    close();
+                    item.onClick?.();
+                  }),
+                }}
+              />
+            ))}
+          </div>
+        ))
+      }
+    </Popover>
   );
 }

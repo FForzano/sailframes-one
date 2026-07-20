@@ -1,0 +1,26 @@
+/* Avatar + name + badge on their own row, actions on a separate row below —
+   avoids the old layout where all four were packed into one <h2> and wrapped
+   messily on narrow screens. */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+.name {
+  font-size: 1.3rem;
+  margin: 0 0 0.2rem;
+}
+.meta {
+  font-size: 0.85rem;
+  margin: 0 0 0.3rem;
+}
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}

@@ -18,6 +18,7 @@ import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { BackLink } from "@/components/ui/BackLink";
 import type { UUID } from "@/types";
+import styles from "./RacePage.module.css";
 
 /** The race dashboard (docs/frontend-project.md "Race/Regate"): replay core
  * (map + playback + leaderboard + speed chart + results) with the management
@@ -109,7 +110,7 @@ export function RacePage() {
           {mapMarks.length > 0 && <MapView tracks={[]} marks={mapMarks} />}
         </Card>
       ) : (
-        <div className="sf-race">
+        <div className={styles.race}>
           <div className="sf-section__body">
             <MapView tracks={tracks} marks={mapMarks} />
             <Timeline />

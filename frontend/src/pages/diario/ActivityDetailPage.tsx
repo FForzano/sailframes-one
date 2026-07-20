@@ -25,6 +25,7 @@ import { activityDisplayName } from "@/utils/activityName";
 import { fmtDateTime } from "@/utils/format";
 import { MARK_ROLES } from "@/utils/markRoles";
 import type { MarkRole, UUID, Visibility } from "@/types";
+import backLinkStyles from "@/components/ui/BackLink.module.css";
 
 const VISIBILITIES: Visibility[] = ["public", "club", "group", "private"];
 
@@ -187,7 +188,7 @@ export function ActivityDetailPage() {
 
   return (
     <div className="sf-section__body">
-      <Link to="/diario/activities" className="sf-backlink">
+      <Link to="/diario/activities" className={backLinkStyles.backlink}>
         ← {t("activities.backToActivities")}
       </Link>
       <Card
@@ -295,7 +296,7 @@ export function ActivityDetailPage() {
                   : undefined
               }
               controls={
-                <Timeline className="sf-timeline--overlay" stepMs={medianIntervalMs(tracks[0]) * 5} />
+                <Timeline overlay stepMs={medianIntervalMs(tracks[0]) * 5} />
               }
               onOpenSession={(sessionId) => navigate(`/diario/activities/${activityId}/barche/${sessionId}`)}
               showBoatInfo

@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { PolarPoint } from "@/types";
+import styles from "./PolarChart.module.css";
 
 // Hand-rolled SVG polar diagram: boat speed (radius) vs true wind angle
 // (0° = head to wind, at top). Only one TWS bucket is drawn at a time —
@@ -201,7 +202,7 @@ export function PolarChart({
   };
 
   return (
-    <div className="sf-polar">
+    <div className={styles.polar}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -224,7 +225,7 @@ export function PolarChart({
             <g key={a}>
               <line x1={C} y1={C} x2={x1} y2={y1} stroke="var(--sf-border)" strokeDasharray="2 3" />
               <line x1={C} y1={C} x2={x2} y2={y2} stroke="var(--sf-border)" strokeDasharray="2 3" />
-              <text x={lx} y={ly} className="sf-polar__lbl" textAnchor={anchor} dx={dx} dy={dy}>
+              <text x={lx} y={ly} className={styles.lbl} textAnchor={anchor} dx={dx} dy={dy}>
                 {a}°
               </text>
             </g>
@@ -285,18 +286,18 @@ export function PolarChart({
           })()}
       </svg>
       {selected && (
-        <div className="sf-polar__pick">
+        <div className={styles.pick}>
           <strong>{selected.twa.toFixed(0)}°</strong>
           <span>avg {selected.avg ? `${selected.avg.speed_kts.toFixed(1)} kn` : "—"}</span>
           <span>max {selected.max ? `${selected.max.speed_kts.toFixed(1)} kn` : "—"}</span>
         </div>
       )}
       {groups.length > 1 && (
-        <div className="sf-polar__tws-picker">
-          <span className="sf-polar__tws-value">{active.tws.toFixed(0)} kn TWS</span>
+        <div className={styles.twsPicker}>
+          <span className={styles.twsValue}>{active.tws.toFixed(0)} kn TWS</span>
           <input
             type="range"
-            className="sf-polar__tws-slider"
+            className={styles.twsSlider}
             min={0}
             max={groups.length - 1}
             step={1}
@@ -313,22 +314,22 @@ export function PolarChart({
             }
             aria-label={t("sessions.polarTwsPicker")}
           />
-          <div className="sf-polar__tws-ticks">
+          <div className={styles.twsTicks}>
             <span>{groups[0].tws.toFixed(0)} kn</span>
             <span>{groups[groups.length - 1].tws.toFixed(0)} kn</span>
           </div>
         </div>
       )}
-      <div className="sf-polar__legend">
+      <div className={styles.legend}>
         {groups.length <= 1 && <span>{active.tws.toFixed(0)} kn TWS</span>}
         <span className="sf-muted">0–{maxSpeed.toFixed(1)} kn</span>
       </div>
       {!!targetPoints?.length && (
-        <p className="sf-muted sf-polar__hint">
-          <i className="sf-polar__swatch sf-polar__swatch--solid" />
+        <p className={`sf-muted ${styles.hint}`}>
+          <i className={styles.swatch} />
           {t("sessions.polarAvg")}
           {" · "}
-          <i className="sf-polar__swatch sf-polar__swatch--light" />
+          <i className={`${styles.swatch} ${styles.swatchLight}`} />
           {t("sessions.polarMax")}
           {" — "}
           {t("sessions.polarLegendHint")}

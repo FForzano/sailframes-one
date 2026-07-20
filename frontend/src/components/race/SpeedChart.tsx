@@ -14,6 +14,8 @@ import { timeController, useTimeState } from "@/stores/timeController";
 import { fmtKnots, fmtTime } from "@/utils/format";
 import type { VmgPoint } from "@/types";
 import type { Track } from "./raceModel";
+import { Popover } from "@/components/ui/Popover";
+import styles from "./SpeedChart.module.css";
 
 // Speed-over-ground chart, one line per track, with a cursor line synced to
 // the shared time controller. Click/drag anywhere seeks — it doubles as the
@@ -50,7 +52,6 @@ export function SpeedChart({
   // touch handling below, which never resets `dragging` either).
   const [draggingHandle, setDraggingHandle] = useState<"start" | "end" | null>(null);
   const [showVmg, setShowVmg] = useState(true);
-  const [optionsOpen, setOptionsOpen] = useState(false);
 
   // Merge every track's points (and the VMG series) onto a shared time axis;
   // gaps are connected so tracks with different clocks still render one line.
@@ -119,32 +120,25 @@ export function SpeedChart({
 
   return (
     <div className="sf-chartpanel">
-      <div className="sf-chartpanel__head">
+      <div className={styles.head}>
         <span className="sf-muted" style={{ fontSize: "0.8rem" }}>
           0–{fmtKnots(maxSog)}
         </span>
         {!!vmg?.length && (
-          <div className="sf-options">
-            <button
-              className="sf-btn sf-btn--ghost sf-btn--sm"
-              aria-label="Chart options"
-              onClick={() => setOptionsOpen((v) => !v)}
-            >
-              ⚙
-            </button>
-            {optionsOpen && (
-              <div className="sf-options__panel">
-                <label className="sf-check">
-                  <input
-                    type="checkbox"
-                    checked={showVmg}
-                    onChange={(e) => setShowVmg(e.target.checked)}
-                  />
-                  <span>{t("sessions.vmg")}</span>
-                </label>
-              </div>
+          <Popover
+            trigger={({ toggle }) => (
+              <button className="sf-btn sf-btn--ghost sf-btn--sm" aria-label="Chart options" onClick={toggle}>
+                ⚙
+              </button>
             )}
-          </div>
+          >
+            {() => (
+              <label className="sf-check">
+                <input type="checkbox" checked={showVmg} onChange={(e) => setShowVmg(e.target.checked)} />
+                <span>{t("sessions.vmg")}</span>
+              </label>
+            )}
+          </Popover>
         )}
       </div>
       <ResponsiveContainer width="100%" height={H}>

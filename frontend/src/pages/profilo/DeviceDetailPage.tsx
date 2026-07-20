@@ -14,6 +14,7 @@ import { InputField } from "@/components/ui/InputField";
 import { fmtDateTime, fmtDuration } from "@/utils/format";
 import { statusBadge } from "./DevicesPage";
 import type { UUID } from "@/types";
+import deviceClaimStyles from "@/components/common/deviceClaim.module.css";
 
 export function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: UUID }>();
@@ -206,7 +207,7 @@ export function DeviceDetailPage() {
       {newKey && (
         <Modal title={t("devices.newKey")} onClose={() => setNewKey(null)}>
           <p className="sf-muted">{t("devices.rotateKeyHint")}</p>
-          <div className="sf-keybox">{newKey}</div>
+          <div className={deviceClaimStyles.keybox}>{newKey}</div>
           <div className="sf-form__actions">
             <Button
               variant="ghost"

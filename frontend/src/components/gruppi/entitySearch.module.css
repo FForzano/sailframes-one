@@ -1,0 +1,31 @@
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.bar,
+.search {
+  position: relative;
+}
+.icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--sf-muted);
+  pointer-events: none;
+}
+.input {
+  width: 100%;
+  padding: 0.55rem 0.75rem 0.55rem 2.25rem;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  background: var(--sf-surface);
+  color: var(--sf-text);
+  font: inherit;
+}
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}

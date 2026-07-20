@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import styles from "./Modal.module.css";
 
 // Minimal accessible modal: Esc closes, backdrop click closes, body content
 // is arbitrary. Feature forms live inside as children.
@@ -18,20 +19,20 @@ export function Modal({
   }, [onClose]);
 
   return (
-    <div className="sf-modal__backdrop" onClick={onClose}>
+    <div className={styles.backdrop} onClick={onClose}>
       <div
-        className="sf-modal"
+        className={styles.modal}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sf-modal__head">
-          <h2 className="sf-modal__title">{title}</h2>
-          <button className="sf-modal__close" onClick={onClose} aria-label="Close">
+        <div className={styles.head}>
+          <h2 className={styles.title}>{title}</h2>
+          <button className={styles.close} onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
-        <div className="sf-modal__body">{children}</div>
+        <div className={styles.body}>{children}</div>
       </div>
     </div>
   );

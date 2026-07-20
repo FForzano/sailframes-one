@@ -21,6 +21,7 @@ import { useMediaUpload } from "@/hooks/useMediaUpload";
 import { userLabel } from "@/utils/format";
 import type { BoatRole, UUID } from "@/types";
 import { useRef } from "react";
+import photoGridStyles from "@/components/common/photoGrid.module.css";
 
 const BOAT_ROLES: BoatRole[] = ["owner", "admin", "visitor"];
 const SAILING_ROLES = ["skipper", "crew"];
@@ -318,7 +319,7 @@ export function BoatDetailPage() {
         {boat.data.photos.filter(Boolean).length === 0 ? (
           <p className="sf-muted">{t("common.none")}</p>
         ) : (
-          <div className="sf-photo-grid">
+          <div className={photoGridStyles.grid}>
             {boat.data.photos.map(
               (p) =>
                 p && (
@@ -327,7 +328,7 @@ export function BoatDetailPage() {
                     {manager && (
                       <Button
                         variant="danger"
-                        className="sf-btn--sm sf-photo__del"
+                        className={`sf-btn--sm ${photoGridStyles.del}`}
                         onClick={() => removePhoto.mutate(p.image_id)}
                       >
                         ×

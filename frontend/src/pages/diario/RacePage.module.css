@@ -1,0 +1,11 @@
+.race {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .race {
+    grid-template-columns: 1fr;
+  }
+}

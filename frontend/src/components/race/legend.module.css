@@ -1,0 +1,46 @@
+/* Small always-visible legend under the session map — same colors as the
+   MapView mark pins, so the type/color mapping doesn't rely on hovering
+   each one. Also reused by Leaderboard for its per-boat track-color dot. */
+.mapLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.8rem;
+  color: var(--sf-muted);
+}
+.mapLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.mapLegend .dot {
+  width: 9px;
+  height: 9px;
+  margin-right: 0;
+}
+.dotLegUpwind {
+  background: var(--sf-leg-upwind);
+}
+.dotLegReach {
+  background: var(--sf-leg-reach);
+}
+.dotLegDownwind {
+  background: var(--sf-leg-downwind);
+}
+.dotTack {
+  background: var(--sf-primary);
+}
+.dotGybe {
+  background: var(--sf-gybe);
+}
+.dotCourseChange {
+  background: var(--sf-success);
+}
+
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+}

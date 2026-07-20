@@ -1,0 +1,29 @@
+/* Live playback readouts: 4-up row on desktop, 2×2 on mobile. */
+.indicators {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 700px) {
+  .indicators {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+}
+.label {
+  font-size: 0.75rem;
+  color: var(--sf-muted);
+}
+.value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

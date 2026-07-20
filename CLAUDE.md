@@ -51,18 +51,60 @@ project-specific:
   Router modules stay thin (HTTP concerns only); business logic lives in
   `services`/`repositories`; don't mix request parsing, DB access, and
   response shaping in one function just because they run back-to-back.
-- **Reuse before writing.** Before adding a new helper, check if an
-  existing function in the codebase (or a well-maintained library
-  already in use — e.g. an existing repository method, a `services/`
-  helper, a frontend hook) already does it. Prefer extending/
-  parameterizing an existing function over writing a near-duplicate.
-- **No duplicated logic.** If the same block of logic (even
-  slightly-modified copy-paste) appears in two places, extract it into a
-  shared function — favor small, composable, modular pieces over
-  repeating inline logic. This matters especially for router modules
-  (shared HTTP helpers belong in `routers/_common.py`, not copy-pasted
-  per router) and for the frontend (shared chart/map/data-fetching logic
-  belongs in a hook/util, not duplicated per page).
+- **Reuse before writing — in this order:** (1) an existing function/
+  component/hook already in the codebase (a repository method, a
+  `services/` helper, a frontend hook or shared UI component); (2) a
+  well-maintained library already a dependency of the project; (3) a
+  new well-maintained library, only when nothing existing covers it —
+  don't hand-roll what a stable, actively-maintained package already
+  does well. "Well-maintained" is the gate on (2)/(3): don't reach for
+  an abandoned or barely-used package over a few extra lines of plain
+  code. Prefer extending/parameterizing an existing function over
+  writing a near-duplicate.
+- **No duplicated logic — including CSS.** If the same block of logic
+  (even slightly-modified copy-paste) or the same visual pattern appears
+  in two places, extract it into one shared function/component/CSS
+  Module — favor small, composable, modular pieces over repeating inline
+  logic. Applies especially to router modules (shared HTTP helpers go in
+  `routers/_common.py`, not copy-pasted per router), frontend data logic
+  (shared chart/map/data-fetching goes in a hook/util, not duplicated
+  per page), and frontend styles (see "Frontend CSS" below — one CSS
+  Module per shared pattern, not a copy per file).
+- **This is a standing rule, not a one-time cleanup.** If you find
+  logic or styling that was duplicated by mistake, or a component that
+  could be modular but isn't, the default move is to refactor it into a
+  shared piece — not to leave it as found or add another copy. Flag the
+  refactor to the developer first (it's scope beyond the immediate
+  task), then do it once agreed.
+
+### Frontend CSS: global vs. CSS Modules
+
+`frontend/src/styles/global.css` holds only true cross-cutting
+design-system primitives — the ones every page composes with, the same
+way an app would use Bootstrap's `.btn`: app shell/navbar chrome, the
+mobile bottom action bar, macro-page (`sf-section`) layout, buttons,
+card/form/field primitives, and table/list/badge primitives. These stay
+global classes (`sf-*`) even though a `components/ui/*` component
+usually backs them, because dozens of pages reference the class names
+directly, not only through that component.
+
+Anything scoped to one feature or component — a chart, a dialog, a
+carousel, a single page's layout — belongs in a colocated
+`Component.module.css` (e.g. `PolarChart.tsx` /
+`PolarChart.module.css`), imported as `styles` and referenced as
+`styles.someClass` (camelCase locals, not the old `sf-` BEM names).
+When a couple of files legitimately share one feature-scoped stylesheet
+(e.g. three club/group detail layouts sharing an entity-header look),
+one shared `*.module.css` imported by all of them is fine — CSS Modules
+don't have to be strictly 1:1 with a single importer, they just need a
+bounded, known set of consumers rather than "used by half the app".
+
+Rule of thumb before adding a rule: grep how many files would
+reference the class. A handful of files in one feature area → CSS
+Module. Spread across most pages/`pages/**` directories → global.css.
+When a component still needs a truly global class alongside its own
+module classes (e.g. `sf-muted`, `sf-btn`), combine them with a
+template string: `` className={`sf-muted ${styles.hint}`} ``.
 
 ---
 
@@ -70,37 +112,37 @@ project-specific:
 
 ```
 core/
-├── CLAUDE.md              # This file
-├── README.md               # Project scope: what XGSail is / isn't
+├── CLAUDE.md           # This file
+├── README.md           # Project scope: what XGSail is / isn't
 ├── docs/
-│   ├── device-protocol.md   # Hardware-agnostic device integration protocol
-│   └── estimation-pipeline.md # Position/wind/maneuver estimation pipeline
-├── backend/                # FastAPI REST API (API-only, no static mount)
-│   ├── main.py               # Composition root: CORS, RBAC startup seed, routers
-│   ├── routers/               # One module per resource (see below)
-│   ├── services/                # Business logic (course, geo, gpx, wind estimation,
-│   │                               import processing, maneuver reconciliation)
-│   ├── repositories/              # Data-access layer (base.py + sql/ implementation)
-│   ├── auth/                        # passwords, tokens, permissions, RBAC seed
-│   ├── db/                            # SQLAlchemy models + base, Alembic-migrated
-│   ├── storage/                        # Object-store abstraction (S3/MinIO)
-│   ├── schemas/                          # Pydantic request/response models
-│   └── alembic/                            # DB migrations
-├── frontend/                # Vite + TypeScript SPA (TanStack Query, react-router,
-│   └── src/                   # leaflet, recharts, i18next)
-│       # pages/ groups routes by area: diario/ (activities, sessions, races,
-│       # regattas, import), gruppi/ (clubs, groups, devices), profilo/
-│       # (account, boats, devices, password), admin/ (superadmin)
-├── workers/                 # Heavy-processing workers — same handler runs on AWS
-│   ├── process_upload/        # Lambda (container image): GPS/CSV/GPX → analysis
-│   ├── train_maneuver/         # Maneuver-detector training/export tooling
-│   └── video/                   # MP4 → HLS via ffmpeg, Lambda Runtime Interface Emulator
-├── deploy/                  # Self-hosted stack: Dockerfile.backend, minio-init.sh
-├── scripts/                 # One-off/maintenance scripts (migrations, backfills,
-│                              wind-weight calibration, training-data export)
-└── docker-compose.yml       # One-command local stack (postgres/minio/backend/
-                               frontend/process_upload/video/train_maneuver)
+│   ├── device-protocol.md      # Hardware-agnostic device integration protocol
+│   └── estimation-pipeline.md  # Position/wind/maneuver estimation pipeline
+├── backend/            # FastAPI REST API (API-only, no static mount)
+│   ├── main.py         # Composition root: CORS, RBAC startup seed, routers
+│   ├── routers/        # One module per resource (see below)
+│   ├── services/       # Business logic: course, geo, gpx, wind estimation,
+│   │                   # import processing, maneuver reconciliation
+│   ├── repositories/   # Data-access layer (base.py + sql/ implementation)
+│   ├── auth/           # Passwords, tokens, permissions, RBAC seed
+│   ├── db/             # SQLAlchemy models + base, Alembic-migrated
+│   ├── storage/        # Object-store abstraction (S3/MinIO)
+│   ├── schemas/        # Pydantic request/response models
+│   └── alembic/        # DB migrations
+├── frontend/           # Vite + TS SPA: TanStack Query, react-router, leaflet,
+│   └── src/            # recharts, i18next (pages/ layout below)
+├── workers/            # Heavy-processing workers — same handler runs on AWS
+│   ├── process_upload/  # Lambda (container image): GPS/CSV/GPX → analysis
+│   ├── train_maneuver/  # Maneuver-detector training/export tooling
+│   └── video/           # MP4 → HLS via ffmpeg, Lambda Runtime Interface Emulator
+├── deploy/             # Self-hosted stack: Dockerfile.backend, minio-init.sh
+├── scripts/            # One-off/maintenance: migrations, backfills, wind-weight
+│                       # calibration, training-data export
+└── docker-compose.yml  # One-command local stack (see Self-Hosted Stack below)
 ```
+
+`frontend/src/pages/` groups routes by area: `diario/` (activities,
+sessions, races, regattas, import), `gruppi/` (clubs, groups, devices),
+`profilo/` (account, boats, devices, password), `admin/` (superadmin).
 
 ### Backend routers (`backend/routers/`)
 
@@ -193,10 +235,3 @@ Two authorization layers:
 `backend/auth/` implements passwords, JWT tokens, and the RBAC seed run
 at startup (`seed_superadmin`, `seed_device_types`, `seed_defaults` in
 `main.py`).
-
----
-
-*This file was realigned to reflect XGSail's actual scope (software
-application only) — hardware/firmware/PCB content that previously
-lived here belongs to the separate upstream SailFrames Core (hardware)
-project and is no longer relevant to this repository.*

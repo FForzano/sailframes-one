@@ -15,6 +15,7 @@ import { ImageUploader } from "@/components/common/ImageUploader";
 import { BackLink } from "@/components/ui/BackLink";
 import { RegattaRaceDays } from "@/components/gruppi/RegattaRaceDays";
 import type { UUID } from "@/types";
+import entityHeaderStyles from "@/components/gruppi/entityHeader.module.css";
 
 /** Regatta detail page (name, hero image, description, race days/races) —
  * reachable from a race's dashboard (`RacePage`'s back link) or from the
@@ -67,16 +68,16 @@ export function RegattaDetailPage() {
     <div className="sf-section__body">
       <BackLink to={`/gruppi/clubs/${r.club_id}/eventi`} label={t("regate.backToEvents")} />
       <Card>
-        <div className="sf-entity-header">
-          <div className="sf-entity-header__identity">
+        <div className={entityHeaderStyles.header}>
+          <div className={entityHeaderStyles.identity}>
             {r.image && <img className="sf-avatar sf-avatar--lg" src={r.image.url} alt="" />}
             <div>
-              <h1 className="sf-entity-header__name">{r.name}</h1>
-              {r.description && <p className="sf-muted sf-entity-header__meta">{r.description}</p>}
+              <h1 className={entityHeaderStyles.name}>{r.name}</h1>
+              {r.description && <p className={`sf-muted ${entityHeaderStyles.meta}`}>{r.description}</p>}
             </div>
           </div>
           {manage && (
-            <div className="sf-entity-header__actions">
+            <div className={entityHeaderStyles.actions}>
               <ImageUploader
                 create={() => regattasService.uploadImage(regattaId)}
                 confirm={(id) => regattasService.confirmImage(regattaId, id)}

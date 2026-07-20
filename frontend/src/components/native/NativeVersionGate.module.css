@@ -1,0 +1,16 @@
+.updateRequired {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  text-align: center;
+  padding: 2rem 1.5rem;
+  padding-top: calc(2rem + env(safe-area-inset-top, 0px));
+}
+.updateRequired p {
+  color: var(--sf-muted);
+  max-width: 320px;
+}

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useTimeState } from "@/stores/timeController";
 import { haversineMeters } from "@/utils/geo";
 import { indexAt, type Track } from "./raceModel";
+import legendStyles from "./legend.module.css";
 
 // Live standings at the cursor: distance sailed so far (proxy for progress) +
 // current speed. Cumulative distance is precomputed once per track; each tick
@@ -52,7 +53,7 @@ export function Leaderboard({ tracks }: { tracks: Track[] }) {
             <tr key={r.tr.id}>
               <td>{idx + 1}</td>
               <td>
-                <span className="sf-legend__dot" style={{ background: r.tr.color }} />
+                <span className={legendStyles.dot} style={{ background: r.tr.color }} />
                 {r.tr.name}
               </td>
               <td>{r.sog.toFixed(1)} kn</td>

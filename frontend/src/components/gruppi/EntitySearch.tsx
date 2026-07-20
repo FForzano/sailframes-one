@@ -7,6 +7,7 @@ import { clubsService, clubKeys } from "@/services/clubs";
 import { groupsService, groupKeys } from "@/services/groups";
 import { smartSearch } from "@/utils/smartSearch";
 import { EmptyState } from "@/components/ui/EmptyState";
+import styles from "./entitySearch.module.css";
 
 /** Single search box for both clubs and groups (Gruppi section header) —
  * both lists are already fully loaded by ClubsPage/GroupsPage via the same
@@ -22,10 +23,10 @@ export function EntitySearch() {
   const trimmed = query.trim();
   if (!trimmed) {
     return (
-      <div className="sf-entity-search">
-        <Search size={16} className="sf-entity-search__icon" />
+      <div className={styles.search}>
+        <Search size={16} className={styles.icon} />
         <input
-          className="sf-entity-search__input"
+          className={styles.input}
           type="search"
           placeholder={t("gruppi.searchPlaceholder")}
           value={query}
@@ -40,11 +41,11 @@ export function EntitySearch() {
   const noResults = clubMatches.length === 0 && groupMatches.length === 0;
 
   return (
-    <div className="sf-entity-search">
-      <div className="sf-entity-search__bar">
-        <Search size={16} className="sf-entity-search__icon" />
+    <div className={styles.search}>
+      <div className={styles.bar}>
+        <Search size={16} className={styles.icon} />
         <input
-          className="sf-entity-search__input"
+          className={styles.input}
           type="search"
           placeholder={t("gruppi.searchPlaceholder")}
           value={query}
@@ -52,7 +53,7 @@ export function EntitySearch() {
           autoFocus
         />
       </div>
-      <div className="sf-entity-search__results">
+      <div className={styles.results}>
         {noResults ? (
           <EmptyState>{t("gruppi.noSearchResults")}</EmptyState>
         ) : (

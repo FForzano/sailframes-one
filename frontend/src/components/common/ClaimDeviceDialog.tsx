@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/Select";
 import { InputField } from "@/components/ui/InputField";
 import { ApiError } from "@/api/client";
 import type { ClaimTicket, UUID } from "@/types";
+import styles from "./deviceClaim.module.css";
 
 /** Claim flow (docs/device-protocol.md §2), reused for personal, boat and
  * club devices via `owner`: mint a code, show it with an expiry countdown,
@@ -111,9 +112,9 @@ export function ClaimDeviceDialog({
         </>
       ) : (
         <>
-          <div className="sf-claimcode">{ticket.claim_code}</div>
+          <div className={styles.claimcode}>{ticket.claim_code}</div>
           {remaining > 0 ? (
-            <p className="sf-countdown">{fmtCountdown(remaining)}</p>
+            <p className={styles.countdown}>{fmtCountdown(remaining)}</p>
           ) : (
             <p className="sf-form__error">{t("devices.claimExpired")}</p>
           )}

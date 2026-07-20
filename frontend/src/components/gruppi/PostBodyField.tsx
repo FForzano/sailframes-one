@@ -18,6 +18,7 @@ import { InputField } from "@/components/ui/InputField";
 import { userLabel } from "@/utils/format";
 import { smartSearch } from "@/utils/smartSearch";
 import type { PostOwnerType, UUID } from "@/types";
+import styles from "./EntityFeed.module.css";
 
 type MentionType = "user" | "club" | "group";
 interface MentionCandidate {
@@ -265,7 +266,7 @@ export function PostBodyField({
 
   return (
     <>
-      <div className="sf-feed-form__toolbar">
+      <div className={styles.formToolbar}>
         <Button
           type="button"
           variant="ghost"
@@ -306,7 +307,7 @@ export function PostBodyField({
           <Link2 size={15} />
         </Button>
       </div>
-      <div className="sf-feed-form__field">
+      <div className={styles.formField}>
         <textarea
           ref={textareaRef}
           className="sf-field__input"
@@ -325,18 +326,18 @@ export function PostBodyField({
           required
         />
         {mentionQuery !== null && mentionResults.length > 0 && (
-          <div className="sf-feed-form__mentions">
+          <div className={styles.formMentions}>
             {mentionResults.map((c, i) => (
               <div
                 key={`${c.type}-${c.id}`}
-                className={`sf-feed-form__mention-option ${i === mentionActive ? "sf-feed-form__mention-option--active" : ""}`}
+                className={`${styles.formMentionOption} ${i === mentionActive ? styles.formMentionOptionActive : ""}`}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   applyMention(c);
                 }}
               >
                 <span>{c.label}</span>
-                <span className="sf-feed-form__mention-type">{t(`gruppi.mentionType.${c.type}`)}</span>
+                <span className={styles.formMentionType}>{t(`gruppi.mentionType.${c.type}`)}</span>
               </div>
             ))}
           </div>

@@ -1,0 +1,27 @@
+.claimcode {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 2rem;
+  letter-spacing: 0.35rem;
+  text-align: center;
+  padding: 1rem;
+  background: var(--sf-bg-2);
+  border: 1px dashed var(--sf-border);
+  border-radius: var(--sf-radius);
+  user-select: all;
+}
+.countdown {
+  text-align: center;
+  color: var(--sf-warning);
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+.keybox {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+  padding: 0.75rem;
+  background: var(--sf-bg-2);
+  border: 1px dashed var(--sf-warning);
+  border-radius: var(--sf-radius);
+  user-select: all;
+}

@@ -1,0 +1,32 @@
+.spinner {
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+}
+.full {
+  min-height: 60vh;
+  align-items: center;
+}
+.inline {
+  display: inline-flex;
+  padding: 0;
+}
+.dot {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--sf-border);
+  border-top-color: var(--sf-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.inline .dot {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  border-top-color: currentColor;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

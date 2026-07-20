@@ -18,6 +18,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import styles from "./SessionAnalysis.module.css";
 import { fmtDuration, fmtDistanceNm, fmtKnots, fmtSeconds } from "@/utils/format";
 import { PolarChart } from "./PolarChart";
 import { legSequence } from "@/utils/legSequence";
@@ -120,8 +121,8 @@ export function SessionAnalysis({ sessionId, editMode = false }: { sessionId: UU
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="sf-analysis__block">
-      <h4 className="sf-analysis__title">{title}</h4>
+    <div className={styles.analysisBlock}>
+      <h4 className={styles.analysisTitle}>{title}</h4>
       {children}
     </div>
   );
@@ -319,8 +320,8 @@ function TackBreakdown({ legs }: { legs: SessionLeg[] }) {
           (stbdVmg ?? -Infinity) >= (portVmg ?? -Infinity) ? "starboard" : "port";
 
         return (
-          <div key={legType} className="sf-tackblock">
-            <h5 className="sf-tackblock__title">
+          <div key={legType} className={styles.tackblock}>
+            <h5 className={styles.tackblockTitle}>
               {t(`sessions.${legType}`)} <span className="sf-muted">({group.length})</span>
             </h5>
             <div className="sf-tablewrap">
@@ -406,18 +407,18 @@ function OptimalAngles({
   if (!upwind && !downwind) return null;
 
   return (
-    <div className="sf-optimal-angles">
-      <p className="sf-muted sf-optimal-angles__note">{t("sessions.optimalAnglesNote")}</p>
-      <div className="sf-optimal-angles__row">
+    <div className={styles.optimalAngles}>
+      <p className={`sf-muted ${styles.optimalAnglesNote}`}>{t("sessions.optimalAnglesNote")}</p>
+      <div className={styles.optimalAnglesRow}>
         {[
           ["upwind", upwind] as const,
           ["downwind", downwind] as const,
         ].map(
           ([type, res]) =>
             res && (
-              <div key={type} className="sf-optimal-angles__tile">
-                <span className="sf-optimal-angles__label">{t(`sessions.${type}`)}</span>
-                <strong className="sf-optimal-angles__angle">{res.angle}°</strong>
+              <div key={type} className={styles.optimalAnglesTile}>
+                <span className={styles.optimalAnglesLabel}>{t(`sessions.${type}`)}</span>
+                <strong className={styles.optimalAnglesAngle}>{res.angle}°</strong>
                 <span className="sf-muted">
                   {t("sessions.target")}: {fmtKnots(res.target)}
                 </span>

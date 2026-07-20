@@ -16,6 +16,18 @@ import {
   type Track,
   type TrackPoint,
 } from "./raceModel";
+import styles from "./MapView.module.css";
+
+const LEG_TYPE_CLASS: Record<string, string> = {
+  upwind: styles.markiconLegUpwind,
+  downwind: styles.markiconLegDownwind,
+  reach: styles.markiconLegReach,
+};
+const MANEUVER_TYPE_CLASS: Record<string, string> = {
+  tack: styles.markiconTack,
+  gybe: styles.markiconGybe,
+  course_change: styles.markiconCourseChange,
+};
 
 // Track/boat names are user-supplied data (boat.name) inserted into popup
 // innerHTML below — must be escaped, unlike the rest of popupContent which is
@@ -62,10 +74,10 @@ export interface MapMark {
   kind?: "leg" | "maneuver" | "maneuver-pending" | "maneuver-draft";
   /** Progressive number shown on "leg" marks (matches the LegsTable `#` column). */
   seq?: number;
-  /** Which bordata this "leg" mark is — drives its color (see .sf-markicon--leg-*). */
+  /** Which bordata this "leg" mark is — drives its color (see LEG_TYPE_CLASS above). */
   legType?: "upwind" | "downwind" | "reach";
   /** Which maneuver this "maneuver"/"maneuver-pending" mark is — drives its
-   * color (see .sf-markicon--tack/--gybe/--course_change). */
+   * color (see MANEUVER_TYPE_CLASS above). */
   maneuverType?: "tack" | "gybe" | "course_change";
 }
 
@@ -76,7 +88,7 @@ export interface MapMark {
 export function MapView({
   tracks,
   marks = [],
-  className = "sf-race__map",
+  variant,
   wind,
   sessionWind,
   vmg,
@@ -89,7 +101,10 @@ export function MapView({
 }: {
   tracks: Track[];
   marks?: MapMark[];
-  className?: string;
+  /** "session" applies the session-detail map's shorter height (see
+   * .mapSession in MapView.module.css). Omit for the default (race/activity
+   * map) height. */
+  variant?: "session";
   /** Region to show a wind direction/speed overlay for (e.g. the session's
    * start point + start time) — omit to hide the overlay entirely. Ignored
    * for the actual value shown whenever `sessionWind` has a usable point;
@@ -183,7 +198,7 @@ export function MapView({
 
     const RecenterControl = L.Control.extend({
       onAdd() {
-        const btn = L.DomUtil.create("button", "sf-map__recenter leaflet-bar");
+        const btn = L.DomUtil.create("button", `${styles.recenter} leaflet-bar`);
         btn.type = "button";
         btn.title = "Recenter";
         btn.innerHTML =
@@ -215,7 +230,7 @@ export function MapView({
     // below, which calls setContent again on the same popup instance).
     const container = map.getContainer();
     const onContainerClick = (e: MouseEvent) => {
-      const btn = (e.target as HTMLElement).closest<HTMLElement>(".sf-map-popup__info");
+      const btn = (e.target as HTMLElement).closest<HTMLElement>(`.${styles.popupInfo}`);
       const sessionId = btn?.dataset.sessionId;
       if (sessionId) onOpenSessionRef.current?.(sessionId);
     };
@@ -274,31 +289,31 @@ export function MapView({
         const showInfo = showBoatInfo ?? tracks.length > 1;
         // The boat's own photo (first of Boat.photos), when there is one —
         // large, on the left, spanning the full height of the text lines
-        // beside it (see .sf-map-popup__thumb/-body).
+        // beside it (see .popupThumb/.popupBody in MapView.module.css).
         const thumb = showInfo && tr.boatImageUrl
-          ? `<img class="sf-map-popup__thumb" src="${escapeHtml(tr.boatImageUrl)}" alt="" />`
+          ? `<img class="${styles.popupThumb}" src="${escapeHtml(tr.boatImageUrl)}" alt="" />`
           : "";
         // Bolder/larger than the stat rows below it so it reads as the
         // popup's title, not just another line of data.
         const boatName = showInfo
-          ? `<span class="sf-map-popup__name">${escapeHtml(tr.name)}</span>`
+          ? `<span class="${styles.popupName}">${escapeHtml(tr.name)}</span>`
           : "";
         // Only rendered when the caller actually handles it — otherwise (e.g.
         // RacePage/RaceManagePanel, which don't pass onOpenSession) it would
         // be a decorative icon that does nothing when clicked.
         const moreInfo = onOpenSession
-          ? `<button type="button" class="sf-map-popup__info" data-session-id="${tr.id}" title="${t(
+          ? `<button type="button" class="${styles.popupInfo}" data-session-id="${tr.id}" title="${t(
               "sessions.openSession",
             )}">${moreInfoIcon}</button>`
           : "";
         // Name/link row only when there's something to show in it.
-        const header = boatName || moreInfo ? `<div class="sf-map-popup__row">${boatName}${moreInfo}</div>` : "";
+        const header = boatName || moreInfo ? `<div class="${styles.popupRow}">${boatName}${moreInfo}</div>` : "";
         // Text lines (name+link, speed, VMG, course) stacked to the right of
         // the photo (when shown), which stretches to match their combined height.
         return (
-          `<div class="sf-map-popup__body">` +
+          `<div class="${styles.popupBody}">` +
           thumb +
-          `<div class="sf-map-popup__col">` +
+          `<div class="${styles.popupCol}">` +
           header +
           `<strong>${fmtKnots(p.sog)}</strong>` +
           `<span>${t("sessions.vmg")} ${vp ? fmtKnots(vp.vmg_kts) : "—"}</span>` +
@@ -321,7 +336,7 @@ export function MapView({
             return;
           }
           timeController.seek(p.ms);
-          L.popup({ closeButton: false, className: "sf-map-popup" })
+          L.popup({ closeButton: false, className: styles.popup })
             .setLatLng([p.lat, p.lon])
             .setContent(popupContent(p))
             .openOn(map);
@@ -329,7 +344,7 @@ export function MapView({
 
       bounds.push(...latlngs);
       const icon = L.divIcon({
-        className: "sf-posmarker",
+        className: styles.posmarker,
         html: `<span style="background:${tr.color}"></span>`,
         iconSize: [16, 16],
         iconAnchor: [8, 8],
@@ -345,7 +360,7 @@ export function MapView({
       m.on("dragstart", () => {
         draggingRef.current.add(tr.id);
         const p = nearestPoint(tr, m.getLatLng());
-        dragPopup = L.popup({ closeButton: false, className: "sf-map-popup" })
+        dragPopup = L.popup({ closeButton: false, className: styles.popup })
           .setLatLng([p.lat, p.lon])
           .setContent(popupContent(p))
           .openOn(map);
@@ -390,40 +405,40 @@ export function MapView({
     for (const mk of marks) {
       let icon: L.DivIcon;
       if (mk.kind === "leg") {
-        // Colored by point-of-sail (bordata) — see .sf-markicon--leg-* below;
+        // Colored by point-of-sail (bordata) — see LEG_TYPE_CLASS above;
         // falls back to the base rule's color if legType is somehow absent.
-        const typeClass = mk.legType ? ` sf-markicon--leg-${mk.legType}` : "";
+        const typeClass = mk.legType ? ` ${LEG_TYPE_CLASS[mk.legType]}` : "";
         icon = L.divIcon({
-          className: `sf-markicon sf-markicon--leg${typeClass}`,
+          className: `${styles.markicon} ${styles.markiconLeg}${typeClass}`,
           html: `${mk.seq ?? ""}`,
           iconSize: [18, 18],
         });
       } else if (mk.kind === "maneuver" || mk.kind === "maneuver-pending") {
         // A colored pin (circle + pointing tail) instead of a plain dot, so
-        // maneuver type reads at a glance — color (see .sf-markicon--tack/
-        // --gybe/--course_change) plus the type's first letter (from the
-        // already-translated mark_role, so it's correctly localized).
+        // maneuver type reads at a glance — color (see MANEUVER_TYPE_CLASS
+        // above) plus the type's first letter (from the already-translated
+        // mark_role, so it's correctly localized).
         // iconSize/iconAnchor both use the FULL 26×33 box (26px circle + 7px
-        // tail, see .sf-markicon--maneuver-circle/-tail) — anchor at its
+        // tail, see .markiconManeuverCircle/-Tail) — anchor at its
         // bottom-center, the standard Leaflet pin convention. The earlier
         // version anchored past its own (circle-only) iconSize, which is
         // what put the tip in the wrong place.
-        const typeClass = mk.maneuverType ? ` sf-markicon--${mk.maneuverType}` : "";
-        const pendingClass = mk.kind === "maneuver-pending" ? " sf-markicon--pending" : "";
+        const typeClass = mk.maneuverType ? ` ${MANEUVER_TYPE_CLASS[mk.maneuverType]}` : "";
+        const pendingClass = mk.kind === "maneuver-pending" ? ` ${styles.markiconPending}` : "";
         icon = L.divIcon({
-          className: `sf-markicon sf-markicon--maneuver${typeClass}${pendingClass}`,
+          className: `${styles.markicon} ${styles.markiconManeuver}${typeClass}${pendingClass}`,
           html:
-            `<span class="sf-markicon--maneuver-circle">` +
+            `<span class="${styles.markiconManeuverCircle}">` +
             `<span>${mk.mark_role.charAt(0).toUpperCase()}</span></span>` +
-            `<span class="sf-markicon--maneuver-tail"></span>`,
+            `<span class="${styles.markiconManeuverTail}"></span>`,
           iconSize: [26, 33],
           iconAnchor: [13, 33],
         });
       } else if (mk.kind === "maneuver-draft") {
-        icon = L.divIcon({ className: "sf-markicon sf-markicon--preview", html: "◆", iconSize: [12, 12] });
+        icon = L.divIcon({ className: `${styles.markicon} ${styles.markiconPreview}`, html: "◆", iconSize: [12, 12] });
       } else {
         icon = L.divIcon({
-          className: mk.preview ? "sf-markicon sf-markicon--preview" : "sf-markicon",
+          className: mk.preview ? `${styles.markicon} ${styles.markiconPreview}` : styles.markicon,
           html: "◆",
           iconSize: [16, 16],
         });
@@ -449,14 +464,14 @@ export function MapView({
   }, [cursor, tracks]);
 
   return (
-    <div className={`${className} sf-map`}>
-      <div ref={elRef} className="sf-map__surface" />
-      {mapOptions && <div className="sf-map__options">{mapOptions}</div>}
-      {controls && <div className="sf-map__controls">{controls}</div>}
+    <div className={`${styles.map} ${variant === "session" ? styles.mapSession : ""}`}>
+      <div ref={elRef} className={styles.surface} />
+      {mapOptions && <div className={styles.options}>{mapOptions}</div>}
+      {controls && <div className={styles.controls}>{controls}</div>}
       {displayWind?.twd_deg != null && (
-        <div className="sf-map__wind" title={fmtKnots(displayWind.tws_kts)}>
+        <div className={styles.wind} title={fmtKnots(displayWind.tws_kts)}>
           <span
-            className="sf-map__wind-arrow"
+            className={styles.windArrow}
             // twd_deg is where the wind comes FROM; rotate by +180 so the
             // arrow shows the direction it's blowing TOWARD (flow), not the
             // bearing to its source.
@@ -464,7 +479,7 @@ export function MapView({
           >
             ↑
           </span>
-          <span className="sf-map__wind-speed">{fmtKnots(displayWind.tws_kts)}</span>
+          <span className={styles.windSpeed}>{fmtKnots(displayWind.tws_kts)}</span>
         </div>
       )}
     </div>

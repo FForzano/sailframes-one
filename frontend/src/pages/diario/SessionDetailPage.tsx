@@ -33,6 +33,19 @@ import { sessionStatusBadge } from "@/utils/badges";
 import { SAILING_ROLES } from "@/utils/sailingRoles";
 import type { GpsPoint, SailingRole, UUID } from "@/types";
 import { useRef } from "react";
+import backLinkStyles from "@/components/ui/BackLink.module.css";
+import photoGridStyles from "@/components/common/photoGrid.module.css";
+import legendStyles from "@/components/race/legend.module.css";
+import styles from "./SessionDetailPage.module.css";
+
+const MAP_LEGEND_DOT_CLASS: Record<string, string> = {
+  "leg-upwind": legendStyles.dotLegUpwind,
+  "leg-reach": legendStyles.dotLegReach,
+  "leg-downwind": legendStyles.dotLegDownwind,
+  tack: legendStyles.dotTack,
+  gybe: legendStyles.dotGybe,
+  course_change: legendStyles.dotCourseChange,
+};
 
 // Keys of SessionLeg["leg_type"] and SessionManeuver["maneuver_type"] — one
 // map toggle each (see the marks useMemo and the "Mostra su mappa" submenu).
@@ -312,7 +325,7 @@ export function SessionDetailPage() {
     return out;
   }, [analysis.data, mapShow, maneuverEditMode, maneuverDraftStart, t]);
 
-  // Small always-visible key for the pin colors (see .sf-map-legend) — only
+  // Small always-visible key for the pin colors (see legend.module.css) — only
   // the types actually present (and currently toggled on) in `marks`, in a
   // stable order (legs, then maneuvers).
   const mapLegend = useMemo(() => {
@@ -541,7 +554,7 @@ export function SessionDetailPage() {
   return (
     <div className="sf-section__body">
       {s.activity_id && (
-        <Link to={`/diario/activities/${s.activity_id}`} className="sf-backlink">
+        <Link to={`/diario/activities/${s.activity_id}`} className={backLinkStyles.backlink}>
           ← {t("sessions.backToActivity")}
         </Link>
       )}
@@ -575,7 +588,7 @@ export function SessionDetailPage() {
             <MapView
               tracks={tracks}
               marks={marks}
-              className="sf-race__map sf-map--session"
+              variant="session"
               vmg={analysis.data?.vmg_series}
               sessionWind={analysis.data?.true_wind}
               wind={
@@ -584,7 +597,7 @@ export function SessionDetailPage() {
                   : undefined
               }
               controls={
-                <Timeline className="sf-timeline--overlay" stepMs={medianIntervalMs(tracks[0]) * 5} />
+                <Timeline overlay stepMs={medianIntervalMs(tracks[0]) * 5} />
               }
               placementMode={maneuverEditMode}
               onManeuverPlacement={handleManeuverPlacement}
@@ -602,9 +615,9 @@ export function SessionDetailPage() {
               </p>
             )}
             {trimMode && (
-              <div className="sf-trim-bar sf-card__pad">
+              <div className={`${styles.trimBar} sf-card__pad`}>
                 <p className="sf-muted">{t("sessions.trimHint")}</p>
-                <div className="sf-trim-bar__actions">
+                <div className={styles.trimBarActions}>
                   <Button
                     onClick={applyTrim}
                     disabled={setTrim.isPending || trimDraftStartMs == null || trimDraftEndMs == null}
@@ -618,10 +631,10 @@ export function SessionDetailPage() {
               </div>
             )}
             {mapLegend.length > 0 && (
-              <div className="sf-map-legend sf-card__pad">
+              <div className={`${legendStyles.mapLegend} sf-card__pad`}>
                 {mapLegend.map(([key, label]) => (
-                  <span key={key} className="sf-map-legend__item">
-                    <span className={`sf-legend__dot sf-legend__dot--${key}`} />
+                  <span key={key} className={legendStyles.mapLegendItem}>
+                    <span className={`${legendStyles.dot} ${MAP_LEGEND_DOT_CLASS[key]}`} />
                     {label}
                   </span>
                 ))}
@@ -727,13 +740,13 @@ export function SessionDetailPage() {
         }
       >
         {photos.data?.length ? (
-          <div className="sf-photo-grid">
+          <div className={photoGridStyles.grid}>
             {photos.data.map((p) => (
               <figure key={p.image_id}>
                 <img src={p.url} alt="" />
                 <Button
                   variant="danger"
-                  className="sf-btn--sm sf-photo__del"
+                  className={`sf-btn--sm ${photoGridStyles.del}`}
                   onClick={() => removePhoto.mutate(p.image_id)}
                 >
                   ×
@@ -758,7 +771,7 @@ export function SessionDetailPage() {
         }
       >
         {videos.data?.length ? (
-          <div className="sf-photo-grid">
+          <div className={photoGridStyles.grid}>
             {videos.data.map((v) => (
               <video key={v.file_id} src={v.url} controls style={{ width: "100%" }} />
             ))}
