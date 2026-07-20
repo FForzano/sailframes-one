@@ -239,7 +239,6 @@ export function EntityFeed({
 
   return (
     <Card
-      title={t("gruppi.news")}
       actions={
         canManage && (
           <Button
@@ -271,11 +270,13 @@ export function EntityFeed({
           {posts.data.map((p) => (
             <div key={p.id} className="sf-feed__post">
               <div className="sf-feed__post-head">
-                <strong>{userLabel(p.author)}</strong>
-                <span className="sf-muted">
-                  {fmtDateTime(p.created_at)}
-                  {p.updated_at && ` · ${t("gruppi.postEdited")}`}
-                </span>
+                <div className="sf-feed__post-meta">
+                  <strong>{userLabel(p.author)}</strong>
+                  <span className="sf-muted">
+                    {fmtDateTime(p.created_at)}
+                    {p.updated_at && ` · ${t("gruppi.postEdited")}`}
+                  </span>
+                </div>
                 <span className="sf-feed__post-actions">
                   {p.author_id === user?.id && (
                     <Button

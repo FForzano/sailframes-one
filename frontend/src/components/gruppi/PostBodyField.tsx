@@ -31,6 +31,37 @@ interface MentionCandidate {
  * the text to replace. */
 const MENTION_TRIGGER_RE = /@([^\s@]*)$/;
 
+type FormatType = "bold" | "underline" | "italic";
+const FORMAT_MARKERS: Record<FormatType, string> = { bold: "**", underline: "__", italic: "*" };
+
+interface FormatSpan {
+  type: FormatType;
+  markerLen: number;
+  innerStart: number;
+  innerEnd: number;
+}
+
+/** Same precedence as `renderPostBody`'s parser (bold before italic, since
+ * they share `*`) — finds every bold/underline/italic span in `text` so the
+ * toolbar can tell whether the cursor/selection currently sits inside one. */
+const FORMAT_RE = /\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*/g;
+
+function findFormatSpans(text: string): FormatSpan[] {
+  const spans: FormatSpan[] = [];
+  FORMAT_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = FORMAT_RE.exec(text))) {
+    if (m[1] !== undefined) {
+      spans.push({ type: "bold", markerLen: 2, innerStart: m.index + 2, innerEnd: m.index + 2 + m[1].length });
+    } else if (m[2] !== undefined) {
+      spans.push({ type: "underline", markerLen: 2, innerStart: m.index + 2, innerEnd: m.index + 2 + m[2].length });
+    } else if (m[3] !== undefined) {
+      spans.push({ type: "italic", markerLen: 1, innerStart: m.index + 1, innerEnd: m.index + 1 + m[3].length });
+    }
+  }
+  return spans;
+}
+
 /** Bold/Italic/Underline/Link toolbar + textarea + @mention autocomplete for
  * a post body, shared between creating a post (`PostComposer`) and editing
  * an existing one — factored out so the two don't duplicate this logic. The
@@ -143,50 +174,58 @@ export function PostBodyField({
   };
 
   // Tracks the textarea's current selection so the toolbar can show a marker
-  // as "active" when it already wraps the selection, and so wrapSelection
-  // below can toggle it off instead of nesting a second copy.
+  // as "active" whenever the cursor sits inside (or the selection sits
+  // inside) a span already using it, and so wrapSelection below can toggle
+  // that whole span off instead of nesting a second copy.
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const trackSelection = (e: SyntheticEvent<HTMLTextAreaElement>) => {
     setSelection({ start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd });
   };
 
-  /** Whether `before`/`after` sit immediately outside the tracked selection
-   * in `value` right now — i.e. the selection is already wrapped. */
-  const isWrapped = (before: string, after: string = before) =>
-    selection.start >= before.length &&
-    value.slice(selection.start - before.length, selection.start) === before &&
-    value.slice(selection.end, selection.end + after.length) === after;
+  const formatSpans = useMemo(() => findFormatSpans(value), [value]);
+
+  /** The span of `type` that fully contains the current selection (a
+   * collapsed cursor counts as a zero-width selection "inside" the span),
+   * if any — this is what makes a toolbar button light up, and what
+   * wrapSelection removes when toggling a marker back off. */
+  const activeSpan = (type: FormatType) =>
+    formatSpans.find((s) => s.type === type && selection.start >= s.innerStart && selection.end <= s.innerEnd);
 
   /** Wraps the current selection (or a placeholder, if nothing is selected)
-   * in the given markers — used by the Bold/Italic/Underline toolbar
-   * buttons. If the selection is already wrapped, strips the markers instead
-   * (so pressing the same button again toggles it off rather than nesting a
-   * second copy). Re-selects the (un)wrapped text afterwards so another
-   * click keeps toggling the same span. */
-  const wrapSelection = (before: string, after: string = before) => {
+   * in the marker for `type` — used by the Bold/Italic/Underline toolbar
+   * buttons. If the cursor/selection is already inside a span of that type,
+   * strips its markers instead (so pressing the same button again toggles
+   * the whole span off rather than nesting a second copy). Re-selects the
+   * (un)wrapped text afterwards, translated by the marker length, so
+   * clicking again keeps toggling the same spot. */
+  const wrapSelection = (type: FormatType) => {
     const el = textareaRef.current;
     if (!el) return;
+    const marker = FORMAT_MARKERS[type];
     const { selectionStart, selectionEnd } = el;
-    if (isWrapped(before, after)) {
+    const span = activeSpan(type);
+    if (span) {
+      const { markerLen } = span;
       const next =
-        value.slice(0, selectionStart - before.length) +
-        value.slice(selectionStart, selectionEnd) +
-        value.slice(selectionEnd + after.length);
+        value.slice(0, span.innerStart - markerLen) +
+        value.slice(span.innerStart, span.innerEnd) +
+        value.slice(span.innerEnd + markerLen);
       onChange(next);
       requestAnimationFrame(() => {
         el.focus();
-        const start = selectionStart - before.length;
-        el.setSelectionRange(start, start + (selectionEnd - selectionStart));
-        setSelection({ start, end: start + (selectionEnd - selectionStart) });
+        const start = selectionStart - markerLen;
+        const end = selectionEnd - markerLen;
+        el.setSelectionRange(start, end);
+        setSelection({ start, end });
       });
       return;
     }
     const selected = value.slice(selectionStart, selectionEnd) || t("gruppi.formatPlaceholder");
-    const next = value.slice(0, selectionStart) + before + selected + after + value.slice(selectionEnd);
+    const next = value.slice(0, selectionStart) + marker + selected + marker + value.slice(selectionEnd);
     onChange(next);
     requestAnimationFrame(() => {
       el.focus();
-      const start = selectionStart + before.length;
+      const start = selectionStart + marker.length;
       const end = start + selected.length;
       el.setSelectionRange(start, end);
       setSelection({ start, end });
@@ -230,30 +269,30 @@ export function PostBodyField({
         <Button
           type="button"
           variant="ghost"
-          className={`sf-btn--icon-sm ${isWrapped("**") ? "sf-btn--active" : ""}`}
+          className={`sf-btn--icon-sm ${activeSpan("bold") ? "sf-btn--active" : ""}`}
           aria-label={t("gruppi.formatBold")}
-          aria-pressed={isWrapped("**")}
-          onClick={() => wrapSelection("**")}
+          aria-pressed={!!activeSpan("bold")}
+          onClick={() => wrapSelection("bold")}
         >
           <Bold size={15} />
         </Button>
         <Button
           type="button"
           variant="ghost"
-          className={`sf-btn--icon-sm ${isWrapped("*") ? "sf-btn--active" : ""}`}
+          className={`sf-btn--icon-sm ${activeSpan("italic") ? "sf-btn--active" : ""}`}
           aria-label={t("gruppi.formatItalic")}
-          aria-pressed={isWrapped("*")}
-          onClick={() => wrapSelection("*")}
+          aria-pressed={!!activeSpan("italic")}
+          onClick={() => wrapSelection("italic")}
         >
           <Italic size={15} />
         </Button>
         <Button
           type="button"
           variant="ghost"
-          className={`sf-btn--icon-sm ${isWrapped("__") ? "sf-btn--active" : ""}`}
+          className={`sf-btn--icon-sm ${activeSpan("underline") ? "sf-btn--active" : ""}`}
           aria-label={t("gruppi.formatUnderline")}
-          aria-pressed={isWrapped("__")}
-          onClick={() => wrapSelection("__")}
+          aria-pressed={!!activeSpan("underline")}
+          onClick={() => wrapSelection("underline")}
         >
           <Underline size={15} />
         </Button>

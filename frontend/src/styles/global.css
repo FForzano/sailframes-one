@@ -1378,13 +1378,13 @@ h1, h2, h3 {
   flex-direction: column;
   gap: 0.9rem;
 }
+/* Each post as its own boxed panel — reads as a list of distinct posts
+   rather than one continuous scrolling document. */
 .sf-feed__post {
-  padding-bottom: 0.9rem;
-  border-bottom: 1px solid var(--sf-border);
-}
-.sf-feed__post:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
+  padding: 0.9rem 1rem;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
 }
 .sf-feed__post-head {
   display: flex;
@@ -1392,10 +1392,26 @@ h1, h2, h3 {
   gap: 0.5rem;
   margin-bottom: 0.3rem;
 }
+.sf-feed__post-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 .sf-feed__post-actions {
   display: flex;
   gap: 0.25rem;
   margin-left: auto;
+}
+@media (max-width: 700px) {
+  .sf-feed__post-head {
+    align-items: flex-start;
+  }
+  .sf-feed__post-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+  }
 }
 .sf-feed__post-body {
   white-space: pre-wrap;
