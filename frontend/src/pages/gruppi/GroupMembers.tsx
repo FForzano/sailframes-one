@@ -5,7 +5,6 @@ import { Check, LogOut, Search, UserMinus, UserPlus } from "lucide-react";
 import { groupsService, groupKeys } from "@/services/groups";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Avatar } from "@/components/ui/Avatar";
@@ -66,33 +65,29 @@ export function GroupMembers() {
   const visible: GroupMember[] = showSearch ? smartSearch(query, filtered, (m) => [userLabel(m.user)]) : filtered;
 
   return (
-    <Card
-      title={t("gruppi.members")}
-      actions={
-        manages && (
-          <span style={{ display: "flex", gap: "0.5rem" }}>
-            {pendingCount > 0 && (
-              <Button
-                variant={pendingOnly ? "primary" : "ghost"}
-                className="sf-btn--sm"
-                aria-pressed={pendingOnly}
-                onClick={() => setPendingOnly((v) => !v)}
-              >
-                {t("gruppi.pendingOnly")} ({pendingCount})
-              </Button>
-            )}
+    <>
+      {manages && (
+        <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
+          {pendingCount > 0 && (
             <Button
-              variant="ghost"
-              className="sf-btn--icon-sm"
-              aria-label={t("gruppi.invite")}
-              onClick={() => setInviting(true)}
+              variant={pendingOnly ? "primary" : "ghost"}
+              className="sf-btn--sm"
+              aria-pressed={pendingOnly}
+              onClick={() => setPendingOnly((v) => !v)}
             >
-              <UserPlus size={16} />
+              {t("gruppi.pendingOnly")} ({pendingCount})
             </Button>
-          </span>
-        )
-      }
-    >
+          )}
+          <Button
+            variant="ghost"
+            className="sf-btn--icon-sm"
+            aria-label={t("gruppi.invite")}
+            onClick={() => setInviting(true)}
+          >
+            <UserPlus size={16} />
+          </Button>
+        </div>
+      )}
       {showSearch && (
         <div className={entitySearchStyles.search} style={{ marginBottom: "0.75rem" }}>
           <Search size={16} className={entitySearchStyles.icon} />
@@ -183,6 +178,6 @@ export function GroupMembers() {
           <UserPicker busy={invite.isPending} pickLabel={t("gruppi.invite")} onPick={(u) => invite.mutate(u.id)} />
         </Modal>
       )}
-    </Card>
+    </>
   );
 }

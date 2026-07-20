@@ -65,52 +65,50 @@ export function AnagraficaPage() {
 
   return (
     <div className="sf-grid" style={{ gridTemplateColumns: "minmax(280px, 480px)" }}>
-      <Card title={t("profile.details")}>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
-          <Avatar
-            size="lg"
-            profileImage={me.data?.profile_image ?? null}
-            firstName={me.data?.first_name}
-            lastName={me.data?.last_name}
-          />
-          <ImageUploader
-            label={t("profile.profileImage")}
-            create={usersService.createProfileImage}
-            confirm={(id) => usersService.confirmProfileImage(id)}
-            crop
-            onDone={async () => {
-              await queryClient.invalidateQueries({ queryKey: userKeys.me });
-            }}
-          />
+      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
+        <Avatar
+          size="lg"
+          profileImage={me.data?.profile_image ?? null}
+          firstName={me.data?.first_name}
+          lastName={me.data?.last_name}
+        />
+        <ImageUploader
+          label={t("profile.profileImage")}
+          create={usersService.createProfileImage}
+          confirm={(id) => usersService.confirmProfileImage(id)}
+          crop
+          onDone={async () => {
+            await queryClient.invalidateQueries({ queryKey: userKeys.me });
+          }}
+        />
+      </div>
+      <form onSubmit={onSubmit}>
+        <InputField
+          label={t("profile.firstName")}
+          id="first_name"
+          value={form.first_name}
+          onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
+        />
+        <InputField
+          label={t("profile.lastName")}
+          id="last_name"
+          value={form.last_name}
+          onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
+        />
+        <InputField label={t("auth.email")} id="email" value={me.data?.email ?? ""} disabled />
+        <InputField
+          label={t("profile.dob")}
+          id="dob"
+          type="date"
+          value={form.dob}
+          onChange={(e) => setForm((f) => ({ ...f, dob: e.target.value }))}
+        />
+        <div className="sf-form__actions">
+          <Button type="submit" disabled={save.isPending}>
+            {t("common.save")}
+          </Button>
         </div>
-        <form onSubmit={onSubmit}>
-          <InputField
-            label={t("profile.firstName")}
-            id="first_name"
-            value={form.first_name}
-            onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))}
-          />
-          <InputField
-            label={t("profile.lastName")}
-            id="last_name"
-            value={form.last_name}
-            onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))}
-          />
-          <InputField label={t("auth.email")} id="email" value={me.data?.email ?? ""} disabled />
-          <InputField
-            label={t("profile.dob")}
-            id="dob"
-            type="date"
-            value={form.dob}
-            onChange={(e) => setForm((f) => ({ ...f, dob: e.target.value }))}
-          />
-          <div className="sf-form__actions">
-            <Button type="submit" disabled={save.isPending}>
-              {t("common.save")}
-            </Button>
-          </div>
-        </form>
-      </Card>
+      </form>
       <Card title={t("profile.units")}>
         <div className="sf-form__row">
           <button

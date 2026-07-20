@@ -290,6 +290,13 @@ h1, h2, h3 {
   gap: 0.25rem;
   border-bottom: 1px solid var(--sf-border);
   overflow-x: auto;
+  /* Horizontally-scrollable tab strip (more tabs than fit, e.g. Profilo on
+     mobile) — hide the native scrollbar track, which used to be masked by
+     a Card starting right underneath and now reads as a stray gray line. */
+  scrollbar-width: none;
+}
+.sf-tabs::-webkit-scrollbar {
+  display: none;
 }
 .sf-tab {
   padding: 0.55rem 1rem;
@@ -421,6 +428,16 @@ h1, h2, h3 {
 .sf-card__actions {
   display: flex;
   gap: 0.5rem;
+}
+/* Same header-row shape as .sf-card__head, for pages that render their
+   filter/action controls directly under a tab bar instead of inside a
+   Card whose title would just repeat the tab label. */
+.sf-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
 }
 /* Click-to-rename title text (ActivityDetailPage) — a dashed underline hints
    it's editable; the input that replaces it on click matches the title size. */
@@ -952,6 +969,14 @@ h1, h2, h3 {
 }
 .sf-options__panel .sf-check {
   margin-bottom: 0;
+}
+/* For a trigger near the left edge (e.g. a filter button left of an
+   OptionsMenu "⋮") — anchoring the panel from the trigger's right edge
+   (the default, correct for right-aligned triggers) pushes it off-screen
+   to the left instead. */
+.sf-options__panel--left {
+  left: 0;
+  right: auto;
 }
 .sf-optionsmenu__panel {
   padding: 0.3rem;

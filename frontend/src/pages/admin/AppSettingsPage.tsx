@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { appConfigService, appConfigKeys } from "@/services/appConfig";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
 
@@ -36,7 +35,7 @@ export function AppSettingsPage() {
   });
 
   return (
-    <Card title={t("admin.appSettings")}>
+    <>
       <form
         className="sf-form__row"
         style={{ alignItems: "end" }}
@@ -68,6 +67,6 @@ export function AppSettingsPage() {
       <p className="sf-muted" style={{ marginTop: "0.5rem" }}>
         {t("admin.minNativeVersionHint")}
       </p>
-    </Card>
+    </>
   );
 }

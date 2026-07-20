@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesService, deviceKeys } from "@/services/devices";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { InputField } from "@/components/ui/InputField";
@@ -31,7 +30,7 @@ export function DeviceTypesPage() {
   });
 
   return (
-    <Card title={t("admin.deviceTypes")}>
+    <>
       <div className="sf-tablewrap">
         <table className="sf-table">
           <thead>
@@ -97,6 +96,6 @@ export function DeviceTypesPage() {
           </Button>
         </div>
       </form>
-    </Card>
+    </>
   );
 }

@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { regattasService, raceKeys } from "@/services/races";
 import { activitiesService, activityKeys } from "@/services/activities";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { InputField, TextAreaField } from "@/components/ui/InputField";
@@ -110,25 +109,21 @@ export function ClubEvents({
     .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime());
 
   return (
-    <Card
-      title={t("gruppi.events")}
-      actions={
-        (manageRegattas || manageActivities) && (
-          <span className="sf-strip__actions">
-            {manageRegattas && (
-              <Button className="sf-btn--sm" onClick={() => setCreatingRegatta(true)}>
-                {t("regate.newRegatta")}
-              </Button>
-            )}
-            {manageActivities && (
-              <Button className="sf-btn--sm" onClick={() => setCreatingActivity(true)}>
-                {t("gruppi.newEvent")}
-              </Button>
-            )}
-          </span>
-        )
-      }
-    >
+    <>
+      {(manageRegattas || manageActivities) && (
+        <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
+          {manageRegattas && (
+            <Button className="sf-btn--sm" onClick={() => setCreatingRegatta(true)}>
+              {t("regate.newRegatta")}
+            </Button>
+          )}
+          {manageActivities && (
+            <Button className="sf-btn--sm" onClick={() => setCreatingActivity(true)}>
+              {t("gruppi.newEvent")}
+            </Button>
+          )}
+        </div>
+      )}
       <h3>{t("gruppi.upcomingEvents")}</h3>
       {upcoming.length ? (
         <div className={feedStyles.feed}>
@@ -243,6 +238,6 @@ export function ClubEvents({
           </form>
         </Modal>
       )}
-    </Card>
+    </>
   );
 }

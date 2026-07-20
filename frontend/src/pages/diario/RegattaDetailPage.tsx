@@ -66,7 +66,7 @@ export function RegattaDetailPage() {
 
   return (
     <div className="sf-section__body">
-      <BackLink to={`/gruppi/clubs/${r.club_id}/eventi`} label={t("regate.backToEvents")} />
+      <BackLink fallback={`/gruppi/clubs/${r.club_id}/eventi`} label={t("regate.backToEvents")} />
       <Card>
         <div className={entityHeaderStyles.header}>
           <div className={entityHeaderStyles.identity}>

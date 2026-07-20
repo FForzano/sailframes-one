@@ -2,6 +2,7 @@
    the feed itself share this width so they line up as one block instead of
    a full-width toolbar sitting over a narrower, separately-centered feed. */
 .page {
+  width: 100%;
   max-width: 600px;
   margin: 0 auto;
 }
@@ -27,22 +28,34 @@
 .mediaLink {
   display: block;
 }
-.media {
-  display: block;
+/* Fixed-ratio box on a plain div, NOT on the <img> itself — sizing it via
+   the image's own aspect-ratio/intrinsic dimensions made cards vary in
+   height per track shape (a long thin route vs. a squarish one) or
+   depending on whether there even was a thumbnail. Every card's media area
+   is exactly this size, image or placeholder alike. */
+.mediaBox {
+  position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
+  background: var(--sf-bg-2);
+  overflow: hidden;
+}
+.media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   /* `contain`, not `cover` — these are low-res generated track overlays
      (fine at the old ~220px grid-card size); cropping AND upscaling them to
      fill a wide feed card makes the already-blocky line noticeably worse. */
   object-fit: contain;
-  background: var(--sf-bg-2);
 }
 .mediaPlaceholder {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  aspect-ratio: 4 / 3;
 }
 .mediaPlaceholder[data-kind="regatta"] {
   background: color-mix(in srgb, var(--sf-warning) 15%, var(--sf-bg-2));

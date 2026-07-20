@@ -57,13 +57,20 @@ export function EventRow({
   return (
     <article className={styles.card}>
       <Link to={href} className={styles.mediaLink}>
-        {imageUrl ? (
-          <img src={imageUrl} alt="" className={styles.media} />
-        ) : (
-          <div className={styles.mediaPlaceholder} data-kind={item.kind} aria-hidden>
-            {item.kind === "regatta" ? <Trophy size={32} /> : <Sailboat size={32} />}
-          </div>
-        )}
+        <div className={styles.mediaBox}>
+          {imageUrl ? (
+            // Absolutely positioned inside a plain-div fixed-aspect-ratio
+            // box, not sized via the <img>'s own aspect-ratio/intrinsic
+            // dimensions — those vary per track (a long thin route vs. a
+            // squarish one), which was making cards with vs. without a
+            // thumbnail (or with different track shapes) different heights.
+            <img src={imageUrl} alt="" className={styles.media} />
+          ) : (
+            <div className={styles.mediaPlaceholder} data-kind={item.kind} aria-hidden>
+              {item.kind === "regatta" ? <Trophy size={32} /> : <Sailboat size={32} />}
+            </div>
+          )}
+        </div>
       </Link>
       <div className={styles.body}>
         <div className={styles.badges}>

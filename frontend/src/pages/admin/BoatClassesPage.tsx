@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { boatsService, boatKeys, type BoatClassSort, type SortOrder } from "@/services/boats";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { InputField, TextAreaField } from "@/components/ui/InputField";
@@ -121,7 +120,7 @@ export function BoatClassesPage() {
   });
 
   return (
-    <Card title={t("admin.boatClasses")}>
+    <>
       <div className="sf-form__row" style={{ alignItems: "end" }}>
         <InputField
           label={t("common.search")}
@@ -401,6 +400,6 @@ export function BoatClassesPage() {
           </form>
         </Modal>
       )}
-    </Card>
+    </>
   );
 }

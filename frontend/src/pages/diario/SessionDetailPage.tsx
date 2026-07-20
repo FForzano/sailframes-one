@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { resolveApiUrl } from "@/api/client";
@@ -33,7 +33,7 @@ import { sessionStatusBadge } from "@/utils/badges";
 import { SAILING_ROLES } from "@/utils/sailingRoles";
 import type { GpsPoint, SailingRole, UUID } from "@/types";
 import { useRef } from "react";
-import backLinkStyles from "@/components/ui/BackLink.module.css";
+import { BackLink } from "@/components/ui/BackLink";
 import photoGridStyles from "@/components/common/photoGrid.module.css";
 import legendStyles from "@/components/race/legend.module.css";
 import styles from "./SessionDetailPage.module.css";
@@ -554,9 +554,7 @@ export function SessionDetailPage() {
   return (
     <div className="sf-section__body">
       {s.activity_id && (
-        <Link to={`/diario/activities/${s.activity_id}`} className={backLinkStyles.backlink}>
-          ← {t("sessions.backToActivity")}
-        </Link>
+        <BackLink fallback={`/diario/activities/${s.activity_id}`} label={t("sessions.backToActivity")} />
       )}
       <Card
         title={

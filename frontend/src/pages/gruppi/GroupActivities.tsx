@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { activitiesService, activityKeys } from "@/services/activities";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { InputField, TextAreaField } from "@/components/ui/InputField";
@@ -64,16 +63,14 @@ export function GroupActivities() {
   });
 
   return (
-    <Card
-      title={t("gruppi.groupActivities")}
-      actions={
-        manages && (
+    <>
+      {manages && (
+        <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
           <Button className="sf-btn--sm" onClick={() => setNewActivity(true)}>
             {t("gruppi.newActivity")}
           </Button>
-        )
-      }
-    >
+        </div>
+      )}
       <h3>{t("activities.upcoming")}</h3>
       {planned.data?.length ? (
         <div className="sf-strip">
@@ -136,6 +133,6 @@ export function GroupActivities() {
           </form>
         </Modal>
       )}
-    </Card>
+    </>
   );
 }

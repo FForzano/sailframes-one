@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { windService, windKeys } from "@/services/wind";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { InputField } from "@/components/ui/InputField";
@@ -87,7 +86,7 @@ export function WindStationsPage() {
   });
 
   return (
-    <Card title={t("admin.windStations")}>
+    <>
       <div className="sf-tablewrap">
         <table className="sf-table">
           <thead>
@@ -292,6 +291,6 @@ export function WindStationsPage() {
           </form>
         </Modal>
       )}
-    </Card>
+    </>
   );
 }

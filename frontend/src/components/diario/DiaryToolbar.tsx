@@ -26,9 +26,9 @@ export function DiaryToolbar({
   const navigate = useNavigate();
 
   return (
-    <div className={styles.toolbar}>
+    <div className="sf-toolbar">
       <Popover
-        panelClassName="sf-optionsmenu__panel"
+        panelClassName="sf-optionsmenu__panel sf-options__panel--left"
         trigger={({ open, toggle }) => (
           <button
             className={`sf-btn sf-btn--ghost sf-btn--sm ${styles.filterTrigger}`}

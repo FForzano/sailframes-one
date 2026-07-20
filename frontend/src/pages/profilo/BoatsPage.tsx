@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { boatsService, boatKeys } from "@/services/boats";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/useToast";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { InputField } from "@/components/ui/InputField";
@@ -53,10 +52,10 @@ export function BoatsPage() {
   };
 
   return (
-    <Card
-      title={t("boats.title")}
-      actions={<Button onClick={() => setCreating(true)}>{t("boats.addBoat")}</Button>}
-    >
+    <>
+      <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
+        <Button onClick={() => setCreating(true)}>{t("boats.addBoat")}</Button>
+      </div>
       {boats.data?.length === 0 ? (
         <EmptyState>{t("boats.empty")}</EmptyState>
       ) : (
@@ -138,6 +137,6 @@ export function BoatsPage() {
           </form>
         </Modal>
       )}
-    </Card>
+    </>
   );
 }

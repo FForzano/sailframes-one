@@ -65,25 +65,24 @@ export function GroupsPage() {
 
   return (
     <>
-      <Card
-        title={t("gruppi.myGroups")}
-        actions={<Button onClick={() => setCreating(true)}>{t("gruppi.createGroup")}</Button>}
-      >
-        {mine.length === 0 ? (
-          <EmptyState>{t("gruppi.emptyGroups")}</EmptyState>
-        ) : (
-          <div className="sf-grid">
-            {mine.map((g) => (
-              <Link key={g.id} to={`/gruppi/gruppi/${g.id}`} className="sf-card">
-                {g.profile_image && <img className="sf-avatar" src={g.profile_image.url} alt="" />}
-                <h3>{g.name}</h3>
-                <p className="sf-muted">{g.description}</p>
-                <span className="sf-badge">{t(`gruppi.${g.visibility}`)}</span>
-              </Link>
-            ))}
-          </div>
-        )}
-      </Card>
+      <div className="sf-toolbar">
+        <h3>{t("gruppi.myGroups")}</h3>
+        <Button onClick={() => setCreating(true)}>{t("gruppi.createGroup")}</Button>
+      </div>
+      {mine.length === 0 ? (
+        <EmptyState>{t("gruppi.emptyGroups")}</EmptyState>
+      ) : (
+        <div className="sf-grid">
+          {mine.map((g) => (
+            <Link key={g.id} to={`/gruppi/gruppi/${g.id}`} className="sf-card">
+              {g.profile_image && <img className="sf-avatar" src={g.profile_image.url} alt="" />}
+              <h3>{g.name}</h3>
+              <p className="sf-muted">{g.description}</p>
+              <span className="sf-badge">{t(`gruppi.${g.visibility}`)}</span>
+            </Link>
+          ))}
+        </div>
+      )}
 
       {discover.length > 0 && (
         <Card title={t("gruppi.discoverGroups")}>

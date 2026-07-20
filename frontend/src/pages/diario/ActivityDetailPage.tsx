@@ -25,7 +25,7 @@ import { activityDisplayName } from "@/utils/activityName";
 import { fmtDateTime } from "@/utils/format";
 import { MARK_ROLES } from "@/utils/markRoles";
 import type { MarkRole, UUID, Visibility } from "@/types";
-import backLinkStyles from "@/components/ui/BackLink.module.css";
+import { BackLink } from "@/components/ui/BackLink";
 
 const VISIBILITIES: Visibility[] = ["public", "club", "group", "private"];
 
@@ -251,9 +251,7 @@ export function ActivityDetailPage() {
 
   return (
     <div className="sf-section__body">
-      <Link to="/diario/personale" className={backLinkStyles.backlink}>
-        ← {t("activities.backToActivities")}
-      </Link>
+      <BackLink fallback="/diario/personale" label={t("activities.backToActivities")} />
       <Card
         title={
           editingName ? (

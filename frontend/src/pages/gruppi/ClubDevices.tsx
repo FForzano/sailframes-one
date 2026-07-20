@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { devicesService, deviceKeys } from "@/services/devices";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ClaimDeviceDialog } from "@/components/common/ClaimDeviceDialog";
 import { fmtDateTime, fmtDuration } from "@/utils/format";
@@ -46,14 +45,12 @@ export function ClubDevices({ clubId }: { clubId: UUID }) {
   const clubDevices = devices.data?.filter((d) => d.owner_club_id === clubId) ?? [];
 
   return (
-    <Card
-      title={t("gruppi.fleetHealth")}
-      actions={
+    <>
+      <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
         <Button className="sf-btn--sm" onClick={() => setClaiming(true)}>
           {t("devices.claim")}
         </Button>
-      }
-    >
+      </div>
       {clubDevices.length === 0 ? (
         <p className="sf-muted">{t("devices.empty")}</p>
       ) : (
@@ -80,6 +77,6 @@ export function ClubDevices({ clubId }: { clubId: UUID }) {
       {claiming && (
         <ClaimDeviceDialog owner={{ owner_club_id: clubId }} onClose={() => setClaiming(false)} />
       )}
-    </Card>
+    </>
   );
 }

@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { devicesService, deviceKeys } from "@/services/devices";
 import { useAuth } from "@/hooks/useAuth";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -74,10 +73,10 @@ export function DevicesPage() {
   const personal = devices.data?.filter((d) => d.owner_user_id === user?.id) ?? [];
 
   return (
-    <Card
-      title={t("devices.title")}
-      actions={<Button onClick={() => setClaiming(true)}>{t("devices.claim")}</Button>}
-    >
+    <>
+      <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
+        <Button onClick={() => setClaiming(true)}>{t("devices.claim")}</Button>
+      </div>
       {personal.length === 0 ? (
         <EmptyState>{t("devices.empty")}</EmptyState>
       ) : (
@@ -89,6 +88,6 @@ export function DevicesPage() {
           onClose={() => setClaiming(false)}
         />
       )}
-    </Card>
+    </>
   );
 }

@@ -65,27 +65,26 @@ export function ClubsPage() {
 
   return (
     <>
-      <Card
-        title={t("gruppi.myClubs")}
-        actions={<Button onClick={() => setCreating(true)}>{t("gruppi.createClub")}</Button>}
-      >
-        {mine.length === 0 ? (
-          <EmptyState>{t("gruppi.emptyClubs")}</EmptyState>
-        ) : (
-          <div className="sf-grid">
-            {mine.map((c) => (
-              <Link key={c.id} to={`/gruppi/clubs/${c.id}`} className="sf-card">
-                {c.logo && <img className="sf-avatar" src={c.logo.url} alt="" />}
-                <h3>{c.name}</h3>
-                <p className="sf-muted">{c.city ?? c.description}</p>
-                {ownsClub(c.id) && (
-                  <span className="sf-badge sf-badge--success">{t("gruppi.manageMode")}</span>
-                )}
-              </Link>
-            ))}
-          </div>
-        )}
-      </Card>
+      <div className="sf-toolbar">
+        <h3>{t("gruppi.myClubs")}</h3>
+        <Button onClick={() => setCreating(true)}>{t("gruppi.createClub")}</Button>
+      </div>
+      {mine.length === 0 ? (
+        <EmptyState>{t("gruppi.emptyClubs")}</EmptyState>
+      ) : (
+        <div className="sf-grid">
+          {mine.map((c) => (
+            <Link key={c.id} to={`/gruppi/clubs/${c.id}`} className="sf-card">
+              {c.logo && <img className="sf-avatar" src={c.logo.url} alt="" />}
+              <h3>{c.name}</h3>
+              <p className="sf-muted">{c.city ?? c.description}</p>
+              {ownsClub(c.id) && (
+                <span className="sf-badge sf-badge--success">{t("gruppi.manageMode")}</span>
+              )}
+            </Link>
+          ))}
+        </div>
+      )}
 
       {discover.length > 0 && (
         <Card title={t("gruppi.discoverClubs")}>
