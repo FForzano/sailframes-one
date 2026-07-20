@@ -132,7 +132,7 @@ export function RaceManagePanel({
   return (
     <Card title={t("race.manage")}>
       {canRace && (
-        <>
+        <div className="sf-form__section">
           <form
             className="sf-form__row"
             style={{ alignItems: "end" }}
@@ -155,15 +155,23 @@ export function RaceManagePanel({
             </div>
           </form>
           {!race.start_time && <p className="sf-muted">{t("race.setStartTime")}</p>}
-          <div className="sf-form__actions" style={{ justifyContent: "flex-start" }}>
-            <Button
-              variant="ghost"
-              disabled={match.isPending || !race.start_time}
-              onClick={() => match.mutate()}
-            >
-              {t("race.matchSessions")}
-            </Button>
-          </div>
+        </div>
+      )}
+
+      {canRace && (
+        <div className="sf-form__section" style={{ display: "flex", justifyContent: "flex-start" }}>
+          <Button
+            variant="ghost"
+            disabled={match.isPending || !race.start_time}
+            onClick={() => match.mutate()}
+          >
+            {t("race.matchSessions")}
+          </Button>
+        </div>
+      )}
+
+      {canRace && (
+        <div className="sf-form__section">
           <form
             className="sf-form__row"
             style={{ alignItems: "end" }}
@@ -196,11 +204,14 @@ export function RaceManagePanel({
               </Button>
             </div>
           </form>
-        </>
+        </div>
       )}
 
       {canMarks && (
-        <div className="sf-form__actions" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
+        <div
+          className="sf-form__section"
+          style={{ display: "flex", justifyContent: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}
+        >
           <Button variant="ghost" disabled={startLine.isPending} onClick={() => startLine.mutate(false)}>
             {t("race.autoStartLine")} ({t("common.preview")})
           </Button>
@@ -221,10 +232,10 @@ export function RaceManagePanel({
       )}
 
       {canResults && (
-        <>
+        <div className="sf-form__section">
           <h3>{t("race.results")}</h3>
           <ResultsEditor raceId={race.id} results={race.results ?? []} />
-        </>
+        </div>
       )}
     </Card>
   );

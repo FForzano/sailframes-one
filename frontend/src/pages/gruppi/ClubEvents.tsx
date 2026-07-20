@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { regattasService, racedaysService, racesService, raceKeys } from "@/services/races";
 import { activitiesService, activityKeys } from "@/services/activities";
 import { useToast } from "@/hooks/useToast";
+import { ApiError } from "@/api/client";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -39,7 +40,7 @@ function RegattaBlock({ regattaId, manage }: { regattaId: UUID; manage: boolean 
     mutationFn: ({ dayId, num }: { dayId: UUID; num: number }) =>
       racesService.create({ race_day_id: dayId, race_number: num }),
     onSuccess: invalidate,
-    onError: () => notify(t("errors.generic"), "error"),
+    onError: (err: unknown) => notify(err instanceof ApiError ? err.detail : t("errors.generic"), "error"),
   });
 
   if (!regatta.data) return null;
@@ -52,6 +53,7 @@ function RegattaBlock({ regattaId, manage }: { regattaId: UUID; manage: boolean 
           dayId={day.id}
           date={day.date}
           manage={manage}
+          addingRace={addRace.isPending}
           onAddRace={(num) => addRace.mutate({ dayId: day.id, num })}
         />
       ))}
@@ -83,11 +85,13 @@ function RaceDayRow({
   dayId,
   date,
   manage,
+  addingRace,
   onAddRace,
 }: {
   dayId: UUID;
   date: string;
   manage: boolean;
+  addingRace: boolean;
   onAddRace: (num: number) => void;
 }) {
   const { t } = useTranslation();
@@ -110,6 +114,7 @@ function RaceDayRow({
         {manage && (
           <Button
             className="sf-btn--sm"
+            disabled={addingRace}
             onClick={() => onAddRace((races[races.length - 1]?.race_number ?? 0) + 1)}
           >
             + {t("regate.newRace")}
@@ -257,10 +262,10 @@ export function ClubEvents({
   ];
 
   const upcoming = items
-    .filter((i) => (i.kind === "activity" ? i.activity.status === "planned" : i.date && new Date(i.date).getTime() >= now))
+    .filter((i) => i.date && new Date(i.date).getTime() >= now)
     .sort((a, b) => new Date(a.date ?? 0).getTime() - new Date(b.date ?? 0).getTime());
   const past = items
-    .filter((i) => (i.kind === "activity" ? i.activity.status === "completed" : !(i.date && new Date(i.date).getTime() >= now)))
+    .filter((i) => !(i.date && new Date(i.date).getTime() >= now))
     .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime());
 
   return (

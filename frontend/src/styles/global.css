@@ -555,6 +555,29 @@ h1, h2, h3 {
   color: var(--sf-danger);
   font-size: 0.9rem;
 }
+/* Groups a related block of controls (e.g. one action of a management
+   panel) with a divider from the next block — keeps unrelated forms from
+   visually running into each other, especially once .sf-form__row wraps
+   to a single column on narrow screens. */
+.sf-form__section {
+  padding-top: 1rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--sf-border);
+}
+.sf-form__section:first-child {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
+}
+@media (max-width: 700px) {
+  .sf-form__row {
+    gap: 0.85rem 1rem;
+  }
+  .sf-form__section {
+    padding-top: 1.25rem;
+    margin-top: 1.25rem;
+  }
+}
 .sf-check {
   display: flex;
   gap: 0.5rem;
