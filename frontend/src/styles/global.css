@@ -1884,9 +1884,40 @@ img.sf-feed__post-image {
   font-size: 0.9rem;
   font-weight: 600;
 }
-.sf-polar__tws-picker input[type="range"] {
+.sf-polar__tws-slider {
   width: 100%;
-  accent-color: var(--sf-primary);
+  height: 6px;
+  border-radius: 999px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.sf-polar__tws-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sf-polar-track, var(--sf-primary));
+}
+.sf-polar__tws-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sf-polar-track, var(--sf-primary));
+}
+.sf-polar__tws-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--sf-polar-thumb, var(--sf-primary));
+  border: 2px solid var(--sf-bg);
+  box-shadow: 0 0 0 1px var(--sf-border);
+}
+.sf-polar__tws-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sf-polar-thumb, var(--sf-primary));
+  border: 2px solid var(--sf-bg);
+  box-shadow: 0 0 0 1px var(--sf-border);
 }
 .sf-polar__tws-ticks {
   display: flex;

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { PolarPoint } from "@/types";
 
@@ -24,22 +24,41 @@ const SPOKES = [0, 45, 90, 135, 180];
 // chord — otherwise the no-go zone near 0° looks like smooth coverage.
 const GAP_THRESHOLD_DEG = 9;
 
-// Matches --sf-primary; kept as a literal hex (not the CSS var) because
-// `lighten()` below needs to parse it to build the "target" curve's tint.
-const CURVE_COLOR = "#2f9be0";
+type Rgb = [number, number, number];
 
-/** Lightens a `#rrggbb` color by blending it toward white — used for the
- * "target" (max-speed) curve so it reads as a distinct color per bucket
- * (not just a dashed variant of the same one) while staying associated
- * with its average curve. */
-function lighten(hex: string, amount: number): string {
+function hexToRgb(hex: string): Rgb {
   const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 0xff;
-  const g = (n >> 8) & 0xff;
-  const b = n & 0xff;
-  const mix = (c: number) => Math.round(c + (255 - c) * amount);
-  return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 }
+
+function mixRgb(a: Rgb, b: Rgb, t: number): Rgb {
+  return [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)) as Rgb;
+}
+
+function rgbCss([r, g, b]: Rgb): string {
+  return `rgb(${r},${g},${b})`;
+}
+
+/** Blends an rgb triple toward white — used for the "target" (max-speed)
+ * curve so it reads as a distinct tint of the average curve's color rather
+ * than an identical overlapping line. */
+function lightenRgb(rgb: Rgb, amount: number): Rgb {
+  return mixRgb(rgb, [255, 255, 255], amount);
+}
+
+// Ordinal ramp (one hue, light→dark by bucket position — see dataviz skill's
+// "ordinal" job) anchored on --sf-primary: the lightest bucket is a tint of
+// it, the strongest a shade, so the slider position and the drawn curve's
+// color always agree.
+const BASE_RGB = hexToRgb("#2f9be0");
+const RAMP_LIGHT = mixRgb(BASE_RGB, [255, 255, 255], 0.55);
+const RAMP_DARK = mixRgb(BASE_RGB, [0, 0, 0], 0.35);
+
+function rampRgb(t: number): Rgb {
+  return mixRgb(RAMP_LIGHT, RAMP_DARK, t);
+}
+
+const TWS_TRACK_GRADIENT = `linear-gradient(to right, ${rgbCss(RAMP_LIGHT)}, ${rgbCss(RAMP_DARK)})`;
 
 function polar(twaDeg: number, radius: number, side: 1 | -1): [number, number] {
   const th = (twaDeg * Math.PI) / 180;
@@ -163,6 +182,10 @@ export function PolarChart({
   const activeIndex = Math.min(twsIndex, groups.length - 1);
   const active = groups[activeIndex];
   const activeTarget = targetByTws.get(active.tws)?.slice().sort((a, b) => a.twa_deg - b.twa_deg) ?? [];
+  const rampT = groups.length > 1 ? activeIndex / (groups.length - 1) : 0.5;
+  const activeRgb = rampRgb(rampT);
+  const activeColor = rgbCss(activeRgb);
+  const activeTargetColor = rgbCss(lightenRgb(activeRgb, 0.5));
 
   const handlePick = (clientX: number, clientY: number) => {
     const svg = svgRef.current;
@@ -208,12 +231,12 @@ export function PolarChart({
           );
         })}
         <g>
-          <path d={fillPath(active.pts, maxSpeed)} fill={CURVE_COLOR} fillOpacity={0.15} stroke="none" />
-          <path d={segmentedPath(active.pts, maxSpeed, 1)} fill="none" stroke={CURVE_COLOR} strokeWidth={2} />
+          <path d={fillPath(active.pts, maxSpeed)} fill={activeColor} fillOpacity={0.15} stroke="none" />
+          <path d={segmentedPath(active.pts, maxSpeed, 1)} fill="none" stroke={activeColor} strokeWidth={2} />
           <path
             d={segmentedPath(active.pts, maxSpeed, -1)}
             fill="none"
-            stroke={CURVE_COLOR}
+            stroke={activeColor}
             strokeWidth={2}
             opacity={0.5}
           />
@@ -221,20 +244,20 @@ export function PolarChart({
             <>
               <path
                 d={fillPath(activeTarget, maxSpeed)}
-                fill={lighten(CURVE_COLOR, 0.5)}
+                fill={activeTargetColor}
                 fillOpacity={0.15}
                 stroke="none"
               />
               <path
                 d={segmentedPath(activeTarget, maxSpeed, 1)}
                 fill="none"
-                stroke={lighten(CURVE_COLOR, 0.5)}
+                stroke={activeTargetColor}
                 strokeWidth={2}
               />
               <path
                 d={segmentedPath(activeTarget, maxSpeed, -1)}
                 fill="none"
-                stroke={lighten(CURVE_COLOR, 0.5)}
+                stroke={activeTargetColor}
                 strokeWidth={2}
                 opacity={0.5}
               />
@@ -273,6 +296,7 @@ export function PolarChart({
           <span className="sf-polar__tws-value">{active.tws.toFixed(0)} kn TWS</span>
           <input
             type="range"
+            className="sf-polar__tws-slider"
             min={0}
             max={groups.length - 1}
             step={1}
@@ -281,6 +305,12 @@ export function PolarChart({
               setTwsIndex(Number(e.target.value));
               setSelected(null);
             }}
+            style={
+              {
+                "--sf-polar-track": TWS_TRACK_GRADIENT,
+                "--sf-polar-thumb": activeColor,
+              } as CSSProperties
+            }
             aria-label={t("sessions.polarTwsPicker")}
           />
           <div className="sf-polar__tws-ticks">
