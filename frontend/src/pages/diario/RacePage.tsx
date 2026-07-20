@@ -89,7 +89,10 @@ export function RacePage() {
   return (
     <div className="sf-section__body">
       {raceday.data?.regatta_id && (
-        <BackLink to={`/diario/regate/regatta/${raceday.data.regatta_id}`} label={t("regate.backToRegatta")} />
+        <BackLink
+          fallback={`/diario/regate/regatta/${raceday.data.regatta_id}`}
+          label={t("regate.backToRegatta")}
+        />
       )}
       <h1>
         {regatta.data?.name ?? t("regate.title")} — {t("regate.raceNumber")}{" "}
