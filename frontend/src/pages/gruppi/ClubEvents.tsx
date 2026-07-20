@@ -110,53 +110,55 @@ export function ClubEvents({
 
   return (
     <>
-      {(manageRegattas || manageActivities) && (
-        <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
-          {manageRegattas && (
-            <Button className="sf-btn--sm" onClick={() => setCreatingRegatta(true)}>
-              {t("regate.newRegatta")}
-            </Button>
-          )}
-          {manageActivities && (
-            <Button className="sf-btn--sm" onClick={() => setCreatingActivity(true)}>
-              {t("gruppi.newEvent")}
-            </Button>
-          )}
-        </div>
-      )}
-      <h3>{t("gruppi.upcomingEvents")}</h3>
-      {upcoming.length ? (
-        <div className={feedStyles.feed}>
-          {upcoming.map((i) => (
-            <EventRow
-              key={`${i.kind}-${i.id}`}
-              item={i}
-              manage={manageRegattas}
-              open={openRegattaId === i.id}
-              onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="sf-muted">{t("gruppi.emptyEvents")}</p>
-      )}
+      <div className={feedStyles.page}>
+        {(manageRegattas || manageActivities) && (
+          <div className="sf-toolbar" style={{ justifyContent: "flex-end" }}>
+            {manageRegattas && (
+              <Button className="sf-btn--sm" onClick={() => setCreatingRegatta(true)}>
+                {t("regate.newRegatta")}
+              </Button>
+            )}
+            {manageActivities && (
+              <Button className="sf-btn--sm" onClick={() => setCreatingActivity(true)}>
+                {t("gruppi.newEvent")}
+              </Button>
+            )}
+          </div>
+        )}
+        <h3>{t("gruppi.upcomingEvents")}</h3>
+        {upcoming.length ? (
+          <div className={feedStyles.feed}>
+            {upcoming.map((i) => (
+              <EventRow
+                key={`${i.kind}-${i.id}`}
+                item={i}
+                manage={manageRegattas}
+                open={openRegattaId === i.id}
+                onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="sf-muted">{t("gruppi.emptyEvents")}</p>
+        )}
 
-      <h3>{t("gruppi.pastEvents")}</h3>
-      {past.length ? (
-        <div className={feedStyles.feed}>
-          {past.map((i) => (
-            <EventRow
-              key={`${i.kind}-${i.id}`}
-              item={i}
-              manage={manageRegattas}
-              open={openRegattaId === i.id}
-              onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="sf-muted">{t("gruppi.emptyEvents")}</p>
-      )}
+        <h3>{t("gruppi.pastEvents")}</h3>
+        {past.length ? (
+          <div className={feedStyles.feed}>
+            {past.map((i) => (
+              <EventRow
+                key={`${i.kind}-${i.id}`}
+                item={i}
+                manage={manageRegattas}
+                open={openRegattaId === i.id}
+                onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="sf-muted">{t("gruppi.emptyEvents")}</p>
+        )}
+      </div>
 
       {creatingRegatta && (
         <Modal title={t("regate.newRegatta")} onClose={() => setCreatingRegatta(false)}>
