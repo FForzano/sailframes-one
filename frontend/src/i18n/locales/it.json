@@ -392,10 +392,15 @@
     "namePlaceholder": "Nome attività",
     "marks": "Boe",
     "addMark": "Aggiungi boa",
+    "saveMark": "Salva boa",
+    "editMark": "Modifica",
+    "cancelEditMark": "Annulla modifica",
     "markRole": "Ruolo boa",
     "pickOnMap": "Posiziona sulla mappa",
     "pickingOnMap": "Clicca sulla mappa…",
     "pickOnMapHint": "Clicca sulla mappa per posizionare la boa",
+    "sameAsStartPin": "Stessa posizione del pin di partenza",
+    "sameAsStartRc": "Stessa posizione del comitato di partenza",
     "markRoles": {
       "pin": "Pin (boa di partenza)",
       "rc": "Comitato di regata",
@@ -404,7 +409,9 @@
       "gate_port": "Cancello sinistra",
       "gate_stbd": "Cancello destra",
       "offset": "Offset",
-      "drill": "Esercitazione"
+      "drill": "Esercitazione",
+      "finish_pin": "Pin (arrivo)",
+      "finish_rc": "Comitato di regata (arrivo)"
     },
     "timeOfDay": {
       "morning": "Mattina",

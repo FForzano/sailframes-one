@@ -26,7 +26,22 @@ ACTIVITY_VISIBILITIES = ("public", "club", "group", "private")
 # explicit status. See routers/sessions.py::attach_to_activity for the
 # planned -> completed transition.
 ACTIVITY_STATUSES = ("planned", "completed")
-MARK_ROLES = ("pin", "rc", "windward", "leeward", "gate_port", "gate_stbd", "offset", "drill")
+MARK_ROLES = (
+    "pin",
+    "rc",
+    "windward",
+    "leeward",
+    "gate_port",
+    "gate_stbd",
+    "offset",
+    "drill",
+    # Finish line — mirrors pin/rc (its own pair of marks) rather than
+    # reusing them, since a course can finish on a different line than it
+    # started (see frontend's "same as start" convenience autofill, which
+    # copies pin/rc's coordinates into these when the two lines coincide).
+    "finish_pin",
+    "finish_rc",
+)
 
 
 class ActivityORM(UUIDPKMixin, Base):

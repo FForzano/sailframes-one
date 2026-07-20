@@ -392,10 +392,15 @@
     "namePlaceholder": "Activity name",
     "marks": "Marks",
     "addMark": "Add mark",
+    "saveMark": "Save mark",
+    "editMark": "Edit",
+    "cancelEditMark": "Cancel edit",
     "markRole": "Mark role",
     "pickOnMap": "Place on map",
     "pickingOnMap": "Click the map…",
     "pickOnMapHint": "Click the map to place the mark",
+    "sameAsStartPin": "Same position as the start pin",
+    "sameAsStartRc": "Same position as the start race committee",
     "markRoles": {
       "pin": "Pin (start line)",
       "rc": "Race committee",
@@ -404,7 +409,9 @@
       "gate_port": "Gate (port)",
       "gate_stbd": "Gate (starboard)",
       "offset": "Offset",
-      "drill": "Drill"
+      "drill": "Drill",
+      "finish_pin": "Pin (finish line)",
+      "finish_rc": "Race committee (finish line)"
     },
     "timeOfDay": {
       "morning": "Morning",

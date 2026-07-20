@@ -859,6 +859,9 @@ h1, h2, h3 {
   background: var(--sf-surface);
   color: var(--sf-muted);
 }
+.sf-strip__item--active {
+  border-color: var(--sf-primary);
+}
 .sf-crew-row {
   display: flex;
   align-items: center;

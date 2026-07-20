@@ -46,6 +46,9 @@ export function ActivityDetailPage() {
     lng: "",
   });
   const [pickingMarkOnMap, setPickingMarkOnMap] = useState(false);
+  // Set while editing an already-placed mark — the same form is reused for
+  // both add and edit, submitting to `updateMark` instead of `addMark`.
+  const [editingMarkId, setEditingMarkId] = useState<UUID | null>(null);
   const mapCardRef = useRef<HTMLDivElement>(null);
 
   const activity = useQuery({
@@ -99,6 +102,15 @@ export function ActivityDetailPage() {
     })),
   });
 
+  // useQueries returns a new array reference on every render regardless of
+  // whether any query's data actually changed — depending on `sessionAnalyses`
+  // directly below would recompute `tracks` (and, downstream, force MapView
+  // to tear down and re-fit the whole map, losing the user's pan/zoom and
+  // any in-progress marker drag) on every unrelated state change on this
+  // page. This derives a primitive key that only changes value when a
+  // query's data actually updates, so the memo below only reruns then.
+  const sessionAnalysesKey = sessionAnalyses.map((q) => q.dataUpdatedAt).join(",");
+
   // gps.json is never trimmed in place (see SessionDetailPage's trim
   // feature) — each session's own trim_start_time/trim_end_time (from the
   // `sessions` query, which returns full Session records) has to be applied
@@ -125,14 +137,21 @@ export function ActivityDetailPage() {
         return { ...tr, pts, boatImageUrl, vmg: vmgBySessionId.get(tr.id) };
       })
       .filter((tr) => tr.pts.length > 0);
-  }, [activityData.data, sessions.data, sessionAnalyses, boats.data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `sessionAnalyses`
+    // intentionally excluded in favor of `sessionAnalysesKey` (see above).
+  }, [activityData.data, sessions.data, sessionAnalysesKey, boats.data]);
   useEffect(() => {
     if (tracks.length) timeController.setBounds(...timeBounds(tracks));
     return () => timeController.pause();
   }, [tracks]);
   const mapMarks = useMemo<MapMark[]>(
-    () => (marks.data ?? []).map((m) => ({ id: m.id, mark_role: m.mark_role, lat: m.lat, lng: m.lng })),
-    [marks.data],
+    () =>
+      (marks.data ?? [])
+        // The mark being edited is represented by the draggable preview
+        // below instead, so it isn't shown twice at (possibly) two positions.
+        .filter((m) => m.id !== editingMarkId)
+        .map((m) => ({ id: m.id, mark_role: m.mark_role, lat: m.lat, lng: m.lng })),
+    [marks.data, editingMarkId],
   );
   // Live preview of the "add mark" form's current lat/lng (however it was
   // filled — typed or picked on the map) as a dashed marker, so the user can
@@ -167,6 +186,20 @@ export function ActivityDetailPage() {
       }),
     onSuccess: async () => {
       setMarkForm({ mark_role: MARK_ROLES[0], lat: "", lng: "" });
+      await queryClient.invalidateQueries({ queryKey: activityKeys.marks(activityId!) });
+    },
+    onError: () => notify(t("errors.generic"), "error"),
+  });
+  const updateMark = useMutation({
+    mutationFn: () =>
+      activitiesService.updateMark(activityId!, editingMarkId!, {
+        mark_role: markForm.mark_role,
+        lat: Number(markForm.lat),
+        lng: Number(markForm.lng),
+      }),
+    onSuccess: async () => {
+      setMarkForm({ mark_role: MARK_ROLES[0], lat: "", lng: "" });
+      setEditingMarkId(null);
       await queryClient.invalidateQueries({ queryKey: activityKeys.marks(activityId!) });
     },
     onError: () => notify(t("errors.generic"), "error"),
@@ -409,7 +442,12 @@ export function ActivityDetailPage() {
         {marks.data?.length ? (
           <div className="sf-strip">
             {marks.data.map((m) => (
-              <div key={m.id} className="sf-strip__item sf-strip__item--muted">
+              <div
+                key={m.id}
+                className={`sf-strip__item sf-strip__item--muted${
+                  m.id === editingMarkId ? " sf-strip__item--active" : ""
+                }`}
+              >
                 <span>
                   <strong>{t(`activities.markRoles.${m.mark_role}`)}</strong>{" "}
                   <span className="sf-muted">
@@ -417,13 +455,31 @@ export function ActivityDetailPage() {
                   </span>
                 </span>
                 {canEdit && (
-                  <Button
-                    variant="ghost"
-                    className="sf-btn--sm"
-                    onClick={() => removeMark.mutate(m.id)}
-                  >
-                    {t("common.remove")}
-                  </Button>
+                  <>
+                    <Button
+                      variant="ghost"
+                      className="sf-btn--sm"
+                      onClick={() => {
+                        setEditingMarkId(m.id);
+                        setMarkForm({ mark_role: m.mark_role, lat: String(m.lat), lng: String(m.lng) });
+                      }}
+                    >
+                      {t("activities.editMark")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="sf-btn--sm"
+                      onClick={() => {
+                        if (m.id === editingMarkId) {
+                          setEditingMarkId(null);
+                          setMarkForm({ mark_role: MARK_ROLES[0], lat: "", lng: "" });
+                        }
+                        removeMark.mutate(m.id);
+                      }}
+                    >
+                      {t("common.remove")}
+                    </Button>
+                  </>
                 )}
               </div>
             ))}
@@ -437,7 +493,8 @@ export function ActivityDetailPage() {
             style={{ alignItems: "end", marginTop: "0.75rem" }}
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
-              addMark.mutate();
+              if (editingMarkId) updateMark.mutate();
+              else addMark.mutate();
             }}
           >
             <Select
@@ -486,11 +543,48 @@ export function ActivityDetailPage() {
                 </Button>
               </div>
             )}
+            {/* Convenience autofill: a finish line very often coincides with
+                the start line, so offer to copy the matching start mark's
+                position instead of requiring it to be re-entered/re-picked. */}
+            {(markForm.mark_role === "finish_pin" || markForm.mark_role === "finish_rc") &&
+              (() => {
+                const startRole = markForm.mark_role === "finish_pin" ? "pin" : "rc";
+                const startMark = marks.data?.find((m) => m.mark_role === startRole);
+                if (!startMark) return null;
+                return (
+                  <div className="sf-field">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() =>
+                        setMarkForm((f) => ({ ...f, lat: String(startMark.lat), lng: String(startMark.lng) }))
+                      }
+                    >
+                      {t(markForm.mark_role === "finish_pin" ? "activities.sameAsStartPin" : "activities.sameAsStartRc")}
+                    </Button>
+                  </div>
+                );
+              })()}
             <div className="sf-field">
-              <Button type="submit" disabled={addMark.isPending}>
-                {t("activities.addMark")}
+              <Button type="submit" disabled={addMark.isPending || updateMark.isPending}>
+                {t(editingMarkId ? "activities.saveMark" : "activities.addMark")}
               </Button>
             </div>
+            {editingMarkId && (
+              <div className="sf-field">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditingMarkId(null);
+                    setMarkForm({ mark_role: MARK_ROLES[0], lat: "", lng: "" });
+                    setPickingMarkOnMap(false);
+                  }}
+                >
+                  {t("activities.cancelEditMark")}
+                </Button>
+              </div>
+            )}
           </form>
         )}
       </Card>

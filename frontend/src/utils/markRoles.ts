@@ -11,4 +11,6 @@ export const MARK_ROLES: MarkRole[] = [
   "gate_stbd",
   "offset",
   "drill",
+  "finish_pin",
+  "finish_rc",
 ];

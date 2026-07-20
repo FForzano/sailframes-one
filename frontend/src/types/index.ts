@@ -261,7 +261,9 @@ export type MarkRole =
   | "gate_port"
   | "gate_stbd"
   | "offset"
-  | "drill";
+  | "drill"
+  | "finish_pin"
+  | "finish_rc";
 
 export interface Mark {
   id: UUID;
