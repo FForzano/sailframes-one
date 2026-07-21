@@ -41,11 +41,6 @@ body,
   height: 100%;
 }
 
-html,
-body {
-  overflow-x: hidden;
-}
-
 body {
   margin: 0;
   font-family: var(--sf-font);
@@ -73,6 +68,23 @@ h1, h2, h3 {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+  /* `clip`, not `hidden`: `hidden` on one axis while the other is left at
+     its default `visible` forces that other axis to compute to `auto` (CSS
+     Overflow spec) AND makes the element a scroll container — html/body
+     used to carry `overflow-x: hidden` this way, and at least one Android
+     WebView responded by making BODY its own independently-scrolling box
+     (it also had a fixed height: 100%) instead of propagating scroll to the
+     viewport, leaving document.scrollingElement/documentElement/
+     window.scrollY all stuck at 0 while body.scrollTop silently tracked the
+     real (otherwise invisible-to-JS) scroll position. useAppShellGestures
+     reads document.scrollingElement to decide "are we at the top of the
+     page", so with that stuck at 0 it treated every scroll as if the page
+     were already at the top, breaking scrolling back up anywhere below the
+     very top. `clip` was added to the spec specifically to clip one axis
+     without either side effect — no forced auto-promotion of overflow-y, no
+     new scroll container — so it can't shift the containing block .sf-navbar
+     / .sf-tabs' `position: sticky` rely on either. */
+  overflow-x: clip;
 }
 .sf-main {
   flex: 1;
@@ -86,8 +98,8 @@ h1, h2, h3 {
      the screen), gets judged "not a vertical pan", and then the browser
      refuses to scroll for that entire gesture: the flick just dies. The
      default (auto) scrolls the vertical component regardless of how the
-     gesture starts; there's no horizontal overflow to pan anyway (html/body
-     are overflow-x: hidden), so swipe-nav's X translation in
+     gesture starts; there's no horizontal overflow to pan anyway (.sf-shell
+     is overflow-x: clip), so swipe-nav's X translation in
      useAppShellGestures never has a native horizontal pan to fight. */
 }
 /* Pull-to-refresh gap: an empty, growing strip revealed below the section's
