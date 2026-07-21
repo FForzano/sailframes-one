@@ -33,6 +33,17 @@ const BAIL_SELECTOR =
 // top (not just genuinely at it) start a pull.
 const scrollTop = () => document.scrollingElement?.scrollTop ?? 0;
 
+// TEMPORARY diagnostics — a device report showed sT=0.0 for an entire
+// gesture while genuinely scrolled well past the top, meaning
+// document.scrollingElement itself may be the wrong read on that WebView.
+// Compares every plausible source side by side instead of guessing which
+// one is trustworthy.
+const scrollDebug = () =>
+  `se=${document.scrollingElement?.scrollTop ?? "null"} ` +
+  `de=${document.documentElement.scrollTop} ` +
+  `bd=${document.body.scrollTop} ` +
+  `wy=${window.scrollY}`;
+
 /** The app shell's single touch-gesture recognizer for the routed content
  * (attach `ref` to AppShell's `<main>`). It owns BOTH:
  *
@@ -148,7 +159,7 @@ export function useAppShellGestures<T extends HTMLElement>(
       gestureLog = [];
       moveCount = 0;
       pdCount = 0;
-      logLine(`▼start sT=${scrollTop().toFixed(1)} cand=${pullCandidate}`);
+      logLine(`▼start cand=${pullCandidate} ${scrollDebug()}`);
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -160,9 +171,7 @@ export function useAppShellGestures<T extends HTMLElement>(
       // or native scrolling has already irrevocably taken over).
       moveCount += 1;
       if (moveCount <= 3) {
-        logLine(
-          `mv${moveCount} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} sT=${scrollTop().toFixed(1)} canc=${e.cancelable}`,
-        );
+        logLine(`mv${moveCount} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} canc=${e.cancelable} ${scrollDebug()}`);
       }
       if (!locked) {
         if (Math.abs(dx) < DIRECTION_LOCK_PX && Math.abs(dy) < DIRECTION_LOCK_PX) return;
@@ -185,7 +194,7 @@ export function useAppShellGestures<T extends HTMLElement>(
           // fast path.
           locked = "v";
         }
-        logLine(`LOCK=${locked} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} sT=${scrollTop().toFixed(1)}`);
+        logLine(`LOCK=${locked} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)} ${scrollDebug()}`);
       }
       if (locked === "h") {
         // No preventDefault: there's no horizontal overflow for a native pan
@@ -199,7 +208,7 @@ export function useAppShellGestures<T extends HTMLElement>(
         if (scrollTop() > 1) return;
         e.preventDefault();
         pdCount += 1;
-        if (pdCount <= 2) logLine(`PD#${pdCount} dy=${dy.toFixed(0)} canc=${e.cancelable}`);
+        if (pdCount <= 2) logLine(`PD#${pdCount} dy=${dy.toFixed(0)} canc=${e.cancelable} ${scrollDebug()}`);
         pullDistance = Math.min(dy * RESISTANCE, MAX_PULL_PX);
         setPull(pullDistance);
       }
@@ -258,10 +267,10 @@ export function useAppShellGestures<T extends HTMLElement>(
     // stayed (a scroll that worked), or SNAPPED BACK after the finger lifted
     // — the reported symptom — and to what value.
     const logEnd = (kind: string) => {
-      logLine(`▲${kind} lock=${locked} mv=${moveCount} pd=${pdCount} sT=${scrollTop().toFixed(1)}`);
+      logLine(`▲${kind} lock=${locked} mv=${moveCount} pd=${pdCount} ${scrollDebug()}`);
       flushLog();
       settleTimer = window.setTimeout(() => {
-        logLine(`settle sT=${scrollTop().toFixed(1)}`);
+        logLine(`settle ${scrollDebug()}`);
         flushLog();
       }, 400);
     };
