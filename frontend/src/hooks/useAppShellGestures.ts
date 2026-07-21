@@ -6,6 +6,12 @@ const COMMIT_THRESHOLD_PX = 60;
 // Below this drag distance, direction hasn't been decided yet — lets a
 // vertical scroll start normally instead of being hijacked immediately.
 const DIRECTION_LOCK_PX = 10;
+// Require the horizontal component to clearly dominate before locking "h" —
+// a plain majority (dx > dy) false-positives on ordinary vertical scrolls
+// that start slightly diagonal, which one-handed thumb swipes do often
+// (more so reaching lower on the screen), permanently hijacking that scroll
+// into a horizontal swipe-nav drag for its whole duration.
+const H_LOCK_BIAS = 1.5;
 // Finger moves further than this without the content visually catching up as
 // fast — a soft "rubber band" rather than a 1:1 follow. Shared by both the
 // horizontal swipe and the vertical pull.
@@ -37,14 +43,23 @@ const scrollTop = () => document.scrollingElement?.scrollTop ?? 0;
  *    refresh, calling `onRefresh` past PULL_TRIGGER_PX and reporting
  *    `refreshing` so the caller can show a spinner.
  *
- * Both live in ONE non-passive `touchmove` listener on `.sf-main` on purpose.
- * On iOS/WKWebView every non-passive touchmove listener in the event path
- * forces the whole gesture onto the JS main thread; running two separate
- * recognizers (one here, one on `window`) meant the browser had to call and
- * await BOTH on every frame, which is what made scrolling stutter. With a
- * single recognizer, an ordinary vertical scroll (not at the top, or dragging
- * up) locks `"v"` and returns WITHOUT preventDefault on the very first move,
- * so it scrolls natively exactly as it did before pull-to-refresh existed.
+ * On iOS/WKWebView, a non-passive `touchmove` listener anywhere in a touch's
+ * path forces that ENTIRE gesture onto the JS main thread (no native fast-
+ * path scrolling), whether or not it ever actually calls preventDefault —
+ * and the decision is locked in at the gesture's first event, so detaching/
+ * changing it mid-gesture doesn't help (this bug has been "fixed" twice
+ * before by making the listener passive, see git history). Only
+ * pull-to-refresh ever needs preventDefault, and it can only ever fire for a
+ * gesture that starts at scrollTop 0 — so `touchmove` is attached fresh on
+ * every `touchstart`, non-passive ONLY when that gesture began at the very
+ * top (a pull candidate), and removed again on touchend/touchcancel. Every
+ * other gesture — which is to say virtually all ordinary scrolling,
+ * including scrolling back up from below the top or from the bottom of the
+ * page — gets a passive listener and stays on the native fast path. The
+ * horizontal swipe-nav case doesn't need preventDefault either: `.sf-main`'s
+ * `touch-action: pan-y` (global.css) already stops the browser from natively
+ * panning horizontally, so the passive listener can read deltas and drive
+ * the CSS transform without ever fighting native scroll.
  * Native only — no-op on web (browsers have their own overscroll refresh). */
 export function useAppShellGestures<T extends HTMLElement>(
   paths: string[],
@@ -74,6 +89,11 @@ export function useAppShellGestures<T extends HTMLElement>(
     let locked: "h" | "pull" | "v" | null = null;
     let pullDistance = 0;
     let busy = false;
+    // Whether the in-progress gesture started at scrollTop 0 — the only
+    // case that can ever resolve to "pull" and so the only case that gets a
+    // non-passive touchmove (see the hook comment above for why that's
+    // scoped this tightly).
+    let pullCandidate = false;
 
     const setTransform = (dx: number, easing: "out" | "in" | false) => {
       el.style.transition = easing ? `transform ${SLIDE_MS}ms ease-${easing}` : "none";
@@ -88,6 +108,11 @@ export function useAppShellGestures<T extends HTMLElement>(
       }
       locked = null;
       origin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      pullCandidate = !busy && scrollTop() === 0;
+      // Decided once, up front, for this gesture only — see the hook
+      // comment for why the passive/non-passive choice can't be changed
+      // once the gesture is under way.
+      el.addEventListener("touchmove", onTouchMove, { passive: !pullCandidate });
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -96,11 +121,11 @@ export function useAppShellGestures<T extends HTMLElement>(
       const dy = e.touches[0].clientY - origin.y;
       if (!locked) {
         if (Math.abs(dx) < DIRECTION_LOCK_PX && Math.abs(dy) < DIRECTION_LOCK_PX) return;
-        if (Math.abs(dx) > Math.abs(dy)) {
-          locked = "h";
-        } else if (dy > 0 && !busy && scrollTop() === 0) {
+        if (pullCandidate && dy > 0 && Math.abs(dy) >= Math.abs(dx)) {
           // Vertical, dragging down, already at the very top → pull-to-refresh.
           locked = "pull";
+        } else if (Math.abs(dx) > Math.abs(dy) * H_LOCK_BIAS) {
+          locked = "h";
         } else {
           // Any other vertical drag is a normal scroll — hand it straight to
           // the browser (no preventDefault below) so it stays on the native
@@ -109,7 +134,9 @@ export function useAppShellGestures<T extends HTMLElement>(
         }
       }
       if (locked === "h") {
-        e.preventDefault();
+        // No preventDefault: touch-action: pan-y already keeps the browser
+        // from natively panning horizontally, so this stays passive and
+        // never touches the scroll fast path.
         setTransform(dx * RESISTANCE, false);
       } else if (locked === "pull") {
         // Bail back to native scroll if the page moved off the top mid-drag.
@@ -119,6 +146,8 @@ export function useAppShellGestures<T extends HTMLElement>(
         setPull(pullDistance);
       }
     };
+
+    const detachMove = () => el.removeEventListener("touchmove", onTouchMove);
 
     const finishSwipe = (dx: number) => {
       const paths = pathsRef.current;
@@ -168,6 +197,7 @@ export function useAppShellGestures<T extends HTMLElement>(
     };
 
     const onTouchEnd = (e: TouchEvent) => {
+      detachMove();
       if (!origin) return;
       const dx = e.changedTouches[0].clientX - origin.x;
       const wasLocked = locked;
@@ -178,6 +208,7 @@ export function useAppShellGestures<T extends HTMLElement>(
     };
 
     const onTouchCancel = () => {
+      detachMove();
       const wasLocked = locked;
       origin = null;
       locked = null;
@@ -185,13 +216,14 @@ export function useAppShellGestures<T extends HTMLElement>(
       else if (wasLocked === "pull") finishPull();
     };
 
+    // touchmove itself is attached per-gesture (see onTouchStart/detachMove)
+    // so its passive option can depend on where that gesture started.
     el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
     el.addEventListener("touchend", onTouchEnd, { passive: true });
     el.addEventListener("touchcancel", onTouchCancel, { passive: true });
     return () => {
       el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
+      detachMove();
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", onTouchCancel);
     };
