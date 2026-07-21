@@ -80,10 +80,15 @@ h1, h2, h3 {
   max-width: 1180px;
   margin: 0 auto;
   padding: 1.25rem 1.25rem 3rem;
-  /* Tells the browser up front that vertical scroll is native and it
-     shouldn't wait to see if a touch turns into a horizontal gesture —
-     useAppShellGestures handles that case itself via preventDefault. */
-  touch-action: pan-y;
+  /* Deliberately NO touch-action: pan-y here. With pan-y, WebKit classifies
+     the gesture axis from its very first pixels — a fast thumb-flick often
+     starts on an arc (horizontal-dominant for an instant, more so lower on
+     the screen), gets judged "not a vertical pan", and then the browser
+     refuses to scroll for that entire gesture: the flick just dies. The
+     default (auto) scrolls the vertical component regardless of how the
+     gesture starts; there's no horizontal overflow to pan anyway (html/body
+     are overflow-x: hidden), so swipe-nav's X translation in
+     useAppShellGestures never has a native horizontal pan to fight. */
 }
 /* Pull-to-refresh gap: an empty, growing strip revealed below the section's
    sticky tab bar (see SectionLayout/PullRefreshIndicator) as the user drags

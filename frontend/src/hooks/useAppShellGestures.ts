@@ -56,10 +56,13 @@ const scrollTop = () => document.scrollingElement?.scrollTop ?? 0;
  * other gesture — which is to say virtually all ordinary scrolling,
  * including scrolling back up from below the top or from the bottom of the
  * page — gets a passive listener and stays on the native fast path. The
- * horizontal swipe-nav case doesn't need preventDefault either: `.sf-main`'s
- * `touch-action: pan-y` (global.css) already stops the browser from natively
- * panning horizontally, so the passive listener can read deltas and drive
- * the CSS transform without ever fighting native scroll.
+ * horizontal swipe-nav case doesn't need preventDefault either: the page has
+ * no horizontal overflow (html/body are overflow-x: hidden), so there is no
+ * native horizontal pan for the X translation to fight — the passive
+ * listener just reads deltas and drives the CSS transform. Note `.sf-main`
+ * must NOT set `touch-action: pan-y` (see its comment in global.css): pan-y
+ * makes WebKit judge the gesture axis from its first pixels and drop
+ * arc-starting vertical flicks entirely instead of scrolling them.
  * Native only — no-op on web (browsers have their own overscroll refresh). */
 export function useAppShellGestures<T extends HTMLElement>(
   paths: string[],
@@ -134,9 +137,9 @@ export function useAppShellGestures<T extends HTMLElement>(
         }
       }
       if (locked === "h") {
-        // No preventDefault: touch-action: pan-y already keeps the browser
-        // from natively panning horizontally, so this stays passive and
-        // never touches the scroll fast path.
+        // No preventDefault: there's no horizontal overflow for a native pan
+        // to fight (see the hook comment), so this stays passive and never
+        // touches the scroll fast path.
         setTransform(dx * RESISTANCE, false);
       } else if (locked === "pull") {
         // Bail back to native scroll if the page moved off the top mid-drag.
