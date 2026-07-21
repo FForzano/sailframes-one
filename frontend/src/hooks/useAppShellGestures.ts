@@ -111,7 +111,13 @@ export function useAppShellGestures<T extends HTMLElement>(
       }
       locked = null;
       origin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      pullCandidate = !busy && scrollTop() === 0;
+      // A strict `=== 0` misses genuine at-top touches: right after mount, a
+      // tab-switch slide, or the tail of a native rubber-band bounce, the
+      // WebView can still be settling scrollTop to 0 over a few frames and
+      // report a stray sub-pixel/rounded value in that window — which would
+      // otherwise permanently lock this gesture out of "pull" (the decision
+      // can't change once the touch is under way, see below).
+      pullCandidate = !busy && scrollTop() <= 1;
       // Decided once, up front, for this gesture only — see the hook
       // comment for why the passive/non-passive choice can't be changed
       // once the gesture is under way.
@@ -143,7 +149,9 @@ export function useAppShellGestures<T extends HTMLElement>(
         setTransform(dx * RESISTANCE, false);
       } else if (locked === "pull") {
         // Bail back to native scroll if the page moved off the top mid-drag.
-        if (scrollTop() > 0) return;
+        // Same tolerance as the touchstart check above, so a stray 1px
+        // reading doesn't abort a pull that's already legitimately underway.
+        if (scrollTop() > 1) return;
         e.preventDefault();
         pullDistance = Math.min(dy * RESISTANCE, MAX_PULL_PX);
         setPull(pullDistance);
