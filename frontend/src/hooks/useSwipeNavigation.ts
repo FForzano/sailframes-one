@@ -47,6 +47,20 @@ export function useSwipeNavigation<T extends HTMLElement>(
       el.style.transform = dx === 0 ? "" : `translateX(${dx}px)`;
     };
 
+    // touchmove/touchend/touchcancel are only attached for the duration of a
+    // gesture that hasn't yet been resolved as vertical, and detached the
+    // moment it is (see onTouchMove). A non-passive touchmove listener left
+    // registered on `el` for an entire gesture forces WKWebView to wait on
+    // the JS main thread before it can start native scrolling for EVERY
+    // touch inside <main> — not just genuinely horizontal swipes — which is
+    // what made vertical scrolling (especially back up from the bottom)
+    // feel like it randomly stalled or needed a warm-up drag to "unstick".
+    const detachMove = () => {
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchCancel);
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest(BAIL_SELECTOR)) {
@@ -55,6 +69,9 @@ export function useSwipeNavigation<T extends HTMLElement>(
       }
       locked = null;
       origin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      el.addEventListener("touchmove", onTouchMove, { passive: false });
+      el.addEventListener("touchend", onTouchEnd, { passive: true });
+      el.addEventListener("touchcancel", onTouchCancel, { passive: true });
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -64,6 +81,12 @@ export function useSwipeNavigation<T extends HTMLElement>(
       if (!locked) {
         if (Math.abs(dx) < DIRECTION_LOCK_PX && Math.abs(dy) < DIRECTION_LOCK_PX) return;
         locked = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+        // Resolved as vertical: stop intercepting this gesture's remaining
+        // touchmove events so it falls back to native scrolling immediately.
+        if (locked !== "h") {
+          detachMove();
+          return;
+        }
       }
       if (locked !== "h") return;
       // Only a horizontal drag hijacks the gesture — vertical stays a normal scroll.
@@ -109,23 +132,20 @@ export function useSwipeNavigation<T extends HTMLElement>(
       if (!origin) return;
       const dx = e.changedTouches[0].clientX - origin.x;
       origin = null;
+      detachMove();
       finish(dx);
     };
 
     const onTouchCancel = () => {
       origin = null;
+      detachMove();
       setTransform(0, "out");
     };
 
     el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", onTouchEnd, { passive: true });
-    el.addEventListener("touchcancel", onTouchCancel, { passive: true });
     return () => {
       el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", onTouchEnd);
-      el.removeEventListener("touchcancel", onTouchCancel);
+      detachMove();
     };
   }, [navigate]);
 

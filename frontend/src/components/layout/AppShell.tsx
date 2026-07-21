@@ -7,10 +7,10 @@ import { Disc, NotebookText, Settings, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useShareTarget } from "@/hooks/useShareTarget";
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation";
-import { PULL_TRIGGER_PX, usePullToRefresh } from "@/hooks/usePullToRefresh";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import { PullRefreshProvider } from "@/contexts/PullRefreshContext";
 import * as nativeRecording from "@/services/nativeRecording";
 import { ToastViewport } from "@/components/ui/ToastViewport";
-import { Spinner } from "@/components/ui/Spinner";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProfileMenu } from "@/components/layout/ProfileMenu";
 import { usersService, userKeys } from "@/services/users";
@@ -123,14 +123,13 @@ export function AppShell() {
         />
       </header>
       <main className="sf-main" ref={mainRef}>
-        <div
-          className="sf-pull-refresh"
-          style={{ height: refreshing ? PULL_TRIGGER_PX : pull, opacity: Math.min(pull / PULL_TRIGGER_PX, 1) }}
-          aria-hidden={!refreshing}
-        >
-          <Spinner inline />
-        </div>
-        <Outlet />
+        {/* SectionLayout renders the actual reveal strip, below its own tab
+            bar — see PullRefreshIndicator/PullRefreshContext. Routes outside
+            SectionLayout (Registra, race/regatta detail) don't show one;
+            the refetch on release still runs regardless. */}
+        <PullRefreshProvider value={{ pull, refreshing }}>
+          <Outlet />
+        </PullRefreshProvider>
       </main>
       <nav className="sf-actionbar" aria-label="Main">
         {sections.map((s) => (

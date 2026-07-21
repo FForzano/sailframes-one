@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import type { ReactNode } from "react";
+import { PullRefreshIndicator } from "@/components/layout/PullRefreshIndicator";
 
 export interface SectionTab {
   to: string;
@@ -47,6 +48,10 @@ export function SectionLayout({
           </NavLink>
         ))}
       </nav>
+      {/* Only the outermost SectionLayout shows the indicator — a nested one
+          (e.g. club sub-tabs inside Gruppi/Circoli) would otherwise stack a
+          second copy right below the first. */}
+      {sticky && <PullRefreshIndicator />}
       {header}
       <div className="sf-section__body">
         <Outlet context={context} />

@@ -85,12 +85,14 @@ h1, h2, h3 {
      useSwipeNavigation handles that case itself via preventDefault. */
   touch-action: pan-y;
 }
-/* Pull-to-refresh gap: an empty, growing strip revealed above the routed
-   content as the user drags down from the top of the page — the page
-   "keeps scrolling" into nothing, with the spinner sitting in that nothing,
-   rather than an indicator overlaid on top of content. Height is driven
-   live by usePullToRefresh's `pull` px during the drag; the transition
-   only matters for the snap-back/settle once the finger lifts. */
+/* Pull-to-refresh gap: an empty, growing strip revealed below the section's
+   sticky tab bar (see SectionLayout/PullRefreshIndicator) as the user drags
+   down from the top of the page — the page "keeps scrolling" into nothing,
+   with the spinner sitting in that nothing, rather than an indicator
+   overlaid on top of content, and the tab bar itself stays put instead of
+   being pushed down. Height is driven live by usePullToRefresh's `pull` px
+   during the drag; the transition only matters for the snap-back/settle
+   once the finger lifts. */
 .sf-pull-refresh {
   display: flex;
   align-items: center;
