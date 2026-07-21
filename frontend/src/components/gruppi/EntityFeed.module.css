@@ -66,6 +66,76 @@
     gap: 0.1rem;
   }
 }
+/* The "shared post" preview card for an event-linked announcement — a
+   bordered box nested below the post's own text (Facebook-share style),
+   distinct from the surrounding `.post` panel so it reads as quoted content
+   rather than more of the author's own text. */
+.eventCard {
+  display: flex;
+  gap: 0.7rem;
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease;
+}
+.eventCard:hover {
+  border-color: var(--sf-primary);
+}
+.eventCardMedia {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  border-radius: calc(var(--sf-radius) - 2px);
+  overflow: hidden;
+  background: var(--sf-bg-2);
+}
+.eventCardMedia img {
+  width: 100%;
+  height: 100%;
+  /* `cover`, not `contain` — this is a small fixed-size thumbnail in a list
+     of posts (like a Facebook link-preview), not the event's own detail
+     page where the full flyer must stay legible (see `EventRow.tsx`'s
+     `.mediaBox`, which does use `contain` for that reason). Cropping to
+     fill reads better at this size than letterboxing. */
+  object-fit: cover;
+}
+.eventCardPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.eventCardPlaceholder[data-kind="regatta"] {
+  background: color-mix(in srgb, var(--sf-warning) 15%, var(--sf-bg-2));
+  color: var(--sf-warning);
+}
+.eventCardPlaceholder[data-kind="activity"] {
+  background: color-mix(in srgb, var(--sf-leg-upwind) 15%, var(--sf-bg-2));
+  color: var(--sf-leg-upwind);
+}
+.eventCardBody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.eventCardTitle {
+  font-size: 0.95rem;
+}
+.eventCardDescription {
+  margin: 0;
+  color: var(--sf-muted);
+  font-size: 0.85rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .postBody {
   white-space: pre-wrap;
   overflow-wrap: break-word;

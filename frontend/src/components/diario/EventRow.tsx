@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Sailboat, Trophy } from "lucide-react";
+import { Megaphone, Sailboat, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { RegattaRaceDays } from "@/components/gruppi/RegattaRaceDays";
+import { PostComposer } from "@/components/gruppi/PostComposer";
 import { fmtDate, fmtDateTime } from "@/utils/format";
 import type { Activity, Regatta, UUID } from "@/types";
 import styles from "./EventRow.module.css";
@@ -43,13 +46,21 @@ export function EventRow({
   manage,
   open,
   onToggle,
+  clubId,
+  canAnnounce,
 }: {
   item: EventItem;
   manage: boolean;
   open: boolean;
   onToggle: () => void;
+  /** Club owning this event — required together with `canAnnounce` to show
+   * the "announce" action (regattas/group activities aren't announced from
+   * here, see `ClubEvents.tsx`/`GroupActivities.tsx`). */
+  clubId?: UUID;
+  canAnnounce?: boolean;
 }) {
   const { t } = useTranslation();
+  const [announcing, setAnnouncing] = useState(false);
   const description = item.kind === "activity" ? item.activity.description : item.regatta.description;
   const href = item.kind === "activity" ? `/diario/activities/${item.id}` : `/diario/regate/regatta/${item.id}`;
   const imageUrl = item.kind === "activity" ? item.activity.thumbnail?.url : item.regatta.image?.url;
@@ -93,11 +104,18 @@ export function EventRow({
             : fmtDateTime(item.date)}
         </span>
         {description && <p className={styles.description}>{description}</p>}
-        {item.kind === "regatta" && (
+        {(item.kind === "regatta" || (canAnnounce && clubId)) && (
           <div className={styles.footer}>
-            <Button variant="ghost" className="sf-btn--sm" onClick={onToggle}>
-              {open ? t("common.close") : t("regate.raceDays")}
-            </Button>
+            {item.kind === "regatta" && (
+              <Button variant="ghost" className="sf-btn--sm" onClick={onToggle}>
+                {open ? t("common.close") : t("regate.raceDays")}
+              </Button>
+            )}
+            {canAnnounce && clubId && (
+              <Button variant="ghost" className="sf-btn--sm" onClick={() => setAnnouncing(true)}>
+                <Megaphone size={14} /> {t("gruppi.announceEvent")}
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -105,6 +123,17 @@ export function EventRow({
         <div className={styles.expanded}>
           <RegattaRaceDays regattaId={item.id} manage={manage} />
         </div>
+      )}
+      {announcing && clubId && (
+        <Modal title={t("gruppi.announceEvent")} onClose={() => setAnnouncing(false)}>
+          <PostComposer
+            ownerType="club"
+            ownerId={clubId}
+            eventRef={{ kind: item.kind, id: item.id }}
+            onDone={() => setAnnouncing(false)}
+            flush
+          />
+        </Modal>
       )}
     </article>
   );

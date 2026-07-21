@@ -2,17 +2,20 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Megaphone } from "lucide-react";
 import { activitiesService, activityKeys } from "@/services/activities";
 import { useToast } from "@/hooks/useToast";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { InputField, TextAreaField } from "@/components/ui/InputField";
+import { PostComposer } from "@/components/gruppi/PostComposer";
 import { fmtDateTime } from "@/utils/format";
-import type { Activity } from "@/types";
+import type { Activity, UUID } from "@/types";
 import { useGroupContext } from "./GroupDetailLayout";
 
-function ActivityRow({ a }: { a: Activity }) {
+function ActivityRow({ a, groupId, canAnnounce }: { a: Activity; groupId: UUID; canAnnounce: boolean }) {
   const { t } = useTranslation();
+  const [announcing, setAnnouncing] = useState(false);
   return (
     <div className="sf-strip__item sf-strip__item--muted">
       <span>
@@ -21,7 +24,30 @@ function ActivityRow({ a }: { a: Activity }) {
         </Link>{" "}
         <span className="sf-muted">{fmtDateTime(a.started_at)}</span>
       </span>
-      <span className="sf-badge">{t(`activities.types.${a.type}`)}</span>
+      <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <span className="sf-badge">{t(`activities.types.${a.type}`)}</span>
+        {canAnnounce && (
+          <Button
+            variant="ghost"
+            className="sf-btn--icon-sm"
+            aria-label={t("gruppi.announceEvent")}
+            onClick={() => setAnnouncing(true)}
+          >
+            <Megaphone size={14} />
+          </Button>
+        )}
+      </span>
+      {announcing && (
+        <Modal title={t("gruppi.announceEvent")} onClose={() => setAnnouncing(false)}>
+          <PostComposer
+            ownerType="group"
+            ownerId={groupId}
+            eventRef={{ kind: "activity", id: a.id }}
+            onDone={() => setAnnouncing(false)}
+            flush
+          />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -75,7 +101,7 @@ export function GroupActivities() {
       {planned.data?.length ? (
         <div className="sf-strip">
           {planned.data.map((a) => (
-            <ActivityRow key={a.id} a={a} />
+            <ActivityRow key={a.id} a={a} groupId={groupId} canAnnounce={manages} />
           ))}
         </div>
       ) : (
@@ -86,7 +112,7 @@ export function GroupActivities() {
       {past.data?.length ? (
         <div className="sf-strip">
           {past.data.map((a) => (
-            <ActivityRow key={a.id} a={a} />
+            <ActivityRow key={a.id} a={a} groupId={groupId} canAnnounce={manages} />
           ))}
         </div>
       ) : (

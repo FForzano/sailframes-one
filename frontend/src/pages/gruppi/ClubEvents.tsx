@@ -135,6 +135,8 @@ export function ClubEvents({
                 manage={manageRegattas}
                 open={openRegattaId === i.id}
                 onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
+                clubId={clubId}
+                canAnnounce={i.kind === "regatta" ? manageRegattas : manageActivities}
               />
             ))}
           </div>
@@ -152,6 +154,8 @@ export function ClubEvents({
                 manage={manageRegattas}
                 open={openRegattaId === i.id}
                 onToggle={() => setOpenRegattaId(openRegattaId === i.id ? null : i.id)}
+                clubId={clubId}
+                canAnnounce={i.kind === "regatta" ? manageRegattas : manageActivities}
               />
             ))}
           </div>
