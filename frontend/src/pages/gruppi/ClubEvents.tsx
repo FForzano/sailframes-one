@@ -142,7 +142,7 @@ export function ClubEvents({
           <p className="sf-muted">{t("gruppi.emptyEvents")}</p>
         )}
 
-        <h3>{t("gruppi.pastEvents")}</h3>
+        <h3 style={{ marginTop: "1.5rem" }}>{t("gruppi.pastEvents")}</h3>
         {past.length ? (
           <div className={feedStyles.feed}>
             {past.map((i) => (
