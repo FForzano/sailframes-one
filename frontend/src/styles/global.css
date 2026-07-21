@@ -85,16 +85,18 @@ h1, h2, h3 {
      useSwipeNavigation handles that case itself via preventDefault. */
   touch-action: pan-y;
 }
-.sf-pull-indicator {
-  position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
-  left: 50%;
-  z-index: 60;
-  pointer-events: none;
-  transition: opacity 0.15s ease-out;
-}
-.sf-pull-indicator--active {
-  opacity: 1;
+/* Pull-to-refresh gap: an empty, growing strip revealed above the routed
+   content as the user drags down from the top of the page — the page
+   "keeps scrolling" into nothing, with the spinner sitting in that nothing,
+   rather than an indicator overlaid on top of content. Height is driven
+   live by usePullToRefresh's `pull` px during the drag; the transition
+   only matters for the snap-back/settle once the finger lifts. */
+.sf-pull-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: height 0.15s ease-out;
 }
 .sf-main--wide {
   max-width: none;

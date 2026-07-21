@@ -11,6 +11,12 @@ const DIRECTION_LOCK_PX = 10;
 const BAIL_SELECTOR =
   ".leaflet-container, .recharts-wrapper, .sf-tablewrap, .sf-tabs, .sf-modal__backdrop, input, textarea, select";
 
+// document.scrollingElement.scrollTop is the authoritative "how far from
+// the top" value — window.scrollY can lag or read stale during a native
+// WebView's own rubber-band bounce, which would otherwise let a drag
+// anywhere near the top (not just genuinely at it) start a pull.
+const scrollTop = () => document.scrollingElement?.scrollTop ?? 0;
+
 /** Social-app-style drag-down-to-refresh, native platforms only (pull-to-
  * refresh on the web would fight the browser's own overscroll behavior).
  * Only engages when the drag starts at the very top of the page's scroll;
@@ -33,7 +39,7 @@ export function usePullToRefresh(onRefresh: () => Promise<unknown>) {
     const onTouchStart = (e: TouchEvent) => {
       if (busy) return;
       const target = e.target as HTMLElement;
-      if (target.closest(BAIL_SELECTOR) || window.scrollY > 0) {
+      if (target.closest(BAIL_SELECTOR) || scrollTop() > 0) {
         origin = null;
         return;
       }
@@ -49,7 +55,7 @@ export function usePullToRefresh(onRefresh: () => Promise<unknown>) {
         if (Math.abs(dx) < DIRECTION_LOCK_PX && Math.abs(dy) < DIRECTION_LOCK_PX) return;
         locked = dy > 0 && dy > Math.abs(dx) ? "pull" : "other";
       }
-      if (locked !== "pull" || window.scrollY > 0) return;
+      if (locked !== "pull" || scrollTop() > 0) return;
       e.preventDefault();
       distance = Math.min(dy * RESISTANCE, MAX_PULL_PX);
       setPull(distance);

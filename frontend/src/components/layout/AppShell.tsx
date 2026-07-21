@@ -97,13 +97,6 @@ export function AppShell() {
 
   return (
     <div className="sf-shell">
-      <div
-        className={`sf-pull-indicator ${refreshing ? "sf-pull-indicator--active" : ""}`}
-        style={{ opacity: Math.min(pull / PULL_TRIGGER_PX, 1), transform: `translate(-50%, ${pull}px)` }}
-        aria-hidden={!refreshing}
-      >
-        <Spinner inline />
-      </div>
       <header className="sf-navbar">
         <NavLink to="/" className="sf-navbar__brand">
           <img src="/logo.svg" alt="" className="sf-navbar__logo" />
@@ -130,6 +123,13 @@ export function AppShell() {
         />
       </header>
       <main className="sf-main" ref={mainRef}>
+        <div
+          className="sf-pull-refresh"
+          style={{ height: refreshing ? PULL_TRIGGER_PX : pull, opacity: Math.min(pull / PULL_TRIGGER_PX, 1) }}
+          aria-hidden={!refreshing}
+        >
+          <Spinner inline />
+        </div>
         <Outlet />
       </main>
       <nav className="sf-actionbar" aria-label="Main">
