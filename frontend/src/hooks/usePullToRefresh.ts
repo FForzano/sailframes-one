@@ -36,6 +36,22 @@ export function usePullToRefresh(onRefresh: () => Promise<unknown>) {
     let distance = 0;
     let busy = false;
 
+    // touchmove/touchend/touchcancel are only attached for the duration of a
+    // gesture that starts at the very top of the page (see onTouchStart) and
+    // removed as soon as it ends or turns out not to be a pull. A
+    // non-passive touchmove listener registered permanently on `window`
+    // forces WKWebView to wait on the JS main thread before starting native
+    // scroll on EVERY touch anywhere on the page — not just ones near the
+    // top — which is what made scrolling (especially back up from the
+    // bottom) feel like it randomly stalled. Scoping the listener to just
+    // the gesture that can actually become a pull keeps the rest of the
+    // page's scrolling on the browser's normal fast path.
+    const detachMove = () => {
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", finish);
+      window.removeEventListener("touchcancel", finish);
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       if (busy) return;
       const target = e.target as HTMLElement;
@@ -45,6 +61,9 @@ export function usePullToRefresh(onRefresh: () => Promise<unknown>) {
       }
       locked = null;
       origin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      window.addEventListener("touchmove", onTouchMove, { passive: false });
+      window.addEventListener("touchend", finish, { passive: true });
+      window.addEventListener("touchcancel", finish, { passive: true });
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -54,6 +73,9 @@ export function usePullToRefresh(onRefresh: () => Promise<unknown>) {
       if (!locked) {
         if (Math.abs(dx) < DIRECTION_LOCK_PX && Math.abs(dy) < DIRECTION_LOCK_PX) return;
         locked = dy > 0 && dy > Math.abs(dx) ? "pull" : "other";
+        // Direction resolved as not-a-pull: stop intercepting this gesture's
+        // remaining touchmove events so it falls back to native scrolling.
+        if (locked !== "pull") detachMove();
       }
       if (locked !== "pull" || scrollTop() > 0) return;
       e.preventDefault();
@@ -65,6 +87,7 @@ export function usePullToRefresh(onRefresh: () => Promise<unknown>) {
       const wasPulling = locked === "pull";
       origin = null;
       locked = null;
+      detachMove();
       if (!wasPulling) return;
       if (distance >= PULL_TRIGGER_PX) {
         busy = true;
@@ -82,14 +105,9 @@ export function usePullToRefresh(onRefresh: () => Promise<unknown>) {
     };
 
     window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchmove", onTouchMove, { passive: false });
-    window.addEventListener("touchend", finish, { passive: true });
-    window.addEventListener("touchcancel", finish, { passive: true });
     return () => {
       window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("touchend", finish);
-      window.removeEventListener("touchcancel", finish);
+      detachMove();
     };
   }, []);
 
