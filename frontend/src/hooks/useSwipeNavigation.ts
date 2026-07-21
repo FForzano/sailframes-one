@@ -21,7 +21,20 @@ const BAIL_SELECTOR =
  * translated live under the finger while dragging, then either slides the
  * rest of the way out (committing to the next/previous section in `paths`,
  * ordered to match the action bar) or snaps back if the drag didn't clear
- * the threshold. */
+ * the threshold.
+ *
+ * All touch listeners here are PASSIVE — the horizontal drag is separated
+ * from native vertical scroll entirely by `touch-action: pan-y` on `.sf-main`
+ * (global.css), NOT by preventDefault. That's deliberate: a non-passive
+ * touchmove listener anywhere in the touch path forces iOS/WKWebView to hold
+ * every scroll gesture on the main thread (slow path) for its whole
+ * duration, and removing the listener mid-gesture doesn't restore the fast
+ * path for the in-flight gesture — which is what made vertical scrolling
+ * stutter. With pan-y the browser decides the axis at gesture start: a
+ * horizontal-first gesture isn't a vertical pan, so the browser does no
+ * native scrolling and leaves the X translation to us; a vertical-first
+ * gesture scrolls natively (buttery, on the compositor) and we simply never
+ * lock horizontal. */
 export function useSwipeNavigation<T extends HTMLElement>(
   paths: string[],
   currentPath: string,
@@ -47,20 +60,6 @@ export function useSwipeNavigation<T extends HTMLElement>(
       el.style.transform = dx === 0 ? "" : `translateX(${dx}px)`;
     };
 
-    // touchmove/touchend/touchcancel are only attached for the duration of a
-    // gesture that hasn't yet been resolved as vertical, and detached the
-    // moment it is (see onTouchMove). A non-passive touchmove listener left
-    // registered on `el` for an entire gesture forces WKWebView to wait on
-    // the JS main thread before it can start native scrolling for EVERY
-    // touch inside <main> — not just genuinely horizontal swipes — which is
-    // what made vertical scrolling (especially back up from the bottom)
-    // feel like it randomly stalled or needed a warm-up drag to "unstick".
-    const detachMove = () => {
-      el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", onTouchEnd);
-      el.removeEventListener("touchcancel", onTouchCancel);
-    };
-
     const onTouchStart = (e: TouchEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest(BAIL_SELECTOR)) {
@@ -69,9 +68,6 @@ export function useSwipeNavigation<T extends HTMLElement>(
       }
       locked = null;
       origin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      el.addEventListener("touchmove", onTouchMove, { passive: false });
-      el.addEventListener("touchend", onTouchEnd, { passive: true });
-      el.addEventListener("touchcancel", onTouchCancel, { passive: true });
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -81,16 +77,10 @@ export function useSwipeNavigation<T extends HTMLElement>(
       if (!locked) {
         if (Math.abs(dx) < DIRECTION_LOCK_PX && Math.abs(dy) < DIRECTION_LOCK_PX) return;
         locked = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
-        // Resolved as vertical: stop intercepting this gesture's remaining
-        // touchmove events so it falls back to native scrolling immediately.
-        if (locked !== "h") {
-          detachMove();
-          return;
-        }
       }
+      // Only a horizontal drag translates the page; a vertical one is left to
+      // scroll natively (passive — no preventDefault, see the hook comment).
       if (locked !== "h") return;
-      // Only a horizontal drag hijacks the gesture — vertical stays a normal scroll.
-      e.preventDefault();
       setTransform(dx * RESISTANCE, false);
     };
 
@@ -132,20 +122,23 @@ export function useSwipeNavigation<T extends HTMLElement>(
       if (!origin) return;
       const dx = e.changedTouches[0].clientX - origin.x;
       origin = null;
-      detachMove();
       finish(dx);
     };
 
     const onTouchCancel = () => {
       origin = null;
-      detachMove();
       setTransform(0, "out");
     };
 
     el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchCancel, { passive: true });
     return () => {
       el.removeEventListener("touchstart", onTouchStart);
-      detachMove();
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchCancel);
     };
   }, [navigate]);
 
