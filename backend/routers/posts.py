@@ -40,14 +40,56 @@ def _can_read(owner_type: str, owner, user) -> bool:
     return can_read_group(owner, user)
 
 
-def _can_manage(owner_type: str, owner_id: uuid.UUID, request: Request) -> None:
-    """Raises 403 if the caller may not create/delete posts for this owner."""
+def _can_manage(owner_type: str, owner_id: uuid.UUID, request: Request, *, activity=None, regatta=None) -> None:
+    """Raises 403 if the caller may not create/delete posts for this owner.
+
+    A post tied to an event (``activity``/``regatta``) is gated by whoever
+    can already manage *that event*, not the generic ``club_post.manage`` —
+    announcing a regatta/uscita is part of organizing it, not a separate
+    permission.
+    """
+    if regatta is not None:
+        require_permission(request, "regatta.manage", club_id=owner_id)
+        return
+    if activity is not None:
+        if activity.club_id is not None:
+            require_permission(request, "activity.manage", club_id=owner_id)
+        else:
+            user = require_user(request)
+            if not is_group_manager(user, owner_id):
+                raise HTTPException(403, "Group owner/admin required")
+        return
     if owner_type == "club":
         require_permission(request, "club_post.manage", club_id=owner_id)
     else:
         user = require_user(request)
         if not is_group_manager(user, owner_id):
             raise HTTPException(403, "Group owner/admin required")
+
+
+def _event_ref(post) -> dict | None:
+    """The activity/regatta a post announces, shaped for the frontend to
+    render a Facebook-share-style nested card (title falls back to the
+    activity type on the client, same as the diario event cards — see
+    ``EventRow.tsx`` — and the image/description mirror what that card
+    shows too)."""
+    if post.activity_id is not None:
+        a = repos.activities.get(post.activity_id)
+        if a is None:
+            return None
+        return {
+            "kind": "activity", "id": a.id, "title": a.name, "type": a.type, "date": a.started_at,
+            "description": a.description, "image": media.image_payload(a.thumbnail_image_id),
+        }
+    if post.regatta_id is not None:
+        r = repos.regattas.get(post.regatta_id)
+        if r is None:
+            return None
+        return {
+            "kind": "regatta", "id": r.id, "title": r.name, "date": r.start_date,
+            "description": r.description, "image": media.image_payload(r.image_id),
+        }
+    return None
 
 
 def _post_payload(post) -> dict:
@@ -57,6 +99,7 @@ def _post_payload(post) -> dict:
         img for pi in repos.posts.list_images(post.id)
         if (img := media.image_payload(pi.image_id)) is not None
     ]
+    d["event"] = _event_ref(post)
     return d
 
 
@@ -69,12 +112,37 @@ def list_posts(owner_type: str, owner_id: uuid.UUID, request: Request):
     return [_post_payload(p) for p in repos.posts.list_for_owner(owner_type, owner_id)]
 
 
+def _resolve_event(body: PostCreateModel):
+    """Validates the optional activity/regatta link belongs to the post's
+    owner, returning the loaded ORM row(s) for `_can_manage` to gate on."""
+    if body.activity_id is not None and body.regatta_id is not None:
+        raise HTTPException(422, "activity_id and regatta_id are mutually exclusive")
+    if body.activity_id is not None:
+        activity = repos.activities.get(body.activity_id)
+        owned = activity is not None and (
+            activity.club_id == body.owner_id if body.owner_type == "club"
+            else activity.group_id == body.owner_id
+        )
+        if not owned:
+            raise HTTPException(404, "Activity not found")
+        return activity, None
+    if body.regatta_id is not None:
+        if body.owner_type != "club":
+            raise HTTPException(422, "regatta_id requires owner_type 'club'")
+        regatta = repos.regattas.get(body.regatta_id)
+        if regatta is None or regatta.club_id != body.owner_id:
+            raise HTTPException(404, "Regatta not found")
+        return None, regatta
+    return None, None
+
+
 @router.post("")
 def create_post(body: PostCreateModel, request: Request):
     verify_csrf(request)
     user = require_user(request)
     _require_owner(body.owner_type, body.owner_id)
-    _can_manage(body.owner_type, body.owner_id, request)
+    activity, regatta = _resolve_event(body)
+    _can_manage(body.owner_type, body.owner_id, request, activity=activity, regatta=regatta)
     if not body.body.strip():
         raise HTTPException(422, "body is required")
     post = repos.posts.create({
@@ -82,6 +150,8 @@ def create_post(body: PostCreateModel, request: Request):
         "owner_id": body.owner_id,
         "author_id": user.id,
         "body": body.body,
+        "activity_id": body.activity_id,
+        "regatta_id": body.regatta_id,
     })
     for image_id in body.image_ids:
         repos.posts.add_image(post.id, image_id)

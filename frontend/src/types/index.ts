@@ -174,6 +174,18 @@ export interface Group {
 
 export type PostOwnerType = "club" | "group";
 
+export type PostEventKind = "activity" | "regatta";
+
+export interface PostEventRef {
+  kind: PostEventKind;
+  id: UUID;
+  title: string | null;
+  type?: string;
+  date: string | null;
+  description: string | null;
+  image: ImageRef | null;
+}
+
 export interface Post {
   id: UUID;
   owner_type: PostOwnerType;
@@ -184,6 +196,9 @@ export interface Post {
   images: ImageRef[];
   created_at: string;
   updated_at: string | null;
+  activity_id: UUID | null;
+  regatta_id: UUID | null;
+  event: PostEventRef | null;
 }
 
 // --- devices -----------------------------------------------------------------------

@@ -101,6 +101,8 @@
   overflow: hidden;
 }
 .footer {
+  display: flex;
+  gap: 0.4rem;
   margin-top: 0.15rem;
 }
 .expanded {

@@ -222,6 +222,7 @@
     "news": "Notizie",
     "newsBody": "Scrivi una notizia…",
     "newPost": "Nuova notizia",
+    "announceEvent": "Annuncia",
     "publish": "Pubblica",
     "emptyNews": "Nessuna notizia pubblicata.",
     "postEdited": "modificato",
@@ -410,14 +411,14 @@
     "sameAsStartRc": "Stessa posizione del comitato di partenza",
     "markRoles": {
       "pin": "Pin (boa di partenza)",
-      "rc": "Comitato di regata",
+      "rc": "Comitato di regata (partenza)",
       "windward": "Bolina",
       "leeward": "Poppa",
       "gate_port": "Cancello sinistra",
       "gate_stbd": "Cancello destra",
       "offset": "Offset",
       "drill": "Esercitazione",
-      "finish_pin": "Pin (arrivo)",
+      "finish_pin": "Pin (boa di arrivo)",
       "finish_rc": "Comitato di regata (arrivo)"
     },
     "timeOfDay": {

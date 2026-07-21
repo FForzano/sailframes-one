@@ -222,6 +222,7 @@
     "news": "News",
     "newsBody": "Write a news post…",
     "newPost": "New post",
+    "announceEvent": "Announce",
     "publish": "Publish",
     "emptyNews": "No news posted yet.",
     "postEdited": "edited",
@@ -410,7 +411,7 @@
     "sameAsStartRc": "Same position as the start race committee",
     "markRoles": {
       "pin": "Pin (start line)",
-      "rc": "Race committee",
+      "rc": "Race committee (start line)",
       "windward": "Windward",
       "leeward": "Leeward",
       "gate_port": "Gate (port)",

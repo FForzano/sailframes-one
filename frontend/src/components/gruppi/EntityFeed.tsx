@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
-import { putToUploadUrl } from "@/api/media";
+import { Pencil, Plus, Sailboat, Trash2, Trophy } from "lucide-react";
 import { postsService, postKeys } from "@/services/posts";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/useToast";
@@ -11,144 +11,40 @@ import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PostBodyField } from "@/components/gruppi/PostBodyField";
+import { PostComposer } from "@/components/gruppi/PostComposer";
 import { userLabel, fmtDateTime } from "@/utils/format";
 import { renderPostBody } from "@/utils/postFormat";
 import type { Post, PostOwnerType, UUID } from "@/types";
 import styles from "./EntityFeed.module.css";
 import photoGridStyles from "@/components/common/photoGrid.module.css";
 
-interface PendingImage {
-  imageId: UUID;
-  previewUrl: string;
-}
-
-/** The write form: textarea + image picker/preview + publish. Rendered
- * inline on desktop (`.sf-desktop-only`, see `EntityFeed`'s form wrapper) and
- * inside a `Modal` on mobile — kept as its own component so it isn't defined
- * twice, since a permanently-visible compose box works poorly on a small
- * screen (it would push the whole feed below the fold). */
-function PostComposer({
-  ownerType,
-  ownerId,
-  onDone,
-  flush,
-}: {
-  ownerType: PostOwnerType;
-  ownerId: UUID;
-  onDone?: () => void;
-  flush?: boolean;
-}) {
+/** Nested preview of the activity/regatta a post announces — a Facebook
+ * "shared post" style card (thumbnail + title + description) embedded below
+ * the announcement's own text, linking through to the event. Set by
+ * `ClubEvents.tsx`/`GroupActivities.tsx`'s "announce this event" action. */
+function PostEventCard({ event }: { event: NonNullable<Post["event"]> }) {
   const { t } = useTranslation();
-  const { notify } = useToast();
-  const queryClient = useQueryClient();
-  const [body, setBody] = useState("");
-  const [images, setImages] = useState<PendingImage[]>([]);
-  const [uploading, setUploading] = useState(false);
-
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: postKeys.list(ownerType, ownerId) });
-
-  const addImages = async (files: FileList) => {
-    setUploading(true);
-    try {
-      for (const file of Array.from(files)) {
-        const ticket = await postsService.uploadImage();
-        await putToUploadUrl(ticket.upload_url, file, file.type || undefined);
-        await postsService.confirmImage(ticket.image_id);
-        setImages((prev) => [...prev, { imageId: ticket.image_id, previewUrl: URL.createObjectURL(file) }]);
-      }
-    } catch {
-      notify(t("errors.generic"), "error");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const removeImage = (imageId: UUID) => {
-    setImages((prev) => {
-      const found = prev.find((i) => i.imageId === imageId);
-      if (found) URL.revokeObjectURL(found.previewUrl);
-      return prev.filter((i) => i.imageId !== imageId);
-    });
-  };
-
-  const create = useMutation({
-    mutationFn: () =>
-      postsService.create({
-        owner_type: ownerType,
-        owner_id: ownerId,
-        body,
-        image_ids: images.map((i) => i.imageId),
-      }),
-    onSuccess: async () => {
-      setBody("");
-      images.forEach((i) => URL.revokeObjectURL(i.previewUrl));
-      setImages([]);
-      await invalidate();
-      onDone?.();
-    },
-    onError: () => notify(t("errors.generic"), "error"),
-  });
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (body.trim()) create.mutate();
-  };
-
+  const href = event.kind === "activity" ? `/diario/activities/${event.id}` : `/diario/regate/regatta/${event.id}`;
+  const title = event.title ?? (event.type ? t(`activities.types.${event.type}`) : t(`gruppi.eventKind.${event.kind}`));
   return (
-    <form onSubmit={submit} className={`${styles.feedForm} ${flush ? styles.feedFormFlush : ""}`}>
-      <PostBodyField
-        ownerType={ownerType}
-        ownerId={ownerId}
-        value={body}
-        onChange={setBody}
-        id="feed-body"
-        placeholder={t("gruppi.newsBody")}
-      />
-      {images.length > 0 && (
-        <div className={photoGridStyles.grid}>
-          {images.map((img) => (
-            <figure key={img.imageId}>
-              <img src={img.previewUrl} alt="" />
-              <Button
-                type="button"
-                variant="danger"
-                className={`sf-btn--sm ${photoGridStyles.del}`}
-                onClick={() => removeImage(img.imageId)}
-              >
-                ×
-              </Button>
-            </figure>
-          ))}
-        </div>
-      )}
-      <div className="sf-form__actions">
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          id="feed-image"
-          hidden
-          onChange={(e) => {
-            const files = e.target.files;
-            if (files && files.length > 0) void addImages(files);
-            e.target.value = "";
-          }}
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          className="sf-btn--icon-sm"
-          disabled={uploading}
-          aria-label={t("common.upload")}
-          onClick={() => document.getElementById("feed-image")?.click()}
-        >
-          <ImagePlus size={16} />
-        </Button>
-        <Button type="submit" disabled={create.isPending || uploading || !body.trim()}>
-          {t("gruppi.publish")}
-        </Button>
+    <Link to={href} className={styles.eventCard}>
+      <div className={styles.eventCardMedia}>
+        {event.image ? (
+          <img src={event.image.url} alt="" />
+        ) : (
+          <div className={styles.eventCardPlaceholder} data-kind={event.kind} aria-hidden>
+            {event.kind === "regatta" ? <Trophy size={24} /> : <Sailboat size={24} />}
+          </div>
+        )}
       </div>
-    </form>
+      <div className={styles.eventCardBody}>
+        <span className={`sf-badge ${event.kind === "regatta" ? "sf-badge--regatta" : "sf-badge--activity"}`}>
+          {t(`gruppi.eventKind.${event.kind}`)}
+        </span>
+        <strong className={styles.eventCardTitle}>{title}</strong>
+        {event.description && <p className={styles.eventCardDescription}>{event.description}</p>}
+      </div>
+    </Link>
   );
 }
 
@@ -312,6 +208,7 @@ export function EntityFeed({
               ) : (
                 <p className={styles.postBody}>{renderPostBody(p.body)}</p>
               )}
+              {p.event && <PostEventCard event={p.event} />}
               {p.images.length === 1 ? (
                 <img className={styles.postImage} src={p.images[0].url} alt="" />
               ) : p.images.length > 1 ? (

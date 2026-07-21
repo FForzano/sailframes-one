@@ -16,6 +16,7 @@ import { BackLink } from "@/components/ui/BackLink";
 import { RegattaRaceDays } from "@/components/gruppi/RegattaRaceDays";
 import type { UUID } from "@/types";
 import entityHeaderStyles from "@/components/gruppi/entityHeader.module.css";
+import styles from "./RegattaDetailPage.module.css";
 
 /** Regatta detail page (name, hero image, description, race days/races) —
  * reachable from a race's dashboard (`RacePage`'s back link) or from the
@@ -70,7 +71,7 @@ export function RegattaDetailPage() {
       <Card>
         <div className={entityHeaderStyles.header}>
           <div className={entityHeaderStyles.identity}>
-            {r.image && <img className="sf-avatar sf-avatar--lg" src={r.image.url} alt="" />}
+            {r.image && <img className={styles.heroImage} src={r.image.url} alt="" />}
             <div>
               <h1 className={entityHeaderStyles.name}>{r.name}</h1>
               {r.description && <p className={`sf-muted ${entityHeaderStyles.meta}`}>{r.description}</p>}
@@ -82,7 +83,6 @@ export function RegattaDetailPage() {
                 create={() => regattasService.uploadImage(regattaId)}
                 confirm={(id) => regattasService.confirmImage(regattaId, id)}
                 onDone={invalidate}
-                crop
                 icon={<ImagePlus size={16} />}
                 label={t("common.upload")}
               />
