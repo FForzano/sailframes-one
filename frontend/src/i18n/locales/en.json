@@ -535,5 +535,8 @@
     "title": "Update required",
     "body": "A new version of XGSail is available. Please update the app to continue.",
     "cta": "Open Play Store"
+  },
+  "nativeUpdate": {
+    "body": "Downloading the latest updates, please wait…"
   }
 }

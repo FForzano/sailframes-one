@@ -32,6 +32,31 @@ Native app (@capgo/capacitor-updater, configured in
   frontend/capacitor.config.ts with updateUrl pointing at ota-service)
 ```
 
+## Applying updates on launch, not next launch
+
+`capacitor.config.ts` sets `CapacitorUpdater.autoUpdate: "off"` — the plugin's
+own background check/apply flow is disabled entirely. Instead,
+`NativeUpdateGate` (`frontend/src/components/native/NativeUpdateGate.tsx`)
+wraps the whole tree in `main.tsx`, outermost, before `NativeVersionGate` and
+everything else:
+
+- On every cold start it calls `getLatest()` against `ota-service`. If a
+  newer bundle is available it blocks the app on a full-screen logo +
+  progress bar (`nativeUpdate.body` in `i18n/locales/*.json`) while it
+  `download()`s the bundle, then `set()`s it — which reloads the WebView
+  immediately with the new bundle active. `main.tsx` re-runs from scratch on
+  that reload; `NativeUpdateGate` finds no further update and renders the
+  app normally.
+- If the update check fails (offline, `ota-service` unreachable) or there's
+  no update, it fails open immediately — same pattern as
+  `NativeVersionGate`.
+- This means a published OTA update is live the moment a user opens the app
+  next, not after one extra open-close-reopen cycle (the old
+  `autoUpdate: true`/`"atBackground"` behavior, which downloaded silently
+  but only applied on the *next* background/restart).
+- Still App Store-safe: the JS/HTML/CSS swap happens before the app is ever
+  shown to the user, never mid-session.
+
 No auth on either endpoint — public, read-only, same trust level as the
 existing `firmware/*` anonymous-read prefix in `deploy/minio-init.sh`
 (devices already download unauthenticated firmware bundles that way).

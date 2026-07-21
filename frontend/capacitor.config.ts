@@ -37,14 +37,15 @@ const config: CapacitorConfig = {
       updateUrl: "https://ota.xgsail.com/manifest.json",
       // Self-hosted: no Capgo cloud analytics endpoint.
       statsUrl: "",
-      // `true` = "atBackground": checks for an update on every foreground
-      // transition (app opened/resumed) and downloads it silently, but only
-      // applies it on the *next* background/restart — never hot-swapping
-      // the running session. So a fresh install needs one full
-      // open-close-reopen cycle before an update becomes visible. Keeps
-      // update behavior predictable for App Store review (no mid-session
-      // code swap).
-      autoUpdate: true,
+      // Manual mode: NativeUpdateGate (frontend/src/components/native/
+      // NativeUpdateGate.tsx) owns the entire check/download/apply flow on
+      // every cold start, blocking on a logo+progress screen until it's
+      // done — so a published update is live on THIS launch, not just
+      // visible after the next one. Leaving the native autoUpdate check on
+      // here too would run a second, competing check/download on the same
+      // launch. Still App Store-safe: the code swap happens before the app
+      // is ever shown, not mid-session.
+      autoUpdate: "off",
       resetWhenUpdate: true,
     },
   },

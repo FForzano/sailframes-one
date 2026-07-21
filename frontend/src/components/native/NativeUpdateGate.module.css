@@ -1,0 +1,33 @@
+.updating {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  text-align: center;
+  padding: 2rem 1.5rem;
+  padding-top: calc(2rem + env(safe-area-inset-top, 0px));
+}
+.logo {
+  height: 4rem;
+  width: auto;
+}
+.updating p {
+  color: var(--sf-muted);
+  max-width: 320px;
+}
+.progressTrack {
+  width: 200px;
+  max-width: 60vw;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--sf-border);
+  overflow: hidden;
+}
+.progressFill {
+  height: 100%;
+  background: var(--sf-primary);
+  transition: width 0.15s ease-out;
+}

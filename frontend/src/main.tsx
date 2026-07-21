@@ -7,6 +7,7 @@ import { ApiError } from "@/api/client";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/contexts/ToastContext";
 import { NativeVersionGate } from "@/components/native/NativeVersionGate";
+import { NativeUpdateGate } from "@/components/native/NativeUpdateGate";
 import App from "./App";
 import "./i18n";
 import "./styles/global.css";
@@ -30,17 +31,19 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <NativeVersionGate>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <ToastProvider>
-            <AuthProvider>
-              <App />
-            </AuthProvider>
-          </ToastProvider>
-        </BrowserRouter>
-      </QueryClientProvider>
-    </NativeVersionGate>
+    <NativeUpdateGate>
+      <NativeVersionGate>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <ToastProvider>
+              <AuthProvider>
+                <App />
+              </AuthProvider>
+            </ToastProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </NativeVersionGate>
+    </NativeUpdateGate>
   </StrictMode>,
 );
 
