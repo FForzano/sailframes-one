@@ -24,7 +24,7 @@ import { Menu, type MenuSection } from "@/components/ui/Menu";
 import { Spinner } from "@/components/ui/Spinner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { activityDisplayName } from "@/utils/activityName";
-import { fmtDateTime } from "@/utils/format";
+import { fmtDateTime, fmtDistance, fmtKnots } from "@/utils/format";
 import { MARK_ROLES } from "@/utils/markRoles";
 import type { MarkRole, UUID, Visibility } from "@/types";
 import { BackLink } from "@/components/ui/BackLink";
@@ -440,6 +440,7 @@ export function ActivityDetailPage() {
           <Card title={t("activities.boats")}>
             {sessions.data?.length ? (
               <>
+                <p className="sf-muted">{t("activities.boatsHint")}</p>
                 <BoatSessionCarousel
                   items={carouselItems}
                   onOpen={(sessionId) => navigate(`/diario/activities/${activityId}/barche/${sessionId}`)}
@@ -451,47 +452,56 @@ export function ActivityDetailPage() {
                         <th></th>
                         <th>{t("sessions.boat")}</th>
                         <th>{t("sessions.start")}</th>
+                        <th>{t("sessions.distance")}</th>
+                        <th>{t("sessions.avgSpeed")}</th>
+                        <th>{t("sessions.maxSpeed")}</th>
                         <th></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sessions.data.map((s) => (
-                        <tr
-                          key={s.id}
-                          className="sf-table__row--clickable"
-                          role="link"
-                          tabIndex={0}
-                          onClick={() => navigate(`/diario/activities/${activityId}/barche/${s.id}`)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              navigate(`/diario/activities/${activityId}/barche/${s.id}`);
-                            }
-                          }}
-                        >
-                          <td>
-                            {s.thumbnail ? (
-                              <img src={s.thumbnail.url} alt="" className="sf-session-thumb" />
-                            ) : (
-                              <span className="sf-session-thumb sf-session-thumb--empty" aria-hidden />
-                            )}
-                          </td>
-                          <td>{boatName(s.boat_id)}</td>
-                          <td>{fmtDateTime(s.started_at)}</td>
-                          <td className="sf-table__chevron" aria-hidden>
-                            <svg viewBox="0 0 16 16" width="16" height="16">
-                              <path
-                                d="M5 2.5 11.5 8 5 13.5"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </td>
-                        </tr>
-                      ))}
+                      {sessions.data.map((s, i) => {
+                        const stats = sessionStatsList[i]?.data;
+                        return (
+                          <tr
+                            key={s.id}
+                            className="sf-table__row--clickable"
+                            role="link"
+                            tabIndex={0}
+                            onClick={() => navigate(`/diario/activities/${activityId}/barche/${s.id}`)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                navigate(`/diario/activities/${activityId}/barche/${s.id}`);
+                              }
+                            }}
+                          >
+                            <td>
+                              {s.thumbnail ? (
+                                <img src={s.thumbnail.url} alt="" className="sf-session-thumb" />
+                              ) : (
+                                <span className="sf-session-thumb sf-session-thumb--empty" aria-hidden />
+                              )}
+                            </td>
+                            <td>{boatName(s.boat_id)}</td>
+                            <td>{fmtDateTime(s.started_at)}</td>
+                            <td>{stats ? fmtDistance(stats.distance_m) : "—"}</td>
+                            <td>{stats ? fmtKnots(stats.avg_speed_kts) : "—"}</td>
+                            <td>{stats ? fmtKnots(stats.max_speed_kts) : "—"}</td>
+                            <td className="sf-table__chevron" aria-hidden>
+                              <svg viewBox="0 0 16 16" width="16" height="16">
+                                <path
+                                  d="M5 2.5 11.5 8 5 13.5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
