@@ -373,6 +373,25 @@ export function ActivityDetailPage() {
         <p className="sf-muted">
           {fmtDateTime(a.started_at)} — {fmtDateTime(a.ended_at)}
         </p>
+        {/* For a multi-boat activity, which boat is which is shown in the
+            boats list/table below (thumbnail + name) — but a solo activity
+            renders its one session inline with no such list, so this is the
+            only place left to say which boat it was. Same thumbnail+name
+            treatment as that table, not just a muted line of text. */}
+        {soloSession &&
+          (() => {
+            const boat = boats.data?.find((b) => b.id === soloSession.boat_id);
+            return (
+              <p className="sf-crew-row">
+                {boat?.photos[0]?.url ? (
+                  <img src={boat.photos[0].url} alt="" className="sf-session-thumb" />
+                ) : (
+                  <span className="sf-session-thumb sf-session-thumb--empty" aria-hidden />
+                )}
+                <strong>{boat?.name ?? t("sessions.boat")}</strong>
+              </p>
+            );
+          })()}
         {a.race_id && (
           <p>
             <Link to={`/diario/regate/race/${a.race_id}`}>{t("regate.open")}</Link>
