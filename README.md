@@ -1,5 +1,8 @@
 # XGSail
 
+[![Website](https://img.shields.io/badge/website-xgsail.com-0ea5e9)](https://xgsail.com)
+[![Android APK](https://img.shields.io/github/v/release/FForzano/xgsail?label=Android%20APK&logo=android&logoColor=white&color=3ddc84)](https://github.com/FForzano/xgsail/releases/latest)
+
 Open sailing analytics platform for race analysis, session replay, and fleet performance — self-hostable, hardware-agnostic, and built for extensibility.
 
 > **XGSail is a fork of SailFrames (originally released as "SailFrames One").**

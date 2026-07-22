@@ -60,7 +60,8 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17" # required by AGP 8.13.0 (frontend/android/build.gradle)
+          java-version: "21" # Capacitor plugins compile with sourceCompatibility 21
+                              # (e.g. frontend/android/capacitor-cordova-android-plugins/build.gradle)
           cache: gradle
 
       - name: Install frontend deps
