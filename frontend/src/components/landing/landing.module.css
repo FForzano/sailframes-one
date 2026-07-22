@@ -2,6 +2,10 @@
   min-height: 100%;
   display: flex;
   flex-direction: column;
+  /* Shared reading width for every centered body paragraph below (hero
+     tagline, feature/native-apps intros, footer blurbs) so they all wrap
+     at the same point instead of each picking its own max-width. */
+  --landing-prose-width: 560px;
 }
 .supportBanner {
   display: flex;
@@ -69,6 +73,7 @@
   color: var(--sf-muted);
   font-size: 1.1rem;
   margin: 0;
+  max-width: var(--landing-prose-width);
 }
 .cta {
   display: flex;
@@ -142,6 +147,34 @@
   fill: color-mix(in srgb, var(--sf-warning) 20%, var(--sf-surface-2));
 }
 
+.nativeAppsIntro {
+  text-align: center;
+  max-width: var(--landing-prose-width);
+  margin: -0.75rem auto 1.25rem;
+}
+.nativeApps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.nativeAppIcon {
+  color: var(--sf-primary);
+  margin-bottom: 0.5rem;
+}
+.nativeAppsNote {
+  text-align: center;
+  max-width: var(--landing-prose-width);
+  margin: 1.25rem auto 0;
+  font-size: 0.8rem;
+}
+.nativeAppsDonateLink {
+  font-weight: 700;
+  color: var(--sf-primary);
+  white-space: nowrap;
+}
+
 .footer {
   display: flex;
   flex-direction: column;
@@ -152,7 +185,7 @@
   border-top: 1px solid var(--sf-border);
 }
 .footerAbout {
-  max-width: 480px;
+  max-width: var(--landing-prose-width);
   font-size: 0.85rem;
   margin: 0;
 }

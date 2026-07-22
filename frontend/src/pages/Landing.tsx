@@ -1,24 +1,26 @@
 import { Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Apple, Download, Smartphone } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Spinner } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { isNativeApp } from "@/config/platform";
 import { SelfHostedArt } from "@/components/landing/FeatureArt";
 import { SupportLink } from "@/components/common/SupportLink";
-import { GITHUB_URL, LICENSE_URL, UPSTREAM_URL, CONTACT_EMAIL } from "@/config/links";
+import { ANDROID_APK_URL, GITHUB_URL, LICENSE_URL, UPSTREAM_URL, CONTACT_EMAIL } from "@/config/links";
 import styles from "@/components/landing/landing.module.css";
 
-// Real product screenshots for features 1-5 — feature 6 (self-hosted) has no
+// Real product screenshots for features 1-6 — feature 7 (self-hosted) has no
 // single app screen to show, so it keeps a stylized illustration instead.
 const FEATURE_SHOTS: Record<number, string> = {
-  1: "/landing/playback.png",
-  2: "/landing/analysis.png",
-  3: "/landing/race.png",
-  4: "/landing/clubs.png",
-  5: "/landing/devices.png",
+  1: "/landing/record.png",
+  2: "/landing/playback.png",
+  3: "/landing/analysis.png",
+  4: "/landing/race.png",
+  5: "/landing/clubs.png",
+  6: "/landing/devices.png",
 };
-const FEATURE_KEYS = [1, 2, 3, 4, 5, 6] as const;
+const FEATURE_KEYS = [1, 2, 3, 4, 5, 6, 7] as const;
 
 /**
  * Public "/" route. Web: marketing page for anonymous visitors, redirects
@@ -90,6 +92,32 @@ export function LandingPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>{t("landing.nativeAppsTitle")}</h2>
+        <p className={`sf-muted ${styles.nativeAppsIntro}`}>{t("landing.nativeAppsIntro")}</p>
+        <div className={styles.nativeApps}>
+          <div className="sf-card">
+            <Smartphone className={styles.nativeAppIcon} aria-hidden />
+            <h3 className="sf-card__title">{t("landing.androidTitle")}</h3>
+            <p className="sf-muted">{t("landing.androidBody")}</p>
+            <a href={ANDROID_APK_URL}>
+              <Button variant="ghost" className="sf-btn--sm">
+                <Download size={16} strokeWidth={2} /> {t("landing.androidDownload")}
+              </Button>
+            </a>
+          </div>
+          <div className="sf-card">
+            <Apple className={styles.nativeAppIcon} aria-hidden />
+            <h3 className="sf-card__title">{t("landing.iosTitle")}</h3>
+            <p className="sf-muted">{t("landing.iosBody")}</p>
+          </div>
+        </div>
+        <p className={`sf-muted ${styles.nativeAppsNote}`}>
+          {t("landing.nativeAppsNote")} {t("landing.nativeAppsDonatePrompt")}{" "}
+          <SupportLink className={styles.nativeAppsDonateLink} />
+        </p>
       </section>
 
       <footer className={styles.footer}>
