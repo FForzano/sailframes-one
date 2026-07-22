@@ -50,7 +50,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22" # @capacitor/cli requires Node >=22 (`npx cap sync`)
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

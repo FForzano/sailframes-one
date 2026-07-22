@@ -135,6 +135,33 @@ Repo layout: `backend/` · `frontend/` · `workers/{process_upload,video}/` ·
 `deploy/` (Dockerfile + MinIO init) · `scripts/` (migrations, image build) ·
 `docs/device-protocol.md` (device integration contract).
 
+## Native apps (iOS/Android)
+
+The same frontend also ships as native iOS/Android shells via
+[Capacitor](https://capacitorjs.com/) — not a separate codebase, just the
+existing SPA wrapped for things a browser tab can't do (background GPS
+recording, Bluetooth device pairing, share-target GPX import). See
+`docs/native-apps.md` for how it's built and `docs/ota-updates.md` for how
+JS/CSS updates reach installs without a store release.
+
+**Status: early, not on the official stores.**
+
+- **Android**: buildable and signable, but not published to the Play
+  Store. `.github/workflows/android-release.yml` builds a signed release
+  APK on every `vX.Y.Z` tag and attaches it to the matching GitHub
+  Release — install it by sideloading that APK. A `play-store-upload` job
+  exists in the same workflow but is disabled.
+- **iOS**: not distributable in any form yet, not even for internal
+  testing — `.github/workflows/ios-release.yml` is a scaffold, disabled.
+
+**Why not on the stores yet: cost, not effort.** Google Play requires a
+one-time $25 registration fee; Apple requires a $99/year Developer
+Program membership just to sign a build at all, store or not (see
+"Testing without a paid Apple account" in `docs/native-apps.md`). The
+plan is to cover these through donations and publish once that's funded
+— sideloading the GitHub Release APK is the path for Android in the
+meantime, and iOS has no equivalent until an Apple account is in place.
+
 ## License
 
 Apache 2.0, consistent with the original upstream project unless stated otherwise.
