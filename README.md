@@ -1,7 +1,7 @@
 # XGSail
 
 [![Website](https://img.shields.io/badge/website-xgsail.com-0ea5e9)](https://xgsail.com)
-[![Android APK](https://img.shields.io/github/v/release/FForzano/xgsail?label=Android%20APK&logo=android&logoColor=white&color=3ddc84)](https://github.com/FForzano/xgsail/releases/latest)
+[![Android APK](https://img.shields.io/github/v/release/FForzano/xgsail?label=Android%20APK&logo=android&logoColor=white&color=3ddc84)](https://github.com/FForzano/xgsail/releases/latest/download/app-release.apk)
 [![Docker Hub](https://img.shields.io/badge/docker%20hub-fforzano99%2Fxgsail-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/fforzano99/xgsail)
 [![License](https://img.shields.io/github/license/FForzano/xgsail)](LICENSE)
 
