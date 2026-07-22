@@ -626,7 +626,7 @@ export function SessionDetail({
         </Card>
       )}
 
-      <Card className="sf-card--flush">
+      <Card className="sf-card--flush sf-card--flush-top">
         {streams.isLoading || (gpsStream && gps === null) ? (
           <div className="sf-card__pad">
             <Spinner />
