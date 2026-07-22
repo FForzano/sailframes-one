@@ -91,12 +91,15 @@ Where the original project includes hardware, firmware, edge devices, and AWS-or
 
 This is a fork in lineage and license, not a rebrand of the same codebase. Concretely:
 
-- **Data model**: the users/auth/roles/clubs/groups/devices/sessions schema was redesigned from scratch (see `docs/er-project.md`), not incrementally extended from the original tables.
-- **API surface**: routes, permission model, and ingestion contract were rebuilt around that new schema (`docs/api-project.md`), including a hardware-agnostic device-claim + device-key ingestion flow (`docs/device-protocol.md`) replacing the original's device-specific upload path.
-- **Frontend**: rebuilt on a simplified page structure and data-fetching approach (`docs/frontend-project.md`) rather than carried over as-is.
+- **Data model**: the users/auth/roles/clubs/groups/devices/sessions schema was redesigned from scratch, not incrementally extended from the original tables.
+- **API surface**: routes, permission model, and ingestion contract were rebuilt around that new schema, including a hardware-agnostic device-claim + device-key ingestion flow (`docs/device-protocol.md`) replacing the original's device-specific upload path.
+- **Frontend**: rebuilt on a simplified page structure and data-fetching approach rather than carried over as-is.
 - **Scope boundary**: firmware, PCB design, and embedded-device internals are excluded entirely — they remain in the upstream hardware repository, not mirrored here even partially.
 
-The four docs above are the source of truth for how far the schema/API/frontend have moved from upstream.
+The redesign these docs specified is now implemented on `main`. The
+retained docs are the source of truth going forward: `docs/device-protocol.md`
+(the ingestion contract) and `docs/estimation-pipeline.md` (how raw
+sensor/API data becomes legs/maneuvers/VMG/polar numbers).
 
 ## Principles
 
@@ -131,8 +134,11 @@ No `.env` is required — every value has a dev default. Copy `.env.example` to
 
 - **One API.** The FastAPI `backend/` is the only API surface. Metadata lives in
   Postgres; large files (CSV sensor data, video, JSON results) live in S3/MinIO.
-- **Auth.** Native email/password (Argon2id) → JWT access cookie + rotating
-  refresh token, with double-submit CSRF and per-club RBAC.
+- **Auth.** Email/password (Argon2id) → short-lived JWT access token + rotating
+  refresh token, per-club RBAC. Dual transport: **web** uses httpOnly cookies with
+  double-submit CSRF on mutations; **native apps** get the same tokens in the
+  response body and send the access token as an `Authorization: Bearer` header
+  (no cookie, so CSRF doesn't apply).
 - **Workers as microservices.** `workers/process_upload` (GPS tracks + analysis)
   and `workers/video` (MP4 → HLS via ffmpeg) are built on the AWS Lambda base
   image. The **same image** runs on AWS Lambda and locally: in compose it runs
@@ -141,9 +147,10 @@ No `.env` is required — every value has a dev default. Copy `.env.example` to
   the identical image sits behind an S3 → Lambda trigger. No code changes to move
   between the two.
 
-Repo layout: `backend/` · `frontend/` · `workers/{process_upload,video}/` ·
-`deploy/` (Dockerfile + MinIO init) · `scripts/` (migrations, image build) ·
-`docs/device-protocol.md` (device integration contract).
+Repo layout: `backend/` · `frontend/` · `workers/{process_upload,train_maneuver,video}/` ·
+`ota-service/` (standalone OTA update server) · `deploy/` (Dockerfile + MinIO init) ·
+`scripts/` (migrations, backfills, calibration) · `docs/device-protocol.md`
+(device integration contract) · `docs/estimation-pipeline.md` (analysis pipeline).
 
 ## Native apps (iOS/Android)
 
