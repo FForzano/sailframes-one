@@ -1,5 +1,17 @@
 apply plugin: 'com.android.application'
 
+// Release signing: reads frontend/android/keystore.properties (gitignored,
+// see keystore.properties.example) if present — CI writes it from secrets
+// before building (.github/workflows/android-release.yml). Locally, if the
+// file is absent, the release build type just falls back to unsigned so
+// `./gradlew assembleRelease` still works without a keystore.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+def hasKeystoreProperties = keystorePropertiesFile.exists()
+if (hasKeystoreProperties) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "com.xgsail.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,8 +28,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasKeystoreProperties) {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig hasKeystoreProperties ? signingConfigs.release : null
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

@@ -60,6 +60,32 @@ Minimum OS targets: Android 8 (`minSdkVersion 26` in
 `android/variables.gradle`, set after `cap add android`) and iOS 14 (Xcode
 deployment target, set after `cap add ios`).
 
+## Release builds (CI)
+
+A real native binary (as opposed to an OTA update, see
+`docs/ota-updates.md`) is only needed when native code, plugins, or
+`capacitor.config.ts` change — see "Forcing a native update" below. When
+it is, `.github/workflows/android-release.yml` builds and signs a release
+APK on a `v*` tag push and attaches it to the GitHub Release for that tag
+(sideload distribution, not the Play Store). Signing reads
+`frontend/android/keystore.properties` (gitignored — see
+`keystore.properties.example` for the format and how to generate the
+keystore itself with `keytool`); CI writes that file from repo secrets
+(`ANDROID_KEYSTORE_BASE64`/`ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_ALIAS`/
+`ANDROID_KEY_PASSWORD`). Without those secrets set, the workflow still
+builds but produces an unsigned APK and skips publishing — `app/
+build.gradle` falls back to no signing config when the properties file is
+absent, so local `./gradlew assembleRelease` keeps working either way. A
+`play-store-upload` job in the same workflow is scaffolded but disabled
+(`if: false`) pending a Play Console service account.
+
+`.github/workflows/ios-release.yml` is scaffolded the same way but
+entirely disabled — unlike Android, iOS has no self-signed path to an
+installable build at all (see "Testing without a paid Apple account"
+below), so it needs a paid Apple Developer Program account plus Fastlane
+`match`/App Store Connect API credentials before it can run. See the
+comment block at the top of that file for the exact setup steps.
+
 ## GPX share-target flow
 
 Sharing a `.gpx` file from another app (e.g. Waterspeed) into XGSail:

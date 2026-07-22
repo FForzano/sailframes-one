@@ -1,0 +1,62 @@
+name: iOS release
+
+# Scaffold only — the job is disabled (`if: false`) until there's a paid
+# Apple Developer Program account to go with it. Unlike Android
+# (android-release.yml), iOS has no self-signed path to an installable
+# build: even a build meant only for internal testing must be signed with
+# an Apple-issued certificate, so nothing here can run at all without that
+# account. See "Why Bearer auth for native" and "Testing without a paid
+# Apple account" in docs/native-apps.md for other places this same gate
+# already shows up (Bearer auth, the Share Extension).
+#
+# To enable once the account exists:
+#   1. Set up Fastlane (`fastlane init` in frontend/ios/App) with `match`
+#      for cert/profile management — needs a private git repo to hold the
+#      synced certs, plus these secrets: MATCH_GIT_URL,
+#      MATCH_GIT_BASIC_AUTHORIZATION, MATCH_PASSWORD.
+#   2. Create an App Store Connect API key for unattended `pilot`/`deliver`
+#      uploads — secrets: APP_STORE_CONNECT_API_KEY_ID,
+#      APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_CONTENT.
+#   3. Replace the placeholder step below with the real Fastlane lane
+#      (build + `pilot` upload to TestFlight), then flip `if: false` to
+#      `if: true`.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    if: false
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build web assets (native config)
+        working-directory: frontend
+        run: |
+          cp .env.native.example .env.native
+          set -a && source .env.native && set +a
+          npm run build
+
+      - name: Sync Capacitor iOS project
+        working-directory: frontend
+        run: npx cap sync ios
+
+      - name: Build, sign and upload to TestFlight
+        run: |
+          echo "Not yet configured — needs Fastlane + an Apple Developer" \
+               "Program account. See the comment block at the top of" \
+               "ios-release.yml."
+          exit 1

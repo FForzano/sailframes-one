@@ -1,0 +1,117 @@
+name: Android release
+
+# Builds a signed release APK on a version tag and publishes it as a
+# GitHub Release asset — sideload distribution, not the Play Store (see
+# the `play-store-upload` job below, disabled until Play Console is set
+# up). Independent of docker-publish.yml/deploy-ota.sh: those ship the web
+# app and JS-only native updates respectively, this ships a real native
+# binary, which is only needed when native code/plugins/capacitor.config.ts
+# change (see "Forcing a native update" in docs/native-apps.md).
+#
+# Signing needs these repo secrets (Settings -> Secrets and variables ->
+# Actions). Until they're added, the build still runs but produces an
+# unsigned APK (app/build.gradle falls back to no signingConfig when
+# keystore.properties is absent) — the "Write release keystore" step below
+# is skipped and no release is published.
+#   ANDROID_KEYSTORE_BASE64    - `base64 -i release.keystore | pbcopy`
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+# See frontend/android/keystore.properties.example for how to generate
+# the keystore itself (one-time, keep it safe — losing it means you can
+# never publish an update under the same app identity again).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # to publish the GitHub Release and upload the APK
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17" # required by AGP 8.13.0 (frontend/android/build.gradle)
+          cache: gradle
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build web assets (native config)
+        working-directory: frontend
+        run: |
+          cp .env.native.example .env.native
+          set -a && source .env.native && set +a
+          npm run build
+
+      - name: Sync Capacitor Android project
+        working-directory: frontend
+        run: npx cap sync android
+
+      - name: Write release signing config
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        working-directory: frontend/android
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          cat > keystore.properties <<EOF
+          storeFile=release.keystore
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      - name: Build release APK
+        working-directory: frontend/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Locate APK
+        id: apk
+        run: echo "path=$(find frontend/android/app/build/outputs/apk/release -name '*.apk' | head -n1)" >> "$GITHUB_OUTPUT"
+
+      - name: Clean up signing material
+        if: always()
+        working-directory: frontend/android
+        run: rm -f release.keystore keystore.properties
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xgsail-android-${{ github.ref_name }}
+          path: ${{ steps.apk.outputs.path }}
+
+      # Only publishes a Release on an actual version tag — workflow_dispatch
+      # runs (e.g. to sanity-check the build) stop at the artifact above.
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.path }}
+          generate_release_notes: true
+
+  # Disabled scaffold: uploads the same signed build to the Play Store's
+  # internal testing track via Fastlane `supply` instead of/alongside the
+  # GitHub Release above. To enable: create a Play Console service account,
+  # add its JSON as the PLAY_SERVICE_ACCOUNT_JSON secret, flesh out the
+  # steps below (fastlane install + `supply` invocation, feeding it the APK
+  # from the `build` job via actions/download-artifact), then flip `if:
+  # false` to `if: true`.
+  play-store-upload:
+    needs: build
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Play Store upload not yet configured — see comment above this job in android-release.yml."
