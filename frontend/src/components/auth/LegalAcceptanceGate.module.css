@@ -1,0 +1,42 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--sf-bg);
+  overflow-y: auto;
+}
+.card {
+  width: 100%;
+  max-width: 460px;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.title {
+  font-size: 1.3rem;
+}
+.body {
+  color: var(--sf-muted);
+  margin: 0;
+}
+.accept {
+  margin-top: 0.5rem;
+}
+.logout {
+  align-self: center;
+  background: none;
+  border: none;
+  color: var(--sf-muted);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0.25rem;
+}

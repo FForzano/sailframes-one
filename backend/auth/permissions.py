@@ -119,6 +119,31 @@ def effective_capabilities(user) -> dict:
             "boatsOwner": boats_owner,
             "boatsAdmin": boats_admin,
         },
+        "legal": _legal_status(user),
+    }
+
+
+def _legal_status(user) -> dict:
+    """Whether the user has accepted the CURRENT version of each legal document,
+    for the frontend's re-acceptance gate. ``needs_acceptance`` is true when
+    either the Terms or the Privacy Policy has changed since the user last
+    accepted (including the ``legacy``/NULL pre-versioning state)."""
+    from ..legal import CURRENT_PRIVACY_VERSION, CURRENT_TERMS_VERSION
+
+    terms_ok = getattr(user, "terms_version", None) == CURRENT_TERMS_VERSION
+    privacy_ok = getattr(user, "privacy_version", None) == CURRENT_PRIVACY_VERSION
+    return {
+        "terms": {
+            "acceptedVersion": getattr(user, "terms_version", None),
+            "currentVersion": CURRENT_TERMS_VERSION,
+            "needsAcceptance": not terms_ok,
+        },
+        "privacy": {
+            "acceptedVersion": getattr(user, "privacy_version", None),
+            "currentVersion": CURRENT_PRIVACY_VERSION,
+            "needsAcceptance": not privacy_ok,
+        },
+        "needsAcceptance": not (terms_ok and privacy_ok),
     }
 
 

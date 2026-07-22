@@ -14,7 +14,18 @@ class RegisterModel(BaseModel):
     password: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    # Both are mandatory at registration (enforced in the router). Terms and
+    # Privacy are distinct acceptances of distinct documents.
     terms_and_conditions: bool = False
+    privacy_policy: bool = False
+
+
+class AcceptLegalModel(BaseModel):
+    """Re-acceptance of updated legal documents by a logged-in user. Each flag
+    accepts the *current* version of that document (the server stamps it)."""
+
+    terms_and_conditions: bool = False
+    privacy_policy: bool = False
 
 
 class LoginModel(BaseModel):

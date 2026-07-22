@@ -2,6 +2,7 @@
 password hash); the hash is read only for login via a dedicated method."""
 
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -33,7 +34,10 @@ class SqlUserRepo:
     def create(self, *, email: str, password_hash: Optional[str],
                first_name: Optional[str] = None, last_name: Optional[str] = None,
                terms_and_conditions: bool = False,
+               terms_version: Optional[str] = None,
+               privacy_version: Optional[str] = None,
                is_active: bool = True, is_superadmin: bool = False) -> UserORM:
+        now = datetime.now(timezone.utc)
         with self.Session() as s:
             if self._by_email(s, email) is not None:
                 raise ValueError(f"User already exists: {email}")
@@ -43,6 +47,10 @@ class SqlUserRepo:
                 first_name=first_name,
                 last_name=last_name,
                 terms_and_conditions=terms_and_conditions,
+                terms_version=terms_version,
+                terms_accepted_at=now if terms_version else None,
+                privacy_version=privacy_version,
+                privacy_accepted_at=now if privacy_version else None,
                 is_active=is_active,
                 is_superadmin=is_superadmin,
             )
@@ -50,6 +58,26 @@ class SqlUserRepo:
             s.commit()
             new_id = orm.id
         return self.get_by_id(new_id)
+
+    def record_legal_acceptance(self, user_id: uuid.UUID, *,
+                                terms_version: Optional[str] = None,
+                                privacy_version: Optional[str] = None) -> Optional[UserORM]:
+        """Stamp acceptance of the current legal document version(s) with the
+        current timestamp. Only the documents passed are updated."""
+        now = datetime.now(timezone.utc)
+        with self.Session() as s:
+            orm = s.get(UserORM, user_id)
+            if orm is None:
+                return None
+            if terms_version is not None:
+                orm.terms_version = terms_version
+                orm.terms_accepted_at = now
+                orm.terms_and_conditions = True
+            if privacy_version is not None:
+                orm.privacy_version = privacy_version
+                orm.privacy_accepted_at = now
+            s.commit()
+        return self.get_by_id(user_id)
 
     def update(self, user_id: uuid.UUID, changes: dict) -> Optional[UserORM]:
         allowed = ("first_name", "last_name", "dob", "profile_image_id",
@@ -66,8 +94,6 @@ class SqlUserRepo:
 
     def soft_delete(self, user_id: uuid.UUID) -> bool:
         """Matrix delete = soft: status=deleted, deactivated, timestamped."""
-        from datetime import datetime, timezone
-
         with self.Session() as s:
             orm = s.get(UserORM, user_id)
             if orm is None:

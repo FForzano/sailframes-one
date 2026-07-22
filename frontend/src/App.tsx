@@ -1,9 +1,11 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
-import { RequireAuth, RequireSuperadmin } from "@/components/auth/RequireAuth";
+import { RequireAuth, RequireLegalAcceptance, RequireSuperadmin } from "@/components/auth/RequireAuth";
 import { LandingPage } from "@/pages/Landing";
 import { LoginPage } from "@/pages/Login";
 import { RegisterPage } from "@/pages/Register";
+import { TermsPage } from "@/pages/legal/TermsPage";
+import { PrivacyPage } from "@/pages/legal/PrivacyPage";
 import { NotFoundPage } from "@/pages/NotFound";
 import { DiarioLayout } from "@/pages/diario/DiarioLayout";
 import { SessionDetailPage } from "@/pages/diario/SessionDetailPage";
@@ -46,10 +48,16 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      {/* Public so anonymous visitors can read them before registering. */}
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
 
-      {/* Login mandatory everywhere else: the app shell sits behind RequireAuth. */}
+      {/* Login mandatory everywhere else: the app shell sits behind RequireAuth.
+          RequireLegalAcceptance then blocks the app until updated Terms/Privacy
+          are (re-)accepted. */}
       <Route element={<RequireAuth />}>
-        <Route element={<AppShell />}>
+        <Route element={<RequireLegalAcceptance />}>
+          <Route element={<AppShell />}>
           <Route path="/diario" element={<DiarioLayout />}>
             <Route index element={<Navigate to="personale" replace />} />
             <Route path="personale" element={<MyDiaryPage />} />
@@ -109,6 +117,7 @@ export default function App() {
           </Route>
 
           <Route path="*" element={<NotFoundPage />} />
+          </Route>
         </Route>
       </Route>
     </Routes>

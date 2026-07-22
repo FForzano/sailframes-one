@@ -104,6 +104,8 @@ export function LandingPage() {
           <a href={LICENSE_URL} target="_blank" rel="noreferrer">
             {t("landing.license")}
           </a>
+          <Link to="/terms">{t("legal.termsTitle")}</Link>
+          <Link to="/privacy">{t("legal.privacyTitle")}</Link>
           <a href={`mailto:${CONTACT_EMAIL}`}>{t("landing.contact")}</a>
           <SupportLink />
         </div>

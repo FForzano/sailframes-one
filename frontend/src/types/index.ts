@@ -50,6 +50,26 @@ export interface UserSummary {
   profile_image: ImageRef | null;
 }
 
+/** Per-document acceptance status in the capabilities payload. */
+export interface LegalDocStatus {
+  acceptedVersion: string | null;
+  currentVersion: string;
+  needsAcceptance: boolean;
+}
+
+export interface LegalCapabilities {
+  terms: LegalDocStatus;
+  privacy: LegalDocStatus;
+  /** True when either document needs (re-)acceptance — drives the gate. */
+  needsAcceptance: boolean;
+}
+
+/** Public metadata from GET /api/legal (versions + effective dates). */
+export interface LegalMetadata {
+  terms: { version: string; effective_date: string };
+  privacy: { version: string; effective_date: string };
+}
+
 export interface Capabilities {
   user: User;
   roles: Array<{ role: string; scope_club_id: UUID | null }>;
@@ -64,6 +84,7 @@ export interface Capabilities {
     boatsOwner: UUID[];
     boatsAdmin: UUID[];
   };
+  legal: LegalCapabilities;
 }
 
 export type MembershipStatus = "invited" | "requested" | "active";

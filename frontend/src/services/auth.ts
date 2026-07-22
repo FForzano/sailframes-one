@@ -20,6 +20,7 @@ export const authService = {
     first_name?: string;
     last_name?: string;
     terms_and_conditions: boolean;
+    privacy_policy: boolean;
   }) => api.post<User>("/auth/register", body),
 
   login: async (email: string, password: string) => {

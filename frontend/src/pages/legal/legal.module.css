@@ -1,0 +1,42 @@
+.page {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+.backRow {
+  margin-bottom: 1rem;
+}
+.doc {
+  color: var(--sf-text);
+  line-height: 1.6;
+}
+.title {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  margin-bottom: 0.35rem;
+}
+.meta {
+  font-size: 0.8rem;
+  color: var(--sf-muted);
+  margin-bottom: 1.25rem;
+}
+.lead {
+  color: var(--sf-muted);
+  margin-bottom: 1.75rem;
+}
+.section {
+  margin-bottom: 1.5rem;
+}
+.heading {
+  font-size: 1.05rem;
+  margin-bottom: 0.5rem;
+}
+.paragraph {
+  margin-bottom: 0.6rem;
+}
+.list {
+  margin: 0 0 0.6rem;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}

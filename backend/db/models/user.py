@@ -33,6 +33,16 @@ class UserORM(UUIDPKMixin, TimestampMixin, Base):
     last_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     dob: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     terms_and_conditions: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Versioned legal acceptance: which version of each document the user last
+    # accepted, and when. NULL/"legacy" (vs the current version in
+    # backend/legal.py) means the user must (re-)accept before using the app —
+    # see the capabilities `legal.needs_acceptance` flag. Terms and Privacy are
+    # tracked separately: they are distinct documents with distinct acceptances
+    # (GDPR consent can't be bundled into the terms acceptance).
+    terms_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    privacy_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    privacy_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_superadmin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # use_alter breaks the users<->images FK cycle (images.created_by -> users):

@@ -64,6 +64,10 @@ export function LoginPage() {
         <p className="sf-muted">
           {t("auth.noAccount")} <Link to="/register">{t("auth.register")}</Link>
         </p>
+        <p className="sf-muted">
+          <Link to="/terms">{t("legal.termsTitle")}</Link> ·{" "}
+          <Link to="/privacy">{t("legal.privacyTitle")}</Link>
+        </p>
         {canShowSupportLinks && (
           <p className="sf-muted">
             <SupportLink /> — {t("support.summary")}

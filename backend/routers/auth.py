@@ -53,7 +53,14 @@ from ..auth.tokens import (
     refresh_expiry,
     refresh_max_age,
 )
-from ..schemas import ChangePasswordModel, LoginModel, RefreshModel, RegisterModel
+from ..legal import CURRENT_PRIVACY_VERSION, CURRENT_TERMS_VERSION
+from ..schemas import (
+    AcceptLegalModel,
+    ChangePasswordModel,
+    LoginModel,
+    RefreshModel,
+    RegisterModel,
+)
 from ._common import repos
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -160,15 +167,42 @@ def register(body: RegisterModel):
         raise HTTPException(422, "Invalid email")
     if len(body.password) < 8:
         raise HTTPException(422, "Password must be at least 8 characters")
+    # Accepting both the Terms of Service and the Privacy Policy is mandatory
+    # to register — enforced here on the server, not just by the client-side
+    # checkbox. The accepted versions are stamped from backend/legal.py so a
+    # client can't claim to have accepted a different (e.g. older) version.
+    if not body.terms_and_conditions:
+        raise HTTPException(422, "You must accept the Terms of Service")
+    if not body.privacy_policy:
+        raise HTTPException(422, "You must accept the Privacy Policy")
     try:
         user = repos.users.create(
             email=email, password_hash=hash_password(body.password),
             first_name=body.first_name, last_name=body.last_name,
-            terms_and_conditions=body.terms_and_conditions,
+            terms_and_conditions=True,
+            terms_version=CURRENT_TERMS_VERSION,
+            privacy_version=CURRENT_PRIVACY_VERSION,
         )
     except ValueError:
         raise HTTPException(409, "Email already registered")
     return user.to_dict()
+
+
+@router.post("/accept-legal")
+def accept_legal(body: AcceptLegalModel, request: Request):
+    """Record a logged-in user's (re-)acceptance of the current Terms of
+    Service and/or Privacy Policy — used when a document changes and the app
+    blocks on the re-acceptance gate (see capabilities ``legal``). Each flag
+    accepts the *current* server-side version; a false flag leaves that
+    document's previously-recorded acceptance untouched."""
+    verify_csrf(request)
+    user = require_user(request)
+    repos.users.record_legal_acceptance(
+        user.id,
+        terms_version=CURRENT_TERMS_VERSION if body.terms_and_conditions else None,
+        privacy_version=CURRENT_PRIVACY_VERSION if body.privacy_policy else None,
+    )
+    return {"ok": True}
 
 
 @router.post("/login")

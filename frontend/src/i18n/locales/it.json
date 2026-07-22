@@ -18,6 +18,19 @@
     "haveAccount": "Hai già un account?",
     "acceptTerms": "Accetto i termini e le condizioni"
   },
+  "legal": {
+    "termsTitle": "Termini e Condizioni",
+    "privacyTitle": "Informativa Privacy",
+    "versionLabel": "Versione {{version}}",
+    "effectiveLabel": "In vigore dal {{date}}",
+    "acceptTermsFull": "Ho letto e accetto i <termsLink>Termini e Condizioni</termsLink>",
+    "acceptPrivacyFull": "Ho preso visione dell'<privacyLink>Informativa Privacy</privacyLink>",
+    "gate": {
+      "title": "Termini e Informativa Privacy aggiornati",
+      "body": "Abbiamo aggiornato i nostri documenti legali. Leggili e accettali per continuare a usare XGSail.",
+      "accept": "Accetta e continua"
+    }
+  },
   "common": {
     "tagline": "Next-Gen Sailing Analytics",
     "cancel": "Annulla",

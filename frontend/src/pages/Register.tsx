@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/Button";
@@ -18,12 +18,16 @@ export function RegisterPage() {
     first_name: "",
     last_name: "",
     terms: false,
+    privacy: false,
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [k]: k === "terms" ? e.target.checked : e.target.value }));
+    setForm((f) => ({
+      ...f,
+      [k]: k === "terms" || k === "privacy" ? e.target.checked : e.target.value,
+    }));
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -36,6 +40,7 @@ export function RegisterPage() {
         first_name: form.first_name || undefined,
         last_name: form.last_name || undefined,
         terms_and_conditions: form.terms,
+        privacy_policy: form.privacy,
       });
       navigate("/", { replace: true });
     } catch (err) {
@@ -85,7 +90,25 @@ export function RegisterPage() {
         />
         <label className="sf-check">
           <input type="checkbox" checked={form.terms} onChange={set("terms")} required />
-          <span>{t("auth.acceptTerms")}</span>
+          <span>
+            <Trans
+              i18nKey="legal.acceptTermsFull"
+              components={{
+                termsLink: <Link to="/terms" target="_blank" rel="noreferrer" />,
+              }}
+            />
+          </span>
+        </label>
+        <label className="sf-check">
+          <input type="checkbox" checked={form.privacy} onChange={set("privacy")} required />
+          <span>
+            <Trans
+              i18nKey="legal.acceptPrivacyFull"
+              components={{
+                privacyLink: <Link to="/privacy" target="_blank" rel="noreferrer" />,
+              }}
+            />
+          </span>
         </label>
         {error && <p className="sf-form__error">{error}</p>}
         <Button type="submit" disabled={busy}>

@@ -123,12 +123,16 @@ def seed_superadmin(repos) -> None:
     if repos.users.get_by_email(admin_email) is not None:
         return
     admin_password = os.environ.get("SAILFRAMES_SUPERADMIN_PASSWORD")
+    from ..legal import CURRENT_PRIVACY_VERSION, CURRENT_TERMS_VERSION
+
     repos.users.create(
         email=admin_email,
         password_hash=hash_password(admin_password) if admin_password else None,
         first_name="Super",
         last_name="Admin",
         terms_and_conditions=True,
+        terms_version=CURRENT_TERMS_VERSION,
+        privacy_version=CURRENT_PRIVACY_VERSION,
         is_active=True,
         is_superadmin=True,
     )

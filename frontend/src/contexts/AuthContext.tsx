@@ -30,6 +30,7 @@ export interface AuthContextValue {
     first_name?: string;
     last_name?: string;
     terms_and_conditions: boolean;
+    privacy_policy: boolean;
   }) => Promise<void>;
   logout: () => Promise<void>;
   /** Re-fetch capabilities after membership/role-changing mutations. */
