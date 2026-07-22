@@ -12,11 +12,16 @@ function DeviceOptionCard({
   title,
   hint,
   disabled,
+  badge,
   onClick,
 }: {
   title: string;
   hint: string;
   disabled?: boolean;
+  /** Shown when `disabled` — defaults to `devices.add.soon`. Pass an
+   * explicit label when the card is disabled for a different reason (e.g.
+   * "app only" rather than "not built yet"), so the two aren't conflated. */
+  badge?: string;
   onClick: () => void;
 }) {
   const { t } = useTranslation();
@@ -29,7 +34,7 @@ function DeviceOptionCard({
     >
       <span className={styles.cardTitle}>{title}</span>
       <span className={`sf-muted ${styles.cardHint}`}>{hint}</span>
-      {disabled && <span className="sf-badge sf-badge--soon">{t("devices.add.soon")}</span>}
+      {disabled && <span className="sf-badge sf-badge--soon">{badge ?? t("devices.add.soon")}</span>}
     </button>
   );
 }
@@ -39,7 +44,9 @@ function DeviceOptionCard({
  * BLE flow this leads into). Only XGSail E1 is active today; Apple Watch,
  * Garmin and Polar are shown disabled ("in arrivo") — see
  * backend/routers/integrations.py, which reserves their API surface without
- * implementing it yet.
+ * implementing it yet. XGSail E1 itself is disabled on web (BLE claiming
+ * needs the native app) but tagged "solo app", not "in arrivo", since it's
+ * available today — just not from this platform.
  *
  * Context-aware on `owner`: wearables are personal (a user connects their
  * own watch/account), so they're only offered from the personal devices
@@ -61,6 +68,7 @@ export function AddDeviceDialog({ owner, onClose }: { owner: Owner; onClose: () 
           title={t("devices.add.xgsailE1")}
           hint={isNative ? t("devices.add.xgsailE1Hint") : t("devices.add.nativeOnly")}
           disabled={!isNative}
+          badge={t("devices.add.nativeOnlyBadge")}
           onClick={() => setClaimingXgsailE1(true)}
         />
         {showWearables && (

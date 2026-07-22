@@ -100,7 +100,7 @@
     "feature4Title": "Circoli e gruppi",
     "feature4Body": "Condividi le attività con equipaggio, gruppo o circolo, con ruoli e permessi dedicati.",
     "feature5Title": "Dispositivi hardware-agnostici",
-    "feature5Body": "Associa qualsiasi tracker con una chiave dedicata e inizia a caricare i dati — nessun vincolo di marca.",
+    "feature5Body": "Il protocollo di connessione è aperto e documentato: qualsiasi dispositivo può integrarsi. Oggi supportiamo nativamente XGSail E1, con altri tracker in arrivo.",
     "feature6Title": "Self-hosted e open source",
     "feature6Body": "Avvia il tuo stack con un comando, oppure usa la versione hosted su xgsail.com — la scelta dei tuoi dati è tua.",
     "footerAbout": "XGSail è un fork open source di SailFrames, distribuito con licenza Apache 2.0.",
@@ -205,6 +205,7 @@
       "garmin": "Garmin",
       "polar": "Polar",
       "soon": "In arrivo",
+      "nativeOnlyBadge": "Solo app",
       "nativeOnly": "Apri l'app XGSail per aggiungere questo dispositivo",
       "personalOnly": "Solo dispositivi personali — collega il tuo smartwatch dal profilo"
     },
