@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Capacitor } from "@capacitor/core";
+import { Info } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ClaimDeviceDialog } from "@/components/common/ClaimDeviceDialog";
+import { E1InfoDialog } from "@/components/devices/E1InfoDialog";
 import type { UUID } from "@/types";
 import styles from "./AddDeviceDialog.module.css";
 
@@ -14,6 +16,7 @@ function DeviceOptionCard({
   disabled,
   badge,
   onClick,
+  onInfoClick,
 }: {
   title: string;
   hint: string;
@@ -23,19 +26,30 @@ function DeviceOptionCard({
    * "app only" rather than "not built yet"), so the two aren't conflated. */
   badge?: string;
   onClick: () => void;
+  /** Optional info affordance, shown as its own corner button so it stays
+   * reachable even when the card itself is `disabled` (e.g. XGSail E1 on
+   * web, where claiming needs the native app but the info page shouldn't). */
+  onInfoClick?: () => void;
 }) {
   const { t } = useTranslation();
   return (
-    <button
-      type="button"
-      className={`sf-card ${styles.card}`}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      <span className={styles.cardTitle}>{title}</span>
-      <span className={`sf-muted ${styles.cardHint}`}>{hint}</span>
-      {disabled && <span className="sf-badge sf-badge--soon">{badge ?? t("devices.add.soon")}</span>}
-    </button>
+    <div className={`sf-card ${styles.card}`}>
+      <button type="button" className={styles.cardButton} disabled={disabled} onClick={onClick}>
+        <span className={styles.cardTitle}>{title}</span>
+        <span className={`sf-muted ${styles.cardHint}`}>{hint}</span>
+        {disabled && <span className="sf-badge sf-badge--soon">{badge ?? t("devices.add.soon")}</span>}
+      </button>
+      {onInfoClick && (
+        <button
+          type="button"
+          className={styles.infoButton}
+          onClick={onInfoClick}
+          aria-label={t("devices.e1.info.button")}
+        >
+          <Info size={14} strokeWidth={2} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -54,6 +68,7 @@ function DeviceOptionCard({
 export function AddDeviceDialog({ owner, onClose }: { owner: Owner; onClose: () => void }) {
   const { t } = useTranslation();
   const [claimingXgsailE1, setClaimingXgsailE1] = useState(false);
+  const [infoE1Open, setInfoE1Open] = useState(false);
   const isNative = Capacitor.isNativePlatform();
   const showWearables = owner.owner_user_id !== undefined;
 
@@ -70,6 +85,7 @@ export function AddDeviceDialog({ owner, onClose }: { owner: Owner; onClose: () 
           disabled={!isNative}
           badge={t("devices.add.nativeOnlyBadge")}
           onClick={() => setClaimingXgsailE1(true)}
+          onInfoClick={() => setInfoE1Open(true)}
         />
         {showWearables && (
           <>
@@ -80,6 +96,7 @@ export function AddDeviceDialog({ owner, onClose }: { owner: Owner; onClose: () 
         )}
       </div>
       {!showWearables && <p className="sf-muted">{t("devices.add.personalOnly")}</p>}
+      {infoE1Open && <E1InfoDialog onClose={() => setInfoE1Open(false)} />}
     </Modal>
   );
 }

@@ -4,27 +4,35 @@
   gap: 0.75rem;
 }
 
-/* Each option is an .sf-card used as a button — this module only adds the
-   grid-cell sizing, clickable affordance, and disabled treatment on top of
-   the shared card primitive (global.css). */
+/* Each option is an .sf-card holding a full-size .cardButton, plus an
+   optional .infoButton overlaid in the corner — kept as a sibling rather
+   than nested inside .cardButton so it stays clickable (and valid HTML)
+   even when the card's main action is disabled. */
 .card {
+  position: relative;
+  transition: border-color 0.15s ease;
+}
+.card:has(.cardButton:hover:not(:disabled)) {
+  border-color: var(--sf-primary);
+}
+
+.cardButton {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.4rem;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.15s ease;
   /* .sf-card is normally a <div> — reset button UA defaults since this one
      is a <button> for native click/keyboard-activation semantics. */
   font: inherit;
   color: inherit;
   width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
 }
-.card:hover:not(:disabled) {
-  border-color: var(--sf-primary);
-}
-.card:disabled {
+.cardButton:disabled {
   cursor: default;
   opacity: 0.6;
 }
@@ -34,4 +42,22 @@
 }
 .cardHint {
   font-size: 0.82rem;
+}
+
+.infoButton {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0.2rem;
+  line-height: 0;
+  color: var(--sf-muted);
+  cursor: pointer;
+}
+.infoButton:hover {
+  color: var(--sf-primary);
 }
