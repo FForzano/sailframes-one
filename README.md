@@ -44,6 +44,20 @@ XGSail is **not** the hardware, firmware, or embedded edge stack from the origin
 
 Those components may integrate with XGSail through the device protocol, but this repository is focused on the software platform and its data contract.
 
+### XGSail E1 (reference hardware)
+
+[**xgsail-e1**](https://github.com/FForzano/xgsail-e1) is a companion
+repository with the firmware and KiCad PCB design for **E1**, an
+ESP32-based fleet tracker built as reference hardware for this
+platform: GNSS + IMU + wind + pressure logging, an ESP-NOW peer mesh
+for live fleet position sharing and on-course-side (OCS) race-start
+detection, and uploads over the device protocol above — direct over
+WiFi, or relayed over Bluetooth by the owner's phone when WiFi isn't
+available. It's open hardware (Apache 2.0, same license as this repo)
+and currently a build-it-yourself project rather than a sold product.
+See that repository's `README.md` and `docs/hardware.md` for firmware,
+schematics, and the BOM.
+
 ## Project Scope
 
 This repository contains:

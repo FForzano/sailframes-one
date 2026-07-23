@@ -175,6 +175,53 @@
   white-space: nowrap;
 }
 
+.e1Card {
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.e1Head {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+.e1IconWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--sf-primary) 14%, var(--sf-surface-2));
+  color: var(--sf-primary);
+  flex-shrink: 0;
+}
+.e1Highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.85rem;
+}
+.e1Highlight {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 8px;
+  background: var(--sf-surface-2);
+  border: 1px solid var(--sf-border);
+  font-size: 0.85rem;
+}
+.e1HighlightIcon {
+  color: var(--sf-primary);
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.e1Cta {
+  align-self: flex-start;
+}
+
 .footer {
   display: flex;
   flex-direction: column;

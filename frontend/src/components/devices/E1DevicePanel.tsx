@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { Info } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { InputField } from "@/components/ui/InputField";
@@ -11,6 +12,7 @@ import { ConfigWriteError } from "@/services/nativeBle";
 import type { CalibrateResult, E1ConfigPatch, E1WifiNetwork } from "@/services/nativeBle";
 import { fmtDuration } from "@/utils/format";
 import type { Device } from "@/types";
+import { E1InfoDialog } from "./E1InfoDialog";
 import styles from "./E1DevicePanel.module.css";
 
 const UNIT_ROLES = ["racing_boat", "rc_signal", "rc_pin", "mark", "committee_chase", "spare"] as const;
@@ -35,6 +37,7 @@ export function E1DevicePanel({ device }: { device: Device }) {
   const [confirmingCalibrate, setConfirmingCalibrate] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaved, setConfigSaved] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   useEffect(() => {
     if (!e1.config) return;
@@ -49,25 +52,38 @@ export function E1DevicePanel({ device }: { device: Device }) {
 
   if (e1.state === "unsupported") return null;
 
+  const infoButton = (
+    <Button variant="ghost" className="sf-btn--sm" onClick={() => setInfoOpen(true)}>
+      <Info size={16} strokeWidth={2} /> {t("devices.e1.info.button")}
+    </Button>
+  );
+  const infoDialog = infoOpen && <E1InfoDialog onClose={() => setInfoOpen(false)} />;
+
   if (e1.state === "searching") {
     return (
-      <Card title={t("devices.e1.title")}>
-        <Spinner />
-        <p className="sf-muted">{t("devices.e1.searching")}</p>
-      </Card>
+      <>
+        <Card title={t("devices.e1.title")} actions={infoButton}>
+          <Spinner />
+          <p className="sf-muted">{t("devices.e1.searching")}</p>
+        </Card>
+        {infoDialog}
+      </>
     );
   }
 
   if (e1.state === "unreachable") {
     return (
-      <Card title={t("devices.e1.title")}>
-        <p className="sf-muted">{t("devices.e1.unreachable")}</p>
-        <div className="sf-form__actions">
-          <Button variant="ghost" onClick={e1.retry}>
-            {t("common.retry")}
-          </Button>
-        </div>
-      </Card>
+      <>
+        <Card title={t("devices.e1.title")} actions={infoButton}>
+          <p className="sf-muted">{t("devices.e1.unreachable")}</p>
+          <div className="sf-form__actions">
+            <Button variant="ghost" onClick={e1.retry}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        </Card>
+        {infoDialog}
+      </>
     );
   }
 
@@ -98,7 +114,7 @@ export function E1DevicePanel({ device }: { device: Device }) {
 
   return (
     <>
-      <Card title={t("devices.e1.status.title")}>
+      <Card title={t("devices.e1.status.title")} actions={infoButton}>
         {e1.statusLoading && !s ? (
           <Spinner />
         ) : !s ? (
@@ -308,6 +324,7 @@ export function E1DevicePanel({ device }: { device: Device }) {
           onClose={() => setConfirmingCalibrate(false)}
         />
       )}
+      {infoDialog}
     </>
   );
 }

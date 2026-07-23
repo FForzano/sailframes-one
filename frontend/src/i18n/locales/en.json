@@ -106,6 +106,18 @@
     "feature6Body": "The device protocol is open and documented — any hardware can integrate. XGSail E1 is supported natively today, with more trackers on the way.",
     "feature7Title": "Self-hosted & open source",
     "feature7Body": "Run your own stack with one command, or use the hosted version at xgsail.com — your data, your choice.",
+    "e1Title": "An open-hardware tracker built for XGSail",
+    "e1CardTitle": "XGSail E1",
+    "e1Body": "An ESP32-based fleet tracker: GNSS, IMU, wind and pressure logging, live fleet position sharing over BLE mesh, and automatic uploads to XGSail. Open hardware and firmware, no vendor lock-in. Currently a build-it-yourself project, not yet a sold product.",
+    "e1Highlights": {
+      "sensors": "GNSS, IMU, wind & pressure logging",
+      "display": "Sunlight-readable onboard display",
+      "mesh": "Live fleet mesh & OCS detection",
+      "upload": "Auto-upload via WiFi or BLE relay",
+      "power": "Simple hardware power switch",
+      "openHardware": "Open firmware & PCB (Apache 2.0)"
+    },
+    "e1RepoLink": "View the hardware & firmware repo",
     "nativeAppsTitle": "On mobile, too",
     "nativeAppsIntro": "The same app as an iOS and Android version, with background GPS recording and Bluetooth device pairing.",
     "androidTitle": "Android",
@@ -234,6 +246,21 @@
       "title": "XGSail E1",
       "searching": "Looking for the device nearby…",
       "unreachable": "Device not reachable over Bluetooth. Make sure it's powered on and nearby.",
+      "info": {
+        "button": "About E1",
+        "title": "About the XGSail E1",
+        "intro": "E1 is an ESP32-based fleet tracker built for XGSail: GNSS, IMU (heel/pitch), wind, and pressure logging on a single board.",
+        "bullets": {
+          "sensors": "GPS, IMU, wind and pressure sensors log every session to the onboard SD card.",
+          "display": "A sunlight-readable 3.5\" color display shows live position, speed and sensor data on the water.",
+          "mesh": "An ESP-NOW mesh shares live position with nearby boats for fleet tracking and race-committee on-course-side (OCS) start detection.",
+          "upload": "Sessions upload to XGSail automatically over WiFi, or relayed through your phone via Bluetooth when WiFi isn't available.",
+          "power": "A hardware power switch and a physical button handle power and recording — no app required on the water.",
+          "openHardware": "Firmware and PCB design are open source (Apache 2.0), published alongside XGSail."
+        },
+        "diyNote": "E1 is an open-hardware, build-it-yourself project — not (yet) sold as a finished product. Photos and assembly guides are coming as builds are completed.",
+        "repoLink": "View the E1 hardware & firmware repo"
+      },
       "status": {
         "title": "Live status",
         "criticalBattery": "Low battery",

@@ -1,13 +1,32 @@
 import { Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Apple, Download, Smartphone } from "lucide-react";
+import {
+  Apple,
+  Download,
+  Smartphone,
+  Cpu,
+  Satellite,
+  Sun,
+  Radio,
+  UploadCloud,
+  Power,
+  Code2,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Spinner } from "@/components/ui/Spinner";
 import { Button } from "@/components/ui/Button";
 import { isNativeApp } from "@/config/platform";
 import { SelfHostedArt } from "@/components/landing/FeatureArt";
 import { SupportLink } from "@/components/common/SupportLink";
-import { ANDROID_APK_URL, GITHUB_URL, LICENSE_URL, UPSTREAM_URL, CONTACT_EMAIL } from "@/config/links";
+import {
+  ANDROID_APK_URL,
+  GITHUB_URL,
+  LICENSE_URL,
+  UPSTREAM_URL,
+  CONTACT_EMAIL,
+  E1_REPO_URL,
+} from "@/config/links";
 import styles from "@/components/landing/landing.module.css";
 
 // Real product screenshots for features 1-6 — feature 7 (self-hosted) has no
@@ -21,6 +40,15 @@ const FEATURE_SHOTS: Record<number, string> = {
   6: "/landing/devices.png",
 };
 const FEATURE_KEYS = [1, 2, 3, 4, 5, 6, 7] as const;
+
+const E1_HIGHLIGHTS: { key: string; Icon: LucideIcon }[] = [
+  { key: "sensors", Icon: Satellite },
+  { key: "display", Icon: Sun },
+  { key: "mesh", Icon: Radio },
+  { key: "upload", Icon: UploadCloud },
+  { key: "power", Icon: Power },
+  { key: "openHardware", Icon: Code2 },
+];
 
 /**
  * Public "/" route. Web: marketing page for anonymous visitors, redirects
@@ -118,6 +146,34 @@ export function LandingPage() {
           {t("landing.nativeAppsNote")} {t("landing.nativeAppsDonatePrompt")}{" "}
           <SupportLink className={styles.nativeAppsDonateLink} />
         </p>
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>{t("landing.e1Title")}</h2>
+        <div className={`sf-card ${styles.e1Card}`}>
+          <div className={styles.e1Head}>
+            <span className={styles.e1IconWrap}>
+              <Cpu size={28} strokeWidth={2} aria-hidden />
+            </span>
+            <div>
+              <h3 className="sf-card__title">{t("landing.e1CardTitle")}</h3>
+              <p className="sf-muted">{t("landing.e1Body")}</p>
+            </div>
+          </div>
+          <div className={styles.e1Highlights}>
+            {E1_HIGHLIGHTS.map(({ key, Icon }) => (
+              <div className={styles.e1Highlight} key={key}>
+                <Icon size={18} strokeWidth={2} className={styles.e1HighlightIcon} aria-hidden />
+                <span>{t(`landing.e1Highlights.${key}`)}</span>
+              </div>
+            ))}
+          </div>
+          <a href={E1_REPO_URL} target="_blank" rel="noreferrer" className={styles.e1Cta}>
+            <Button variant="ghost" className="sf-btn--sm">
+              {t("landing.e1RepoLink")}
+            </Button>
+          </a>
+        </div>
       </section>
 
       <footer className={styles.footer}>
