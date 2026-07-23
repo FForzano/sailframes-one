@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { InputField } from "@/components/ui/InputField";
 import { fmtDateTime, fmtDuration } from "@/utils/format";
 import { statusBadge } from "./DevicesPage";
+import { E1DevicePanel } from "@/components/devices/E1DevicePanel";
 import type { UUID } from "@/types";
 import deviceClaimStyles from "@/components/common/deviceClaim.module.css";
 
@@ -141,8 +142,10 @@ export function DeviceDetailPage() {
         </div>
       </Card>
 
+      {d.status === "claimed" && <E1DevicePanel device={d} />}
+
       {d.status === "claimed" && (
-        <Card title={t("devices.health")}>
+        <Card title={t("devices.lastReport")}>
           {health.isLoading ? (
             <Spinner />
           ) : !h ? (

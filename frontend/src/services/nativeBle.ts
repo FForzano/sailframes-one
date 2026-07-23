@@ -7,32 +7,31 @@ import { devicesService } from "@/services/devices";
 import type { UUID } from "@/types";
 
 // Native-only BLE relay for the XGSail E1 hardware device — implements
-// docs/device-protocol.md §8. No-op on web, same convention as
-// nativeAuth.ts/nativeRecording.ts: Web Bluetooth isn't available on iOS
-// Safari at all and is unreliable elsewhere, so BLE claim/upload for
+// docs/device-protocol.md §8 plus the E1-specific extensions documented in
+// xgsail-e1's docs/ble-config.md (device_config, status, and control's
+// calibrate/calibrate-reset/start-rec/stop-rec commands). No-op on web, same
+// convention as nativeAuth.ts/nativeRecording.ts: Web Bluetooth isn't
+// available on iOS Safari at all and is unreliable elsewhere, so BLE for
 // XGSail E1 is a native-app-only feature by design (AddDeviceDialog hides/
 // disables the card outside the native app rather than offering a shakier
 // web fallback).
-//
-// Two operations, both documented in the protocol doc:
-// - claimDevice()   — §8.3: relays the claim/confirm call and writes the
-//   resulting device_api_key onto the device over BLE.
-// - uploadSessions() — §8.4: relays buffered sessions the device couldn't
-//   upload itself (no WiFi at the time) through the phone's own connection.
 //
 // GATT service/characteristic UUIDs — freshly generated (v4, random), not
 // borrowed from a known public service like Nordic UART, so scanning for
 // SERVICE_UUID can't false-positive-match an unrelated nearby BLE device
 // that happens to implement that service. These are the values firmware
-// must use (see docs/device-protocol.md §8.2) — share this file or the doc
-// with whoever implements the E1's BLE stack; nothing here depends on the
-// specific values beyond app and firmware agreeing on them.
+// must use (see docs/device-protocol.md §8.2 and xgsail-e1's
+// docs/ble-config.md) — share this file or those docs with whoever
+// implements the E1's BLE stack; nothing here depends on the specific
+// values beyond app and firmware agreeing on them.
 const SERVICE_UUID = "24e6db2c-3c8a-4b5b-ba5a-23bc4c818046";
 const CHAR_IDENTITY = "985a1aae-858e-4727-9d5c-c8670bd6bd06";
 const CHAR_PROVISIONING = "db2c2e63-9e13-4fa9-867c-0b579ce2ae57";
 const CHAR_SESSION_MANIFEST = "ed9efdc8-70d4-4ce5-a0a3-9fa6d88b9b9e";
 const CHAR_SESSION_DATA = "728d2815-0409-49ce-ad73-ecca6fc6d981";
 const CHAR_CONTROL = "ec88dd3e-2562-420c-aebe-30a4ae40bdf9";
+const CHAR_DEVICE_CONFIG = "042dfd7c-88f4-4ae8-af9a-eb1d7be7a3c6";
+const CHAR_STATUS = "bfef7865-f3f7-486c-93fe-bbae78cfdc43";
 
 const isNative = () => Capacitor.isNativePlatform();
 
@@ -56,6 +55,22 @@ export async function getStoredDeviceKey(xgsailDeviceId: UUID): Promise<string |
 
 async function storeDeviceKey(xgsailDeviceId: UUID, key: string): Promise<void> {
   await SecureStorage.setItem(keyStorageKey(xgsailDeviceId), key);
+}
+
+// --- Connection helper -------------------------------------------------
+
+/** Connects, runs `fn`, always disconnects — the shared shape every BLE
+ * operation in this file needs (claim, upload relay, config read/write,
+ * status poll, commands). Centralized so connect/disconnect bookkeeping
+ * doesn't get duplicated (and drift) across each operation. */
+async function withConnection<T>(bleId: string, fn: () => Promise<T>): Promise<T> {
+  await BleClient.initialize();
+  await BleClient.connect(bleId);
+  try {
+    return await fn();
+  } finally {
+    await BleClient.disconnect(bleId).catch(() => {});
+  }
 }
 
 // --- Scanning --------------------------------------------------------------
@@ -94,6 +109,64 @@ async function readIdentity(bleId: string): Promise<IdentityPayload> {
   return JSON.parse(dataViewToText(raw)) as IdentityPayload;
 }
 
+// --- Resolving a claimed XGSail device to its live BLE peripheral -----------
+
+// external_id -> bleId, populated by findByExternalId. There's no other way
+// to map a claimed XGSail Device back to a nearby peripheral: every E1
+// advertises under the same name ("SailFrames-E1"), so the only
+// disambiguator is external_id read off `identity` after connecting — this
+// cache just avoids re-scanning+re-connecting-to-everything on every poll.
+const externalIdToBleId = new Map<string, string>();
+
+/** Scans for `timeoutMs`, connecting to each candidate in turn until one's
+ * `identity.external_id` matches, or none do. Cached by external_id; a
+ * failed connect to the cached bleId (device moved out of range, rebooted
+ * with a new OS-level connection id) evicts the cache entry so the next
+ * call re-scans instead of retrying a dead id forever. */
+export async function findByExternalId(
+  externalId: string,
+  timeoutMs = 8000,
+): Promise<ScannedDevice | null> {
+  if (!isNative()) return null;
+  const cached = externalIdToBleId.get(externalId);
+  if (cached) {
+    try {
+      const identity = await withConnection(cached, () => readIdentity(cached));
+      if (identity.external_id === externalId) return { bleId: cached, name: null };
+    } catch {
+      // fall through to a fresh scan
+    }
+    externalIdToBleId.delete(externalId);
+  }
+
+  const candidates = await scanForDevices(timeoutMs);
+  for (const candidate of candidates) {
+    try {
+      const identity = await withConnection(candidate.bleId, () => readIdentity(candidate.bleId));
+      if (identity.external_id === externalId) {
+        externalIdToBleId.set(externalId, candidate.bleId);
+        return candidate;
+      }
+    } catch {
+      // unreachable/errored candidate — try the next one
+    }
+  }
+  return null;
+}
+
+/** Opens a connection the caller manages the lifetime of directly (unlike
+ * withConnection's one-shot pattern) — for a panel that polls `status`/
+ * `device_config` repeatedly while mounted instead of reconnecting per
+ * call. Caller must call `disconnect()` on unmount. */
+export async function connect(bleId: string): Promise<void> {
+  await BleClient.initialize();
+  await BleClient.connect(bleId);
+}
+
+export async function disconnect(bleId: string): Promise<void> {
+  await BleClient.disconnect(bleId).catch(() => {});
+}
+
 // --- Claim over BLE (§8.3) --------------------------------------------------
 
 /** Claims a device over BLE instead of typing the claim code onto it by
@@ -106,9 +179,7 @@ export async function claimDevice(
   claimCode: string,
 ): Promise<{ deviceId: UUID; externalId: string }> {
   if (!isNative()) throw new Error("Not available on web");
-  await BleClient.initialize();
-  await BleClient.connect(scanned.bleId);
-  try {
+  return withConnection(scanned.bleId, async () => {
     const identity = await readIdentity(scanned.bleId);
     const { device_id, device_api_key } = await devicesService.confirmClaim({
       external_id: identity.external_id,
@@ -122,26 +193,45 @@ export async function claimDevice(
     );
     await storeDeviceKey(device_id, device_api_key);
     return { deviceId: device_id, externalId: identity.external_id };
-  } finally {
-    await BleClient.disconnect(scanned.bleId).catch(() => {});
-  }
+  });
 }
 
 // --- Upload relay (§8.4) ----------------------------------------------------
 
 interface ManifestEntry {
-  session_id: string;
+  session_id: string; // the device-local SD path of the pending file — also
+  // the source of the real filename (see uploadSessions below); NOT an
+  // XGSail session id.
   byte_size: number;
   started_at: string;
   ended_at: string | null;
+  // E1 extension (xgsail-e1's ble_relay.cpp/docs/ble-config.md): the
+  // boat/activity the operator picked at recording start over `start-rec`,
+  // if any. Absent = device/session-uploads defaults apply, same as a
+  // direct-WiFi upload with no override.
+  boat_id?: string;
+  activity_id?: string;
 }
 
-async function writeControl(bleId: string, cmd: string, sessionId: string): Promise<void> {
+/** The real basename the E1 would send if it uploaded this file itself over
+ * WiFi (upload.cpp sends `filename` as the file's own SD basename, e.g.
+ * `E1_20260723_1405_nav.csv`) — the manifest's `session_id` is that file's
+ * full SD path. Using anything else here (a fixed "data.csv") makes the
+ * backend's process_upload worker unable to tell nav/imu/wind/pressure CSVs
+ * apart (it keys sensor type off the filename suffix) and, since every file
+ * in one session shares `sequence_number=0` by default, collapses them onto
+ * the same storage key — silently dropping every file but the last one
+ * written. */
+function basenameOf(sdPath: string): string {
+  return sdPath.slice(sdPath.lastIndexOf("/") + 1);
+}
+
+async function writeControl(bleId: string, cmd: string, extra?: Record<string, unknown>): Promise<void> {
   await BleClient.write(
     bleId,
     SERVICE_UUID,
     CHAR_CONTROL,
-    textToDataView(JSON.stringify({ cmd, session_id: sessionId })),
+    textToDataView(JSON.stringify({ cmd, ...extra })),
   );
 }
 
@@ -240,33 +330,40 @@ export async function uploadSessions(
   const key = await getStoredDeviceKey(xgsailDeviceId);
   if (!key) throw new Error("No stored key for this device — claim it again");
 
-  await BleClient.initialize();
-  await BleClient.connect(scanned.bleId);
-  const results: UploadRelayResult[] = [];
-  try {
+  return withConnection(scanned.bleId, async () => {
+    const results: UploadRelayResult[] = [];
     const manifestRaw = await BleClient.read(scanned.bleId, SERVICE_UUID, CHAR_SESSION_MANIFEST);
     const manifest = JSON.parse(dataViewToText(manifestRaw)) as ManifestEntry[];
 
     for (const entry of manifest) {
       try {
-        await writeControl(scanned.bleId, "start-transfer", entry.session_id);
+        await writeControl(scanned.bleId, "start-transfer", { session_id: entry.session_id });
         const bytes = await receiveSessionBytes(scanned.bleId, entry.byte_size);
 
-        // boat_id omitted: XGSail E1 is a "boat_tracker"-category device
-        // type, so the backend defaults it to the device's own owner_boat_id
-        // (backend/routers/device_api.py) — same as a direct-WiFi upload.
+        // filename is the file's real SD basename (nav/imu/wind/pres suffix
+        // intact) — see basenameOf()'s doc for why a fixed name breaks
+        // sensor-type detection and collides multiple files onto one key.
+        // boat_id/activity_id, when the operator chose them at recording
+        // start, must be forwarded here too so a BLE-relayed upload behaves
+        // like a direct-WiFi one (upload.cpp forwards the same fields).
         const upload = await deviceApiFetch<{ session_upload_id: UUID; upload_url: string }>(
           key,
           "/devices/me/session-uploads",
           "POST",
-          { started_at: entry.started_at, ended_at: entry.ended_at, filename: "data.csv" },
+          {
+            started_at: entry.started_at,
+            ended_at: entry.ended_at,
+            filename: basenameOf(entry.session_id),
+            ...(entry.boat_id ? { boat_id: entry.boat_id } : {}),
+            ...(entry.activity_id ? { activity_id: entry.activity_id } : {}),
+          },
         );
 
         await putToUploadUrl(resolveApiUrl(upload.upload_url), new Blob([bytes]));
         await deviceApiFetch(key, `/devices/me/session-uploads/${upload.session_upload_id}`, "PATCH", {
           is_final: true,
         });
-        await writeControl(scanned.bleId, "ack-uploaded", entry.session_id);
+        await writeControl(scanned.bleId, "ack-uploaded", { session_id: entry.session_id });
         results.push({ sessionId: entry.session_id, uploaded: true });
       } catch (err) {
         results.push({
@@ -276,8 +373,158 @@ export async function uploadSessions(
         });
       }
     }
-  } finally {
-    await BleClient.disconnect(scanned.bleId).catch(() => {});
+    return results;
+  });
+}
+
+// --- device_config (xgsail-e1's docs/ble-config.md) -------------------------
+
+export interface E1WifiNetwork {
+  ssid: string;
+  pass: string; // always "" on read (write-only) — see ble-config.md
+}
+
+export interface E1Config {
+  boat_id: string; // mesh-identity/log-filename label — NOT the XGSail boat
+  unit_role: "racing_boat" | "rc_signal" | "rc_pin" | "mark" | "committee_chase" | "spare";
+  api_base_url: string;
+  wind_mac: string;
+  wind_offset: number;
+  start_speed_knots: number;
+  stop_speed_knots: number;
+  start_delay_sec: number;
+  stop_delay_sec: number;
+  rtk_enabled: boolean;
+  wifi: E1WifiNetwork[];
+}
+
+export type E1ConfigPatch = Partial<Omit<E1Config, "wifi">> & { wifi?: E1WifiNetwork[] };
+
+export async function readConfig(bleId: string): Promise<E1Config> {
+  const raw = await BleClient.read(bleId, SERVICE_UUID, CHAR_DEVICE_CONFIG);
+  return JSON.parse(dataViewToText(raw)) as E1Config;
+}
+
+export type ConfigWriteErrorReason = "pairing_window_closed" | "bad_json" | "sd_busy";
+
+export class ConfigWriteError extends Error {
+  constructor(public reason: ConfigWriteErrorReason) {
+    super(`device_config write failed: ${reason}`);
   }
-  return results;
+}
+
+/** Writes a partial config update and awaits the device's notified result.
+ * A write outside the pairing window (no recent long-press, no existing
+ * bond) is rejected with `pairing_window_closed` — the caller is
+ * responsible for telling the user to long-press the physical button
+ * first (xgsail-e1's docs/ble-config.md: no in-band way to open it). */
+export async function writeConfig(bleId: string, patch: E1ConfigPatch): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    BleClient.startNotifications(bleId, SERVICE_UUID, CHAR_DEVICE_CONFIG, (value) => {
+      const status = JSON.parse(dataViewToText(value)) as { status: "ok" | "error"; reason?: ConfigWriteErrorReason };
+      void BleClient.stopNotifications(bleId, SERVICE_UUID, CHAR_DEVICE_CONFIG).catch(() => {});
+      if (status.status === "ok") resolve();
+      else reject(new ConfigWriteError(status.reason ?? "bad_json"));
+    })
+      .then(() =>
+        BleClient.write(bleId, SERVICE_UUID, CHAR_DEVICE_CONFIG, textToDataView(JSON.stringify(patch))),
+      )
+      .catch(reject);
+  });
+}
+
+// --- status (xgsail-e1's docs/ble-config.md) --------------------------------
+
+export interface E1Status {
+  claimed: boolean;
+  firmware_version: string;
+  uptime_s: number;
+  heap_free: number;
+  battery: { pct: number; v: number; critical: boolean };
+  sd_ok: boolean;
+  wifi: { connected: boolean; ssid?: string; ip?: string };
+  sensors: { imu: boolean; pressure: boolean; wind: boolean };
+  gps: {
+    fix: boolean;
+    satellites: number;
+    hdop: number;
+    lat: number;
+    lon: number;
+    speed_kts: number;
+    course: number;
+  };
+  wind: { connected: boolean; speed_kts?: number; angle_deg?: number; battery?: number };
+  recording: { logging: boolean; session_count: number; pending_uploads: number };
+}
+
+export async function readStatus(bleId: string): Promise<E1Status> {
+  const raw = await BleClient.read(bleId, SERVICE_UUID, CHAR_STATUS);
+  return JSON.parse(dataViewToText(raw)) as E1Status;
+}
+
+// --- control commands: calibrate / start-rec / stop-rec ---------------------
+
+export interface CalibrateResult {
+  status: "ok" | "error";
+  heel_offset?: number;
+  pitch_offset?: number;
+  reason?: "no_imu" | "sd_busy";
+}
+
+export interface RecCommandResult {
+  ok: boolean;
+  logging: boolean;
+}
+
+/** Sends a `control` command and awaits its notified reply, matched by
+ * `cmd` (control is used for several concurrent purposes — start-transfer/
+ * ack-uploaded during a relay, calibrate/rec commands here — so replies are
+ * correlated by the `cmd` field, not by connection state). */
+async function sendControlCommand<T>(bleId: string, cmd: string, extra?: Record<string, unknown>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`No response to '${cmd}'`)), 10_000);
+    BleClient.startNotifications(bleId, SERVICE_UUID, CHAR_CONTROL, (value) => {
+      const payload = JSON.parse(dataViewToText(value)) as { cmd?: string } & Record<string, unknown>;
+      if (payload.cmd !== cmd) return;
+      clearTimeout(timeout);
+      void BleClient.stopNotifications(bleId, SERVICE_UUID, CHAR_CONTROL).catch(() => {});
+      resolve(payload as T);
+    })
+      .then(() => writeControl(bleId, cmd, extra))
+      .catch((err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+  });
+}
+
+/** Zeroes heel/pitch at the boat's current attitude — only meaningful with
+ * the boat sitting level; the caller is responsible for telling the user
+ * that first. */
+export function calibrate(bleId: string): Promise<CalibrateResult> {
+  return sendControlCommand<CalibrateResult>(bleId, "calibrate");
+}
+
+/** Resets heel/pitch calibration offsets back to zero. */
+export function calibrateReset(bleId: string): Promise<CalibrateResult> {
+  return sendControlCommand<CalibrateResult>(bleId, "calibrate-reset");
+}
+
+/** Starts a recording on the device, same entry point as the physical
+ * button's short press. `boatId`/`activityId` are both optional and
+ * independent of each other (xgsail-e1's docs/ble-config.md): omitting both
+ * files the session under the device's own boat and a fresh solo activity,
+ * same as today's default. */
+export function startRec(
+  bleId: string,
+  opts?: { boatId?: UUID; activityId?: UUID },
+): Promise<RecCommandResult> {
+  return sendControlCommand<RecCommandResult>(bleId, "start-rec", {
+    ...(opts?.boatId ? { boat_id: opts.boatId } : {}),
+    ...(opts?.activityId ? { activity_id: opts.activityId } : {}),
+  });
+}
+
+export function stopRec(bleId: string): Promise<RecCommandResult> {
+  return sendControlCommand<RecCommandResult>(bleId, "stop-rec");
 }
