@@ -56,6 +56,18 @@ everything else:
   but only applied on the *next* background/restart).
 - Still App Store-safe: the JS/HTML/CSS swap happens before the app is ever
   shown to the user, never mid-session.
+- `NativeUpdateGate` also re-runs the same check (silently, no blocking
+  screen) every time the app returns to foreground
+  (`@capacitor/app`'s `appStateChange`), so an app left open in the
+  background — never fully cold-started again — still picks up an update
+  next time it's brought forward, not just on the next real launch.
+- Either way, the check is skipped (and re-checked right before applying)
+  whenever a phone-GPS recording is in progress
+  (`nativeRecording.activeRecordingId()`), since reloading the WebView mid-
+  recording would drop its in-memory watcher state, which isn't persisted.
+  An E1 (BLE-device) recording doesn't need this guard — the device is the
+  source of truth for that, so a reload just reconnects and re-reads
+  status.
 
 No auth on either endpoint — public, read-only, same trust level as the
 existing `firmware/*` anonymous-read prefix in `deploy/minio-init.sh`
