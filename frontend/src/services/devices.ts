@@ -1,6 +1,13 @@
 import { api } from "@/api/client";
 import type { ClaimTicket, Device, DeviceHealth, DeviceType, UUID } from "@/types";
 
+// The XGSail E1's device-type row is still seeded as "SailFrames E1" (see
+// backend/auth/seed.py) — matching on `parser_key` rather than `name` keeps
+// this working regardless of whether/when that display name gets renamed,
+// and (unlike `category`, which "Generic GPX" also shares) it uniquely
+// identifies the E1 hardware adapter.
+export const XGSAIL_E1_PARSER_KEY = "sailframes_e1_csv";
+
 export const deviceKeys = {
   all: ["devices"] as const,
   detail: (id: UUID) => ["devices", id] as const,

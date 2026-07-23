@@ -9,6 +9,7 @@ import { useShareTarget } from "@/hooks/useShareTarget";
 import { useAppShellGestures } from "@/hooks/useAppShellGestures";
 import { PullRefreshProvider } from "@/contexts/PullRefreshContext";
 import * as nativeRecording from "@/services/nativeRecording";
+import { useE1AutoSync } from "@/services/e1Sync";
 import { ToastViewport } from "@/components/ui/ToastViewport";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProfileMenu } from "@/components/layout/ProfileMenu";
@@ -29,6 +30,12 @@ export function AppShell() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { pendingFile } = useShareTarget();
+  const queryClient = useQueryClient();
+
+  // Opportunistic, silent BLE relay of any claimed XGSail E1's buffered
+  // sessions — see services/e1Sync.ts. No UI of its own; this is the
+  // automatic counterpart to the E1's own WiFi upload.
+  useE1AutoSync(queryClient);
 
   // Local GPS recordings still waiting to upload (or retrying) — surfaced
   // as a badge on the Registra nav item so it's visible from anywhere in
@@ -88,7 +95,6 @@ export function AppShell() {
   // drag down from the very top to refetch whatever's on screen. Native
   // only — see useAppShellGestures for why both share a single listener.
   const location = useLocation();
-  const queryClient = useQueryClient();
   const { ref: mainRef, pull, refreshing } = useAppShellGestures<HTMLElement>(
     sections.map((s) => s.to),
     location.pathname,

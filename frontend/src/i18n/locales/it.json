@@ -57,6 +57,7 @@
     "date": "Data",
     "role": "Ruolo",
     "saved": "Salvato",
+    "retry": "Riprova",
     "loadError": "Errore di caricamento",
     "sortBy": "Ordina per",
     "sortOrder": "Direzione",
@@ -218,7 +219,8 @@
       "soon": "In arrivo",
       "nativeOnlyBadge": "Solo app",
       "nativeOnly": "Apri l'app XGSail per aggiungere questo dispositivo",
-      "personalOnly": "Solo dispositivi personali — collega il tuo smartwatch dal profilo"
+      "personalOnly": "Solo dispositivi personali — collega il tuo smartwatch dal profilo",
+      "xgsailE1NoBoatWarning": "Un XGSail E1 registrato qui non è associato a nessuna barca: le registrazioni avviate dal pulsante fisico sul dispositivo non avranno una barca a cui essere attribuite. Potrai comunque scegliere la barca dall'app quando avvii la registrazione da remoto."
     },
     "ble": {
       "scan": "Cerca dispositivi",
@@ -228,6 +230,67 @@
       "connect": "Connetti",
       "connecting": "Connessione…",
       "claiming": "Registrazione dispositivo…"
+    },
+    "e1": {
+      "title": "XGSail E1",
+      "searching": "Ricerca del dispositivo nelle vicinanze…",
+      "unreachable": "Dispositivo non raggiungibile via Bluetooth. Assicurati che sia acceso e vicino.",
+      "status": {
+        "title": "Stato live",
+        "criticalBattery": "Batteria scarica",
+        "gps": "GPS",
+        "satellites": "{{count}} satelliti",
+        "noFix": "Nessun fix GPS",
+        "disconnected": "Non connesso",
+        "sensors": "Sensori",
+        "pressure": "pressione",
+        "wind": "vento",
+        "windLive": "Vento live",
+        "recording": "Registrazione",
+        "logging": "In corso",
+        "idle": "Ferma",
+        "pendingUploads": "{{count}} sessioni in attesa di caricamento"
+      },
+      "config": {
+        "title": "Configurazione",
+        "pairingHint": "Per salvare, tieni premuto il pulsante fisico sul dispositivo per 2 secondi, poi salva entro 60 secondi.",
+        "wifiSsid": "Rete WiFi",
+        "wifiPass": "Password",
+        "wifiPassUnchanged": "Lascia vuoto per non modificarla",
+        "addWifi": "Aggiungi rete WiFi",
+        "apiBaseUrl": "Indirizzo del server XGSail",
+        "boatIdLabel": "Nome del dispositivo sulla rete di bordo",
+        "boatIdHint": "Solo un'etichetta identificativa (mesh/nome file) — non cambia la barca a cui vengono attribuite le sessioni, che è quella scelta al momento della registrazione del dispositivo.",
+        "unitRole": "Ruolo in flotta",
+        "unitRoles": {
+          "racing_boat": "Barca in regata",
+          "rc_signal": "Comitato — segnalazione",
+          "rc_pin": "Comitato — boa pin",
+          "mark": "Boa",
+          "committee_chase": "Barca appoggio comitato",
+          "spare": "Riserva"
+        },
+        "windMac": "MAC sensore vento (Calypso)",
+        "windOffset": "Offset vento (gradi)",
+        "rtkEnabled": "RTK attivo",
+        "error": {
+          "pairing_window_closed": "Finestra di associazione chiusa: tieni premuto il pulsante fisico sul dispositivo per 2 secondi e riprova entro 60 secondi.",
+          "bad_json": "Errore di comunicazione con il dispositivo. Riprova.",
+          "sd_busy": "Dispositivo occupato (scheda SD in uso). Riprova tra poco."
+        }
+      },
+      "calibration": {
+        "title": "Calibrazione IMU",
+        "hint": "Con la barca in piano, calibra per azzerare sbandamento e assetto.",
+        "calibrate": "Calibra",
+        "reset": "Ripristina calibrazione",
+        "confirmLevel": "Assicurati che la barca sia ferma e in piano prima di calibrare. Continuare?",
+        "result": "Sbandamento: {{heel}}° · Assetto: {{pitch}}°",
+        "error": {
+          "no_imu": "Sensore IMU non rilevato sul dispositivo.",
+          "sd_busy": "Dispositivo occupato (scheda SD in uso). Riprova tra poco."
+        }
+      }
     }
   },
   "gruppi": {
@@ -445,6 +508,12 @@
       "uploaded": "Caricata",
       "failed": "Caricamento fallito",
       "permission_error": "GPS non disponibile"
+    },
+    "source": {
+      "label": "Sorgente registrazione",
+      "phone": "Questo telefono",
+      "e1Idle": "Ferma",
+      "pendingUploads": "{{count}} sessioni in attesa di caricamento"
     }
   },
   "activities": {

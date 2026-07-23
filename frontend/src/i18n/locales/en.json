@@ -57,6 +57,7 @@
     "date": "Date",
     "role": "Role",
     "saved": "Saved",
+    "retry": "Retry",
     "loadError": "Failed to load",
     "sortBy": "Sort by",
     "sortOrder": "Order",
@@ -218,7 +219,8 @@
       "soon": "Coming soon",
       "nativeOnlyBadge": "App only",
       "nativeOnly": "Open the XGSail app to add this device",
-      "personalOnly": "Personal devices only — connect your own watch from your profile"
+      "personalOnly": "Personal devices only — connect your own watch from your profile",
+      "xgsailE1NoBoatWarning": "An XGSail E1 claimed here isn't attached to any boat: recordings started from the physical button on the device won't have a boat to be attributed to. You can still pick a boat from the app when starting a recording remotely."
     },
     "ble": {
       "scan": "Scan for devices",
@@ -228,6 +230,67 @@
       "connect": "Connect",
       "connecting": "Connecting…",
       "claiming": "Claiming device…"
+    },
+    "e1": {
+      "title": "XGSail E1",
+      "searching": "Looking for the device nearby…",
+      "unreachable": "Device not reachable over Bluetooth. Make sure it's powered on and nearby.",
+      "status": {
+        "title": "Live status",
+        "criticalBattery": "Low battery",
+        "gps": "GPS",
+        "satellites": "{{count}} satellites",
+        "noFix": "No GPS fix",
+        "disconnected": "Not connected",
+        "sensors": "Sensors",
+        "pressure": "pressure",
+        "wind": "wind",
+        "windLive": "Live wind",
+        "recording": "Recording",
+        "logging": "Logging",
+        "idle": "Idle",
+        "pendingUploads": "{{count}} sessions waiting to upload"
+      },
+      "config": {
+        "title": "Configuration",
+        "pairingHint": "To save, hold the device's physical button for 2 seconds, then save within 60 seconds.",
+        "wifiSsid": "WiFi network",
+        "wifiPass": "Password",
+        "wifiPassUnchanged": "Leave blank to keep it unchanged",
+        "addWifi": "Add WiFi network",
+        "apiBaseUrl": "XGSail server address",
+        "boatIdLabel": "Device name on the onboard network",
+        "boatIdHint": "Just an identifying label (mesh/filename) — it doesn't change which boat sessions are filed under, which is decided when the device was claimed.",
+        "unitRole": "Fleet role",
+        "unitRoles": {
+          "racing_boat": "Racing boat",
+          "rc_signal": "Race committee — signal",
+          "rc_pin": "Race committee — pin mark",
+          "mark": "Mark",
+          "committee_chase": "Committee chase boat",
+          "spare": "Spare"
+        },
+        "windMac": "Wind sensor MAC (Calypso)",
+        "windOffset": "Wind offset (degrees)",
+        "rtkEnabled": "RTK enabled",
+        "error": {
+          "pairing_window_closed": "Pairing window closed: hold the device's physical button for 2 seconds and try again within 60 seconds.",
+          "bad_json": "Communication error with the device. Try again.",
+          "sd_busy": "Device busy (SD card in use). Try again shortly."
+        }
+      },
+      "calibration": {
+        "title": "IMU calibration",
+        "hint": "With the boat level, calibrate to zero heel and pitch.",
+        "calibrate": "Calibrate",
+        "reset": "Reset calibration",
+        "confirmLevel": "Make sure the boat is still and level before calibrating. Continue?",
+        "result": "Heel: {{heel}}° · Pitch: {{pitch}}°",
+        "error": {
+          "no_imu": "IMU sensor not detected on the device.",
+          "sd_busy": "Device busy (SD card in use). Try again shortly."
+        }
+      }
     }
   },
   "gruppi": {
@@ -445,6 +508,12 @@
       "uploaded": "Uploaded",
       "failed": "Upload failed",
       "permission_error": "GPS unavailable"
+    },
+    "source": {
+      "label": "Recording source",
+      "phone": "This phone",
+      "e1Idle": "Idle",
+      "pendingUploads": "{{count}} sessions waiting to upload"
     }
   },
   "activities": {

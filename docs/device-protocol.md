@@ -337,7 +337,7 @@ source of truth if these two ever drift.
 | (service) | `24e6db2c-3c8a-4b5b-ba5a-23bc4c818046` | — | Groups the characteristics below; also the §8.1 scan filter |
 | `identity` | `985a1aae-858e-4727-9d5c-c8670bd6bd06` | read | `external_id` (same value used in §2) and firmware version |
 | `provisioning` | `db2c2e63-9e13-4fa9-867c-0b579ce2ae57` | write, notify | App writes the `device_api_key` from §2 step 3; device persists it and notifies claim status |
-| `session_manifest` | `ed9efdc8-70d4-4ce5-a0a3-9fa6d88b9b9e` | read, notify | Device announces buffered, not-yet-uploaded sessions: id, byte size, `started_at`/`ended_at` |
+| `session_manifest` | `ed9efdc8-70d4-4ce5-a0a3-9fa6d88b9b9e` | read, notify | Device announces buffered, not-yet-uploaded sessions: id, byte size, `started_at`/`ended_at`, optional `boat_id`/`activity_id` |
 | `session_data` | `728d2815-0409-49ce-ad73-ecca6fc6d981` | notify (chunked) | Device streams one session's raw bytes to the app, framed with a sequence index so the app can detect drops |
 | `control` | `ec88dd3e-2562-420c-aebe-30a4ae40bdf9` | write | App → device commands: `start-transfer <session>`, `ack-uploaded <session>` |
 
@@ -351,7 +351,16 @@ that device's uploads.
 - `provisioning` write: `{"device_api_key": "..."}`; notifies back
   `{"status": "claimed"}` once persisted.
 - `session_manifest` read/notify: a JSON array of
-  `{"session_id": "...", "byte_size": N, "started_at": "...", "ended_at": "..."|null}`.
+  `{"session_id": "...", "byte_size": N, "started_at": "...", "ended_at": "..."|null, "boat_id": "..."|omitted, "activity_id": "..."|omitted}`.
+  `session_id` is a device-local token (e.g. an SD-card path) identifying
+  the buffered file to `control`'s `start-transfer`/`ack-uploaded` below —
+  it is **not** an XGSail session id. `boat_id`/`activity_id` are optional:
+  when a device lets the operator pick them before recording (as a
+  device-specific extension might), they should be included here so the
+  app can forward them on `session-uploads` (§4.1) exactly as a
+  direct-WiFi upload would (§4.1's `boat_id`/`activity_id` fields);
+  omitted entirely when the device has no opinion, so the backend's own
+  defaults apply.
 - `session_data` notify: **not** JSON — raw binary, a 4-byte big-endian
   sequence index followed by that chunk's bytes. The app reassembles by
   index and considers the transfer complete once it has `byte_size` bytes
@@ -382,7 +391,15 @@ For each session the device has buffered but couldn't upload directly:
 
 1. App reads `session_manifest` to discover it.
 2. App calls `POST /api/devices/me/session-uploads` (§4.1) itself, using the
-   `device_api_key` it holds, exactly as the device would.
+   `device_api_key` it holds, exactly as the device would — including the
+   manifest entry's `boat_id`/`activity_id` when present. **`filename` must
+   be the file's real device-side basename** (e.g. `nav.csv`, or whatever
+   suffix the device uses to tell sensor streams apart), never a
+   placeholder shared across every relayed file: the backend's processing
+   pipeline keys sensor type off the filename, and every file in a
+   session shares `sequence_number=0` by default (§4.1), so any two files
+   uploaded under the same fixed name collide on the same storage key and
+   silently overwrite each other.
 3. App writes `start-transfer <session>` to `control`, then receives the
    session's bytes as `session_data` notifications arrive.
 4. App `PUT`s those bytes to the `upload_url` from step 2 — no additional

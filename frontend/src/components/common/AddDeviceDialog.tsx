@@ -80,6 +80,9 @@ export function AddDeviceDialog({ owner, onClose }: { owner: Owner; onClose: () 
         )}
       </div>
       {!showWearables && <p className="sf-muted">{t("devices.add.personalOnly")}</p>}
+      {isNative && owner.owner_boat_id === undefined && (
+        <p className="sf-badge sf-badge--warning">{t("devices.add.xgsailE1NoBoatWarning")}</p>
+      )}
     </Modal>
   );
 }

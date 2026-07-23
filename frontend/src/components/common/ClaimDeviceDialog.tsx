@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Capacitor } from "@capacitor/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { devicesService, deviceKeys } from "@/services/devices";
+import { devicesService, deviceKeys, XGSAIL_E1_PARSER_KEY } from "@/services/devices";
 import * as nativeBle from "@/services/nativeBle";
 import type { ScannedDevice } from "@/services/nativeBle";
 import { Modal } from "@/components/ui/Modal";
@@ -12,13 +12,6 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ApiError } from "@/api/client";
 import type { UUID } from "@/types";
 import styles from "./deviceClaim.module.css";
-
-// The XGSail E1's device-type row is still seeded as "SailFrames E1" (see
-// backend/auth/seed.py) — matching on `parser_key` rather than `name` keeps
-// this working regardless of whether/when that display name gets renamed,
-// and (unlike `category`, which "Generic GPX" also shares) it uniquely
-// identifies the E1 hardware adapter.
-const XGSAIL_E1_PARSER_KEY = "sailframes_e1_csv";
 
 type Phase = "idle" | "scanning" | "select" | "claiming" | "done";
 

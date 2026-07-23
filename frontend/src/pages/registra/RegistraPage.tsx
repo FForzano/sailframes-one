@@ -18,9 +18,13 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
 import { Modal } from "@/components/ui/Modal";
-import type { UUID } from "@/types";
+import { Spinner } from "@/components/ui/Spinner";
+import { devicesService, deviceKeys, XGSAIL_E1_PARSER_KEY } from "@/services/devices";
+import { useE1Device } from "@/hooks/useE1Device";
+import type { Device, UUID } from "@/types";
 
 const STANDALONE = "" as const; // empty select value = "uscita singola"
+const PHONE_SOURCE = "phone" as const; // recording source select: this phone's own GPS
 
 function ActivityPicker({
   id,
@@ -223,12 +227,95 @@ function RecordingRow({
   );
 }
 
+/** Start/stop controls for an XGSail E1 chosen as the recording source
+ * (instead of this phone's own GPS). Connection state, `recording.logging`
+ * and `pending_uploads` all come straight from the device's `status`
+ * characteristic (xgsail-e1's docs/ble-config.md) — the device is the
+ * source of truth here, there's no separate local recording state to keep
+ * in sync. `boatId`/`activityId` are forwarded to `start-rec`, same fields
+ * `session-uploads` already accepts either way the session is eventually
+ * uploaded (WiFi or BLE relay). */
+function E1RecordingControl({
+  device,
+  boatId,
+  activityId,
+}: {
+  device: Device;
+  boatId: string;
+  activityId: string;
+}) {
+  const { t } = useTranslation();
+  const e1 = useE1Device(device);
+
+  if (e1.state === "searching") {
+    return (
+      <>
+        <Spinner />
+        <p className="sf-muted">{t("devices.e1.searching")}</p>
+      </>
+    );
+  }
+
+  if (e1.state === "unreachable") {
+    return (
+      <>
+        <p className="sf-muted">{t("devices.e1.unreachable")}</p>
+        <div className="sf-form__actions">
+          <Button variant="ghost" onClick={e1.retry}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  const logging = e1.status?.recording.logging ?? false;
+  const pending = e1.status?.recording.pending_uploads ?? 0;
+
+  return (
+    <>
+      <p className={logging ? "sf-badge sf-badge--success" : "sf-muted"}>
+        {t(logging ? "registra.recording" : "registra.source.e1Idle")}
+      </p>
+      {pending > 0 && <p className="sf-muted">{t("registra.source.pendingUploads", { count: pending })}</p>}
+      <div className="sf-form__actions">
+        {logging ? (
+          <Button
+            className="sf-btn--icon"
+            variant="danger"
+            onClick={() => e1.stopRec.mutate()}
+            disabled={e1.stopRec.isPending}
+            aria-label={t("registra.stop")}
+          >
+            <Square size={22} strokeWidth={1.75} />
+          </Button>
+        ) : (
+          <Button
+            className="sf-btn--icon"
+            onClick={() =>
+              e1.startRec.mutate({
+                boatId: boatId ? (boatId as UUID) : undefined,
+                activityId: activityId ? (activityId as UUID) : undefined,
+              })
+            }
+            disabled={e1.startRec.isPending}
+            aria-label={t("registra.start")}
+          >
+            <Disc size={22} strokeWidth={1.75} />
+          </Button>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function RegistraPage() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { recordings, refresh } = nativeRecording.useRecordings();
   const [boatId, setBoatId] = useState("");
   const [activityId, setActivityId] = useState<string>(STANDALONE);
+  const [source, setSource] = useState<string>(PHONE_SOURCE);
   const [activeId, setActiveId] = useState<UUID | null>(nativeRecording.activeRecordingId());
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
@@ -236,6 +323,22 @@ export function RegistraPage() {
   const upload = useImportUpload();
 
   const boats = useQuery({ queryKey: boatKeys.mine, queryFn: () => boatsService.list(true) });
+
+  // XGSail E1 devices claimed by this user, available as a recording
+  // source alongside the phone's own GPS — native only (BLE), same
+  // eligibility check as useE1Device.
+  const deviceTypes = useQuery({ queryKey: deviceKeys.types, queryFn: devicesService.listTypes });
+  const devicesQuery = useQuery({
+    queryKey: deviceKeys.all,
+    queryFn: devicesService.list,
+    enabled: Capacitor.isNativePlatform(),
+  });
+  const e1Devices = (devicesQuery.data ?? []).filter(
+    (d) =>
+      d.status === "claimed" &&
+      deviceTypes.data?.find((dt) => dt.id === d.device_type_id)?.parser_key === XGSAIL_E1_PARSER_KEY,
+  );
+  const selectedE1Device = source !== PHONE_SOURCE ? e1Devices.find((d) => d.id === source) : undefined;
 
   useEffect(() => {
     refresh();
@@ -384,6 +487,21 @@ export function RegistraPage() {
           </>
         ) : (
           <>
+            {e1Devices.length > 0 && (
+              <Select
+                label={t("registra.source.label")}
+                id="registra-source"
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+              >
+                <option value={PHONE_SOURCE}>{t("registra.source.phone")}</option>
+                {e1Devices.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.nickname ?? d.external_id ?? d.id.slice(0, 8)}
+                  </option>
+                ))}
+              </Select>
+            )}
             <Select
               label={t("sessions.importBoat")}
               id="registra-boat"
@@ -401,19 +519,25 @@ export function RegistraPage() {
               ))}
             </Select>
             <ActivityPicker id="registra-activity" value={activityId} onChange={setActivityId} />
-            <div className="sf-form__actions">
-              <Button
-                className="sf-btn--icon"
-                onClick={() => void onStart()}
-                disabled={!boatId}
-                aria-label={t("registra.start")}
-              >
-                <Disc size={22} strokeWidth={1.75} />
-              </Button>
-            </div>
-            <p className="sf-muted">{t("registra.batteryHint")}</p>
-            {error && error !== ERROR_PERMISSION_DENIED && error !== ERROR_LOCATION_SERVICES_DISABLED && (
-              <p className="sf-form__error">{recordingErrorMessage(t, error)}</p>
+            {selectedE1Device ? (
+              <E1RecordingControl device={selectedE1Device} boatId={boatId} activityId={activityId} />
+            ) : (
+              <>
+                <div className="sf-form__actions">
+                  <Button
+                    className="sf-btn--icon"
+                    onClick={() => void onStart()}
+                    disabled={!boatId}
+                    aria-label={t("registra.start")}
+                  >
+                    <Disc size={22} strokeWidth={1.75} />
+                  </Button>
+                </div>
+                <p className="sf-muted">{t("registra.batteryHint")}</p>
+                {error && error !== ERROR_PERMISSION_DENIED && error !== ERROR_LOCATION_SERVICES_DISABLED && (
+                  <p className="sf-form__error">{recordingErrorMessage(t, error)}</p>
+                )}
+              </>
             )}
           </>
         )}
