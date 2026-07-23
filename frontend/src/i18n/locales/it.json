@@ -219,8 +219,7 @@
       "soon": "In arrivo",
       "nativeOnlyBadge": "Solo app",
       "nativeOnly": "Apri l'app XGSail per aggiungere questo dispositivo",
-      "personalOnly": "Solo dispositivi personali — collega il tuo smartwatch dal profilo",
-      "xgsailE1NoBoatWarning": "Un XGSail E1 registrato qui non è associato a nessuna barca: le registrazioni avviate dal pulsante fisico sul dispositivo non avranno una barca a cui essere attribuite. Potrai comunque scegliere la barca dall'app quando avvii la registrazione da remoto."
+      "personalOnly": "Solo dispositivi personali: collega il tuo smartwatch dal profilo"
     },
     "ble": {
       "scan": "Cerca dispositivi",

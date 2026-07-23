@@ -219,8 +219,7 @@
       "soon": "Coming soon",
       "nativeOnlyBadge": "App only",
       "nativeOnly": "Open the XGSail app to add this device",
-      "personalOnly": "Personal devices only — connect your own watch from your profile",
-      "xgsailE1NoBoatWarning": "An XGSail E1 claimed here isn't attached to any boat: recordings started from the physical button on the device won't have a boat to be attributed to. You can still pick a boat from the app when starting a recording remotely."
+      "personalOnly": "Personal devices only: connect your own watch from your profile"
     },
     "ble": {
       "scan": "Scan for devices",
